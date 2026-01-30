@@ -1,0 +1,52 @@
+{
+  "base_url": "https://yunwu.ai/v1",
+  "api_key": "sk-hwvRPhrBz0OEMa6u4wSzdAKs2yEYsvHzA3FvFmCeT25HdI8B",
+  "task_models": {
+    "summary": "deepseek-v3.2"
+  },
+  "models": [
+    {
+      "id": "claude-sonnet-4-5-20250929",
+      "name": "Claude Sonnet 4",
+      "desc": "性能与速度的最佳平衡点，在长文本理解与复杂创意写作中保持行业顶尖水平，具备极高的人文素养。",
+      "context_limit": 200000
+    },
+    {
+      "id": "claude-opus-4-5-20251101-thinking",
+      "name": "Claude Opus 4",
+      "desc": "Anthropic 旗舰模型，深度集成原生思维链，专为攻克硬核科学、高级数学及极其复杂的长程逻辑推理而生。",
+      "context_limit": 200000
+    },
+    {
+      "id": "gemini-3-pro-preview-thinking",
+      "name": "Gemini 3 Pro",
+      "desc": "Google 多模态巅峰之作，支持超长上下文，具备顶尖的跨模态（视频/音频/代码）理解与超大规模文档分析能力。",
+      "context_limit": 2000000
+    },
+    {
+      "id": "gpt-5.2-chat",
+      "name": "GPT 5",
+      "desc": "OpenAI 交互旗舰，拥有无与伦比的 Agent 编排能力、自然语言直觉与复杂任务的零样本执行力。",
+      "context_limit": 128000
+    },
+    {
+      "id": "gpt-5.2-codex",
+      "name": "GPT 5 Codex",
+      "desc": "针对编程深度优化的 GPT-5 版本，精通自动化软件架构设计、复杂 Bug 溯源及多文件代理编码任务。",
+      "context_limit": 128000
+    },
+    {
+      "id": "grok-4-fast-reasoning",
+      "name": "Grok 4 Fast",
+      "desc": "xAI 实时进化模型，以幽默、独到见解及极速推理见长，擅长处理具时效性的社交资讯与协作任务。",
+      "context_limit": 1000000
+    },
+    {
+      "id": "deepseek-v3.2",
+      "name": "DeepSeek V3",
+      "desc": "国产自研逻辑专家，极具性价比的强推理模型，在编程辅助、数学推导及工具调用方面表现出色。",
+      "context_limit": 128000
+    }
+  ],
+  "default_model": "claude-sonnet-4-5-20250929"
+}
