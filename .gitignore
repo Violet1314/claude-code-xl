@@ -16,7 +16,7 @@ env/
 .idea/
 
 # Project
-data/config/api-config.json
+tests/
 data/stats/
 *.log
 
