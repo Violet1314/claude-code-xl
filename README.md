@@ -57,4 +57,61 @@ pip install -e ".[dev]"
 python -m claude_code
 ```
 
+claude_code项目结构:
+G:.
+└─claude_code
+    │  app.py
+    │  __init__.py
+    │  __main__.py
+    │
+    ├─commands
+    │      base.py
+    │      handlers.py
+    │      registry.py
+    │      __init__.py
+    │
+    ├─config
+    │      defaults.py
+    │      settings.py
+    │      __init__.py
+    │
+    ├─core
+    │      client.py
+    │      conversation.py
+    │      files.py
+    │      stats.py
+    │      __init__.py
+    │
+    ├─ui
+    │      components.py
+    │      console.py
+    │      input.py
+    │      renderer.py
+    │      theme.py
+    │      __init__.py
+    │
+    └─utils
+            paths.py
+            tokens.py
+            __init__.py
+
+项目打包教程:
+cd G:\7-Claude-code-cli\Claude-Code-CLI-main
+
+# 激活环境
+.\.venv\Scripts\Activate.ps1
+
+# 打包使用 --collect-all 收集 rich 的所有内容
+pyinstaller --noconfirm --onefile --console --name "ClaudeCode" --paths "src" --add-data "data/config;data/config" --collect-all "rich" --clean src/claude_code/__main__.py
+
+# 创建配置目录
+mkdir dist\data\config
+
+# 复制配置文件
+copy data\config\api-config.json dist\data\config\
+copy data\config\system-prompts.json dist\data\config\
+
+# 运行
+cd dist
+.\ClaudeCode.exe
 ---
