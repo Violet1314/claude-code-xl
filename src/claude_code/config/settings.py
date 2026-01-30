@@ -13,6 +13,7 @@ class ModelConfig:
     name: str
     desc: str = ""
     context_limit: int = 100_000
+    price: str = ""  # 新增
     
     @classmethod
     def from_dict(cls, data: Dict) -> "ModelConfig":
@@ -21,8 +22,24 @@ class ModelConfig:
             name=data.get("name", ""),
             desc=data.get("desc", ""),
             context_limit=data.get("context_limit", 100_000),
+            price=data.get("price", ""),  # 新增
         )
-
+    
+    def get_price_short(self) -> str:
+        """
+        解析价格为简短格式
+        'Input: 5$/1M Output: 25$/1M' -> '5/25'
+        """
+        if not self.price:
+            return ""
+        
+        import re
+        # 匹配数字（包括小数）
+        numbers = re.findall(r'(\d+(?:\.\d+)?)\$', self.price)
+        if len(numbers) >= 2:
+            return f"{numbers[0]}/{numbers[1]}"
+        return ""
+    
 @dataclass
 class Settings:
     """应用配置"""
