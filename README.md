@@ -1,4 +1,4 @@
-# Claude Code Terminal 使用教程
+# Claude Code CLI 使用教程
 
 ---
 
