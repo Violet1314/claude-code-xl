@@ -57,61 +57,36 @@ pip install -e ".[dev]"
 python -m claude_code
 ```
 
-claude_code项目结构:
-G:.
-└─claude_code
-    │  app.py
-    │  __init__.py
-    │  __main__.py
-    │
-    ├─commands
-    │      base.py
-    │      handlers.py
-    │      registry.py
-    │      __init__.py
-    │
-    ├─config
-    │      defaults.py
-    │      settings.py
-    │      __init__.py
-    │
-    ├─core
-    │      client.py
-    │      conversation.py
-    │      files.py
-    │      stats.py
-    │      __init__.py
-    │
-    ├─ui
-    │      components.py
-    │      console.py
-    │      input.py
-    │      renderer.py
-    │      theme.py
-    │      __init__.py
-    │
-    └─utils
-            paths.py
-            tokens.py
-            __init__.py
+### 8. 结构
 
-项目打包教程:
-cd G:\7-Claude-code-cli\Claude-Code-CLI-main
+```powershell
+claude_code/
+├── __main__.py          # 程序入口：启动 CLI 的主脚本
+├── app.py               # 核心逻辑：管理应用生命周期与主循环
+│
+├── core/                # 【后端核心】
+│   ├── client.py        # API 通信：负责与 LLM 服务端交互
+│   ├── conversation.py  # 对话管理：处理历史记录与上下文切片
+│   ├── files.py         # 文件操作：读写本地代码库的工具
+│   └── stats.py         # 统计模块：Token 消耗与运行时间统计
+│
+├── ui/                  # 【界面交互】
+│   ├── console.py       # 终端输出：处理富文本渲染 (Rich)
+│   ├── input.py         # 用户输入：处理交互式命令与补全
+│   ├── renderer.py      # 渲染引擎：将 Markdown/代码高亮输出
+│   └── theme.py         # 主题配置：定义配色与 UI 样式
+│
+├── commands/            # 【命令系统】
+│   ├── registry.py      # 命令注册中心
+│   └── handlers.py      # 命令处理器：定义如 /clear, /save 等指令
+│
+├── config/              # 【配置管理】
+│   ├── settings.py      # 环境读取：加载 api-config.json
+│   └── defaults.py      # 默认参数：硬编码的兜底配置
+│
+└── utils/               # 【通用工具】
+    ├── paths.py         # 路径处理：跨平台路径适配
+    └── tokens.py        # Token 计算：本地估算 Prompt 长度
+```
 
-# 激活环境
-.\.venv\Scripts\Activate.ps1
-
-# 打包使用 --collect-all 收集 rich 的所有内容
-pyinstaller --noconfirm --onefile --console --name "ClaudeCode" --paths "src" --add-data "data/config;data/config" --collect-all "rich" --clean src/claude_code/__main__.py
-
-# 创建配置目录
-mkdir dist\data\config
-
-# 复制配置文件
-copy data\config\api-config.json dist\data\config\
-copy data\config\system-prompts.json dist\data\config\
-
-# 运行
-cd dist
-.\ClaudeCode.exe
 ---
