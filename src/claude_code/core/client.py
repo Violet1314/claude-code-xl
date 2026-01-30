@@ -1,0 +1,220 @@
+"""API 客户端 - 统一的流式请求处理"""
+import json
+import time
+from typing import Generator, Optional, Dict, List, Any
+
+import httpx
+
+from claude_code.config.defaults import API
+from claude_code.ui import console
+
+class APIClient:
+    """统一 API 客户端"""
+    
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        max_retries: int = None,
+    ):
+        """
+        初始化客户端
+        
+        Args:
+            base_url: API 基础 URL
+            api_key: API 密钥
+            max_retries: 最大重试次数，默认使用配置值
+        """
+        self.base_url = base_url.strip().rstrip('/')
+        self.api_key = api_key.strip()
+        self.endpoint = f"{self.base_url}/chat/completions"
+        self.max_retries = max_retries or API.MAX_RETRIES
+        self._client: Optional[httpx.Client] = None
+        self._init_client()
+    
+    def _init_client(self) -> None:
+        """初始化 httpx 客户端"""
+        self._close_client()
+        self._client = httpx.Client(
+            trust_env=True,
+            verify=True,
+            timeout=httpx.Timeout(
+                connect=API.CONNECT_TIMEOUT,
+                read=API.READ_TIMEOUT,
+                write=API.WRITE_TIMEOUT,
+                pool=API.POOL_TIMEOUT,
+            ),
+        )
+    
+    def _close_client(self) -> None:
+        """安全关闭客户端"""
+        if self._client:
+            try:
+                self._client.close()
+            except Exception:
+                pass
+            self._client = None
+    
+    def _reset_client(self) -> None:
+        """重置客户端连接"""
+        console.warning("触发客户端重置，正在重建连接...")
+        self._init_client()
+    
+    def send_message(
+        self,
+        model_id: str,
+        messages: List[Dict[str, str]],
+        stream: bool = True,
+        temperature: float = None,
+        max_tokens: int = None,
+    ) -> Generator[Dict[str, Any], None, None]:
+        """
+        发送消息并流式返回响应
+        
+        Args:
+            model_id: 模型 ID
+            messages: 消息列表
+            stream: 是否流式输出
+            temperature: 温度参数
+            max_tokens: 最大输出 token
+            
+        Yields:
+            响应数据块
+        """
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        
+        payload = {
+            "model": model_id,
+            "messages": messages,
+            "stream": stream,
+            "temperature": temperature or API.TEMPERATURE,
+            "max_tokens": max_tokens or API.MAX_TOKENS,
+        }
+        
+        if stream:
+            payload["stream_options"] = {"include_usage": True}
+        
+        last_error: Optional[str] = None
+        
+        for attempt in range(self.max_retries):
+            try:
+                yield from self._do_request(headers, payload)
+                return  # 成功则退出
+                
+            except (
+                httpx.ConnectError,
+                httpx.ReadTimeout,
+                httpx.WriteTimeout,
+                httpx.ConnectTimeout,
+                httpx.PoolTimeout,
+                httpx.RemoteProtocolError,
+            ) as e:
+                last_error = f"{type(e).__name__}: {e}"
+                console.warning(f"第 {attempt + 1}/{self.max_retries} 次失败: {last_error}")
+                self._reset_client()
+                
+                if attempt < self.max_retries - 1:
+                    wait = 2 ** attempt
+                    console.dim(f"   {wait}s 后重试...")
+                    time.sleep(wait)
+                    
+            except httpx.HTTPStatusError as e:
+                # 4xx 错误不重试
+                if 400 <= e.response.status_code < 500:
+                    console.error(f"API 错误 [{e.response.status_code}]: {e.response.text}")
+                    return
+                # 5xx 错误重试
+                last_error = f"HTTP {e.response.status_code}"
+                console.warning(f"服务器错误: {last_error}")
+                self._reset_client()
+                
+                if attempt < self.max_retries - 1:
+                    wait = 2 ** attempt
+                    time.sleep(wait)
+        
+        if last_error:
+            console.error(f"请求最终失败，已重试 {self.max_retries} 次")
+    
+    def _do_request(
+        self,
+        headers: Dict[str, str],
+        payload: Dict[str, Any],
+    ) -> Generator[Dict[str, Any], None, None]:
+        """执行实际请求"""
+        # 编码时使用 replace 处理非法字符
+        body = json.dumps(payload, ensure_ascii=False).encode('utf-8', errors='replace')
+        
+        with self._client.stream("POST", self.endpoint, headers=headers, content=body) as resp:
+            if resp.status_code != 200:
+                err_msg = resp.read().decode('utf-8', errors='replace')
+                raise httpx.HTTPStatusError(
+                    err_msg,
+                    request=resp.request,
+                    response=resp,
+                )
+            
+            for line in resp.iter_lines():
+                if not line or not line.startswith("data: "):
+                    continue
+                
+                raw = line[6:].strip()
+                if raw == "[DONE]":
+                    return
+                
+                try:
+                    yield json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+    
+    @staticmethod
+    def extract_content(chunk: Dict[str, Any]) -> str:
+        """
+        从响应块中提取内容
+        
+        Args:
+            chunk: 响应数据块
+            
+        Returns:
+            提取的文本内容
+        """
+        choices = chunk.get("choices", [])
+        if not choices:
+            return ""
+        
+        delta = choices[0].get("delta", {})
+        return delta.get("content") or delta.get("text") or ""
+    
+    @staticmethod
+    def extract_usage(chunk: Dict[str, Any]) -> Optional[Dict[str, int]]:
+        """
+        从响应块中提取 token 使用量
+        
+        Args:
+            chunk: 响应数据块
+            
+        Returns:
+            使用量字典或 None
+        """
+        usage = chunk.get("usage")
+        if not usage:
+            return None
+        
+        return {
+            "input": usage.get("prompt_tokens", 0),
+            "output": usage.get("completion_tokens", 0),
+            "total": usage.get("total_tokens", 0),
+        }
+    
+    def close(self) -> None:
+        """关闭客户端"""
+        self._close_client()
+    
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
