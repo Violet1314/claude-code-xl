@@ -56,7 +56,7 @@ pip install -e ".[dev]"
 ```powershell
 python -m claude_code
 ```
-<img width="1958" height="1143" alt="2026-01-31" src="https://github.com/user-attachments/assets/808ad3e5-776d-450b-af43-acf5de2b468b" />
+<img width="2067" height="1191" alt="1" src="https://github.com/user-attachments/assets/fa7c6895-735a-4d4b-bb36-a3b660dff911" />
 
 ### 8. 结构
 
