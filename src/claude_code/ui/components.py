@@ -72,6 +72,7 @@ def show_status_bar(
     model_name: str,
     total_tokens: int,
     file_count: int = 0,
+    price_short: str = "",  # 新增
 ) -> None:
     """
     显示状态栏
@@ -80,34 +81,40 @@ def show_status_bar(
         model_name: 模型名称
         total_tokens: 总 token 数
         file_count: 挂载文件数
+        price_short: 价格简写 (如 "5/25")
     """
     con = console.get_console()
     
-    # 修复：更智能的模型名称显示
+    # 模型名称处理
     if len(model_name) <= 20:
         model_short = model_name.upper()
     elif '-' in model_name:
         model_short = model_name.split('-')[-1].upper()
     else:
-        # 取前两个单词
         parts = model_name.split()
         model_short = ' '.join(parts[:2]).upper() if len(parts) > 1 else model_name[:15].upper()
     
-    # 左侧：模型信息
-    left = Text.assemble(
+    # 左侧：模型信息 + 价格
+    left_parts = [
         (f" {ICONS['claude']} ", f"bold {COLORS['primary']}"),
-        ("MODEL: ", COLORS['system']),
         (model_short, "bold white"),
-    )
+    ]
+    
+    # 添加价格信息
+    if price_short:
+        left_parts.append(("   💰 ", "dim"))
+        left_parts.append((f"{price_short} $/M", f"dim"))
+    
+    left = Text.assemble(*left_parts)
     
     # 右侧：文件和 token 信息
-    parts = []
+    right_parts = []
     if file_count > 0:
-        parts.append((f"{ICONS['file']} {file_count} ", "cyan"))
-        parts.append(("│ ", COLORS['border']))
-    parts.append((f"Σ {total_tokens:,} tokens ", COLORS['system']))
+        right_parts.append((f"{ICONS['file']} {file_count} ", "cyan"))
+        right_parts.append(("│ ", COLORS['border']))
+    right_parts.append((f"Σ {total_tokens:,} tokens ", COLORS['system']))
     
-    right = Text.assemble(*parts)
+    right = Text.assemble(*right_parts)
     
     con.print(Rule(style=COLORS['border_dim']))
     con.print(Columns([left, right], expand=True))
