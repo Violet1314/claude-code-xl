@@ -2,7 +2,7 @@
 
 ---
 
-## 方式一：下载 ZIP 压缩包
+## 下载 ZIP 压缩包
 
 ### 1. 下载代码
 
@@ -56,6 +56,7 @@ pip install -e ".[dev]"
 ```powershell
 python -m claude_code
 ```
+<img width="1958" height="1143" alt="2026-01-31" src="https://github.com/user-attachments/assets/808ad3e5-776d-450b-af43-acf5de2b468b" />
 
 ### 8. 结构
 
@@ -78,7 +79,7 @@ claude_code/
 │
 ├── commands/            # 【命令系统】
 │   ├── registry.py      # 命令注册中心
-│   └── handlers.py      # 命令处理器：定义如 /clear, /save 等指令
+│   └── handlers.py      # 命令处理器：定义如 /help, /model 等指令
 │
 ├── config/              # 【配置管理】
 │   ├── settings.py      # 环境读取：加载 api-config.json
