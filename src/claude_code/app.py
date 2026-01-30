@@ -443,8 +443,9 @@ class Application:
                         model_name=self.current_model.name if self.current_model else "Claude",
                         total_tokens=self.stats.session.total_tokens,
                         file_count=self.files.count,
+                        price_short=self.current_model.get_price_short() if self.current_model else "",  # 新增
                     )
-                    
+
                     # 显示输入框
                     console.print(f"[{COLORS['primary']}]{top_border}[/]")
                     user_input = self.input_handler.prompt()
