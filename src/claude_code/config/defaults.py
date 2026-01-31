@@ -1,8 +1,7 @@
 """默认配置 - 所有常量的单一数据源"""
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict
 
-@dataclass(frozen=True)
 @dataclass(frozen=True)
 class FileDefaults:
     """文件挂载相关配置"""
