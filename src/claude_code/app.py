@@ -1,4 +1,5 @@
 """主应用类 - 整合所有模块"""
+import re
 import os
 import sys
 import json
@@ -77,6 +78,10 @@ class Application:
         self.history_dir = "data/history"
         os.makedirs(self.history_dir, exist_ok=True)
         
+        # 代码导出目录
+        self.copy_code_dir = "data/copy_code"
+        os.makedirs(self.copy_code_dir, exist_ok=True)
+
         # 注册退出处理
         atexit.register(self._on_exit)
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -148,13 +153,14 @@ class Application:
         
         try:
             with Progress(
-                SpinnerColumn(style=COLORS['primary']),
-                TextColumn(f"[{COLORS['primary']}]{model_name} 正在思考..."),
-                BarColumn(bar_width=40, pulse_style=COLORS['primary']),
+                SpinnerColumn(spinner_name="dots", style=COLORS['primary']),
+                TextColumn(f"[bold {COLORS['primary']}]{model_name}[/] [dim]正在思考...[/]"),
+                BarColumn(bar_width=20, pulse_style=COLORS['primary']),
+                TextColumn("[cyan]已生成 {task.completed:,} 字符[/]"),
                 console=console.get_console(),
                 transient=True,
             ) as progress:
-                task = progress.add_task("", total=100)
+                task = progress.add_task("", total=None, completed=0)
                 
                 for chunk in self.client.send_message(
                     model_id=self.current_model.id if self.current_model else "",
@@ -164,7 +170,7 @@ class Application:
                     content = self.client.extract_content(chunk)
                     if content:
                         full_response += content
-                        progress.update(task, completed=min(99, len(full_response) / 20))
+                        progress.update(task, completed=len(full_response))
             
             duration = time.time() - start_time
             
@@ -318,6 +324,194 @@ class Application:
     # 会话保存/加载
     # ============================================================
     
+    def export_code(self) -> None:
+        """导出最后回复中的代码块到文件"""
+        # 获取最后一次 AI 回复
+        messages = self.conversation.get_messages()
+        assistant_msgs = [m for m in messages if m["role"] == "assistant"]
+        
+        if not assistant_msgs:
+            console.warning("没有可导出的内容")
+            return
+        
+        last_response = assistant_msgs[-1]["content"]
+        
+        # 提取代码块：```language\ncode\n```
+        pattern = r'```(\w*)\n(.*?)```'
+        matches = re.findall(pattern, last_response, re.DOTALL)
+        
+        if not matches:
+            console.warning("最后一次回复中没有代码块")
+            return
+        
+        # 获取用户最后的请求
+        user_msgs = [m for m in messages if m["role"] == "user"]
+        user_request = user_msgs[-1]["content"][:200] if user_msgs else "未知请求"
+        
+        # 判断代码类型
+        user_has_code = bool(re.search(r'```', user_request))
+        code_type = "代码修改" if user_has_code else "完整代码"
+        
+        # 生成标题
+        title = self._generate_code_title(user_request)
+        
+        # 生成目录名
+        timestamp = datetime.now().strftime("%m%d_%H%M")
+        dir_name = f"{timestamp}_{title}"
+        
+        # 清理非法字符
+        for c in ['/', '\\', ':', '*', '?', '"', '<', '>', '|']:
+            dir_name = dir_name.replace(c, '_')
+        
+        dir_path = os.path.join(self.copy_code_dir, dir_name)
+        
+        # 处理目录冲突
+        if os.path.exists(dir_path):
+            counter = 1
+            while os.path.exists(f"{dir_path}_{counter}"):
+                counter += 1
+            dir_path = f"{dir_path}_{counter}"
+        
+        # 创建目录
+        os.makedirs(dir_path, exist_ok=True)
+        
+        # 语言到扩展名映射
+        lang_ext = {
+            'python': '.py', 'py': '.py',
+            'javascript': '.js', 'js': '.js',
+            'typescript': '.ts', 'ts': '.ts',
+            'java': '.java',
+            'c': '.c', 'cpp': '.cpp', 'c++': '.cpp',
+            'go': '.go',
+            'rust': '.rs',
+            'ruby': '.rb',
+            'php': '.php',
+            'swift': '.swift',
+            'kotlin': '.kt',
+            'sql': '.sql',
+            'html': '.html',
+            'css': '.css',
+            'json': '.json',
+            'yaml': '.yaml', 'yml': '.yaml',
+            'xml': '.xml',
+            'shell': '.sh', 'bash': '.sh', 'sh': '.sh',
+            'powershell': '.ps1', 'ps1': '.ps1',
+            'text': '.txt', '': '.txt',
+        }
+        
+        # 构建 README.md 内容
+        readme_lines = [
+            f"# {title}",
+            "",
+            f"> 📅 {datetime.now().strftime('%Y-%m-%d %H:%M')}  ",
+            f"> 🤖 {self.current_model.name if self.current_model else 'AI'}  ",
+            f"> 📝 类型: {code_type}",
+            "",
+            "---",
+            "",
+            "## 用户需求",
+            "",
+            user_request[:500] + ("..." if len(user_request) > 500 else ""),
+            "",
+            "---",
+            "",
+            "## 代码文件",
+            "",
+        ]
+        
+        # 保存代码文件并更新 README
+        saved_files = []
+        for idx, (lang, code) in enumerate(matches, 1):
+            lang_lower = lang.lower() if lang else ''
+            ext = lang_ext.get(lang_lower, '.txt')
+            code = code.strip()
+            
+            # 代码文件名
+            code_filename = f"code_{idx}{ext}"
+            code_filepath = os.path.join(dir_path, code_filename)
+            
+            # 提取代码说明
+            desc = self._extract_code_description(last_response, code, idx)
+            
+            # 写入代码文件（带头部注释）
+            comment_char = '#' if ext in ['.py', '.rb', '.sh', '.yaml', '.yml'] else '//'
+            if ext in ['.html', '.xml']:
+                code_header = f"<!-- 来源: {title} | 时间: {datetime.now().strftime('%Y-%m-%d %H:%M')} -->\n\n"
+            elif ext in ['.css']:
+                code_header = f"/* 来源: {title} | 时间: {datetime.now().strftime('%Y-%m-%d %H:%M')} */\n\n"
+            else:
+                code_header = f"{comment_char} 来源: {title}\n{comment_char} 时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n{comment_char} 说明: {desc}\n\n"
+            
+            with open(code_filepath, 'w', encoding='utf-8') as f:
+                f.write(code_header + code + '\n')
+            
+            saved_files.append(code_filename)
+            
+            # 更新 README
+            readme_lines.extend([
+                f"### {idx}. `{code_filename}` — {lang.upper() or 'TEXT'}",
+                "",
+                f"> 💡 {desc}",
+                "",
+                f"```{lang}",
+                code[:200] + ("..." if len(code) > 200 else ""),
+                "```",
+                "",
+            ])
+        
+        # 写入 README.md
+        readme_path = os.path.join(dir_path, "README.md")
+        with open(readme_path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(readme_lines))
+        
+        # 输出结果
+        console.success(f"已导出 {len(matches)} 个代码块")
+        console.dim(f"  📁 {dir_path}/")
+        for f in saved_files:
+            console.dim(f"     └─ {f}")
+
+    def _generate_code_title(self, user_request: str) -> str:
+        """生成代码文件标题"""
+        # 移除常见前缀
+        prefixes = ["帮我", "请", "给我", "写一个", "写个", "生成", "创建"]
+        title = user_request.strip()
+        for p in prefixes:
+            if title.startswith(p):
+                title = title[len(p):]
+        
+        # 取前 15 个字符
+        title = title[:15].strip()
+        
+        # 移除换行
+        title = title.replace('\n', ' ').replace('\r', '')
+        
+        # 如果为空，使用默认值
+        if not title:
+            title = "代码导出"
+        
+        return title
+
+    def _extract_code_description(self, response: str, code: str, idx: int) -> str:
+        """从 AI 回复中提取代码说明"""
+        # 尝试找代码块前的文字描述
+        code_pos = response.find(code)
+        if code_pos > 0:
+            # 取代码块前 200 字符
+            before_text = response[max(0, code_pos - 200):code_pos]
+            
+            # 找最后一个句号/冒号后的内容
+            for sep in ['：', ':', '。', '\n']:
+                if sep in before_text:
+                    desc = before_text.split(sep)[-1].strip()
+                    if desc and len(desc) > 5:
+                        # 清理 markdown 标记
+                        desc = re.sub(r'```\w*', '', desc).strip()
+                        if desc:
+                            return desc[:50]
+        
+        # 默认描述
+        return f"代码块 {idx}"
+
     def save_conversation(self) -> None:
         """保存会话"""
         if self.conversation.is_empty:

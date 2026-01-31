@@ -39,5 +39,5 @@ CONVERSATION = ConversationDefaults()
 UI = UIDefaults()
 
 # 版本信息
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 APP_NAME = "Claude Code Terminal"

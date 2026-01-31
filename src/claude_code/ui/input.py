@@ -87,6 +87,17 @@ class InputHandler:
             """Esc + Enter 发送消息"""
             event.current_buffer.validate_and_handle()
         
+        @kb.add('enter')
+        def _(event):
+            """Enter 键处理：命令直接发送，对话换行"""
+            text = event.current_buffer.text.strip()
+            if text.startswith('/'):
+                # 命令模式：直接发送
+                event.current_buffer.validate_and_handle()
+            else:
+                # 对话模式：插入换行
+                event.current_buffer.insert_text('\n')
+        
         return PromptSession(
             multiline=True,
             prompt_continuation=self._get_continuation,
@@ -99,32 +110,17 @@ class InputHandler:
     
     def _get_prompt(self):
         """获取主提示符"""
-        # 修复：更智能的模型名称显示
-        if len(self.model_name) <= 15:
-            model_short = self.model_name.upper()
-        elif '-' in self.model_name:
-            model_short = self.model_name.split('-')[-1].upper()
-        else:
-            # 取前两个单词
-            parts = self.model_name.split()
-            model_short = ' '.join(parts[:2]).upper() if len(parts) > 1 else self.model_name[:12].upper()
-        
         parts = [
-            ('class:input-lead', '│ '),
-            ('class:model-tag', f' {model_short} '),
+            ('class:input-lead', '│'),
+            ('class:input-lead', f' {ICONS["user"]} '),
         ]
-        
-        if self.file_count > 0:
-            parts.append(('class:file-tag', f' {ICONS["file"]} {self.file_count} '))
-        
-        parts.append(('class:input-lead', f' {ICONS["user"]} '))
         
         return parts
     
     def _get_continuation(self, width, line_number, is_soft_wrap):
         """获取续行提示符"""
-        return [('class:input-lead', '│ ')]
-    
+        return [('class:input-lead', '│   ')]
+
     def update_state(self, model_name: str = None, file_count: int = None) -> None:
         """
         更新状态

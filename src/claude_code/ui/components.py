@@ -67,15 +67,14 @@ def show_welcome(model_name: str = "Claude") -> None:
 # ============================================================
 # 状态栏
 # ============================================================
-
 def show_status_bar(
     model_name: str,
     total_tokens: int,
     file_count: int = 0,
-    price_short: str = "",  # 新增
+    price_short: str = "",
 ) -> None:
     """
-    显示状态栏
+    显示 Powerline 风格状态栏
     
     Args:
         model_name: 模型名称
@@ -94,30 +93,33 @@ def show_status_bar(
         parts = model_name.split()
         model_short = ' '.join(parts[:2]).upper() if len(parts) > 1 else model_name[:15].upper()
     
-    # 左侧：模型信息 + 价格
-    left_parts = [
-        (f" {ICONS['claude']} ", f"bold {COLORS['primary']}"),
-        (model_short, "bold white"),
-    ]
+    # Powerline 分隔符
+    sep = ""
     
-    # 添加价格信息
+    # 构建 Powerline 段
+    segments = []
+    
+    # 段1: 模型名称 (橙色背景)
+    segments.append(f"[bold #000000 on {COLORS['primary']}] {ICONS['claude']} {model_short} [/]")
+    segments.append(f"[{COLORS['primary']}]{sep}[/]")
+    
+    # 段2: 价格 (如果有)
     if price_short:
-        left_parts.append(("   💰 ", "dim"))
-        left_parts.append((f"{price_short} $/M", f"dim"))
+        segments.append(f"[grey30] [dim]💰[/] [grey30]{price_short}[/] [grey30]$/M[/] [/]")
+        segments.append(f"[grey30]{sep}[/]")
     
-    left = Text.assemble(*left_parts)
-    
-    # 右侧：文件和 token 信息
-    right_parts = []
+    # 段3: 文件数 (如果有)
     if file_count > 0:
-        right_parts.append((f"{ICONS['file']} {file_count} ", "cyan"))
-        right_parts.append(("│ ", COLORS['border']))
-    right_parts.append((f"Σ {total_tokens:,} tokens ", COLORS['system']))
+        segments.append(f"[on dodger_blue3] [dim]{ICONS['file']}[/] [black]{file_count}[/] [/]")
+        segments.append(f"[dodger_blue3]{sep}[/]")
     
-    right = Text.assemble(*right_parts)
+    # 段4: Token 统计
+    segments.append(f"[on grey23] [dim]Σ[/] [black]{total_tokens:,}[/] [/]")
+    segments.append(f"[grey23]{sep}[/]")
     
-    con.print(Rule(style=COLORS['border_dim']))
-    con.print(Columns([left, right], expand=True))
+    # 输出
+    console.blank()
+    con.print("".join(segments))
     console.blank()
 
 # ============================================================
@@ -244,7 +246,7 @@ def show_files_list(files: List[Dict], total_tokens: int = 0) -> None:
 
 def get_input_border(width: int = None) -> tuple:
     """
-    获取输入框边框
+    获取圆角输入框边框（左侧开口）
     
     Args:
         width: 边框宽度，默认自动计算
@@ -256,7 +258,7 @@ def get_input_border(width: int = None) -> tuple:
         cols = shutil.get_terminal_size().columns
         width = min(max(cols - 2, 40), 120)
     
-    top = '┌' + '─' * width
-    bottom = '└' + '─' * width
+    top = '╭' + '─' * width
+    bottom = '╰' + '─' * width
     
     return top, bottom
