@@ -459,10 +459,11 @@ class Application:
                 "",
             ])
         
-        # 写入 README.md
-        readme_path = os.path.join(dir_path, "README.md")
-        with open(readme_path, 'w', encoding='utf-8') as f:
-            f.write('\n'.join(readme_lines))
+        # 写入代码文件
+        code_content = code_header + code + '\n'
+        code_content = code_content.encode('utf-8', errors='replace').decode('utf-8')
+        with open(code_filepath, 'w', encoding='utf-8') as f:
+            f.write(code_content)
         
         # 输出结果
         console.success(f"已导出 {len(matches)} 个代码块")
@@ -539,8 +540,11 @@ class Application:
                 "messages": messages,
             }
             
+            json_str = json.dumps(data, indent=2, ensure_ascii=False)
+            # 清理无效 Unicode 字符
+            json_str = json_str.encode('utf-8', errors='replace').decode('utf-8')
             with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
+                f.write(json_str)
             
             console.success(f"会话已保存: {filename}")
             
