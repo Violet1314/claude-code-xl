@@ -2,24 +2,25 @@
 
 # 🚀 Claude Code CLI 项目打包指南
 
-本教程将引导你如何使用 `PyInstaller` 将 Python 项目打包成一个独立的 `.exe` 可执行文件。
+### 1. 环境准备与工具安装
 
-### 1. 环境准备
-
-在开始打包之前，请确保进入项目根目录并激活虚拟环境，以保证依赖库的完整性。
+首先进入目录并激活虚拟环境。如果尚未安装 `pyinstaller`，请务必执行安装命令，否则系统无法识别打包指令。
 
 ```powershell
 # 进入项目目录
-cd G:\7-Claude-code-cli\Claude-Code-CLI-main
+cd G:\7-Claude-code-cli\2026-02-01\Claude-Code-CLI-main
 
-# 激活虚拟环境 (PowerShell)
+# 激活虚拟环境
 .\.venv\Scripts\Activate.ps1
+
+# 🛠️ 核心步骤：在虚拟环境中安装打包工具
+pip install pyinstaller
 
 ```
 
 ### 2. 执行打包命令
 
-我们使用 `--collect-all` 确保 `rich` 库的样式和资源被完整提取，同时将入口文件指向 `__main__.py`。
+使用以下命令进行封装。注意：PowerShell 中的多行连接符是反引号 ( ``` )。
 
 ```powershell
 pyinstaller --noconfirm --onefile --console `
@@ -32,30 +33,23 @@ pyinstaller --noconfirm --onefile --console `
 
 ```
 
-> **参数说明：**
-> * `--onefile`: 将所有内容打包成一个单一的 .exe 文件。
-> * `--collect-all "rich"`: 解决 rich 库在打包后可能出现的图标或颜色显示异常。
-> * `--add-data`: 包含项目所需的静态配置文件。
-> 
-> 
+### 3. 部署配置文件
 
-### 3. 配置分发环境
-
-打包完成后，`dist` 目录中生成了程序，但仍需手动维护外部配置文件路径（如适用）。
+打包生成的单个 `.exe` 文件位于 `dist` 目录。由于程序通常需要读取外部配置，我们需要手动同步 `data` 文件夹：
 
 ```powershell
-# 创建运行所需的配置目录
+# 创建配置目录
 mkdir dist\data\config
 
-# 复制配置文件到发布目录
+# 复制必要的 JSON 配置文件
 copy data\config\api-config.json dist\data\config\
 copy data\config\system-prompts.json dist\data\config\
 
 ```
 
-### 4. 运行与测试
+### 4. 运行测试
 
-一切就绪后，进入 `dist` 文件夹即可启动你的 AI 助手。
+最后，进入 `dist` 目录验证打包结果：
 
 ```powershell
 cd dist
@@ -65,4 +59,7 @@ cd dist
 
 ---
 
-**💡 提示：** 如果你在打包后遇到“找不到文件”的错误，请检查程序内部引用 `data/config` 时使用的是相对路径还是 `sys._MEIPASS` 路径。
+**⚠️ 注意事项：**
+
+* **权限问题**：如果执行 `Activate.ps1` 报错，请先运行 `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process`。
+* **资源收集**：`--collect-all "rich"` 非常关键，它确保了终端里的彩色输出和漂亮的 UI 能够正常显示。
