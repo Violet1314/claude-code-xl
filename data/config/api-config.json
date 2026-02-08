@@ -6,13 +6,13 @@
   },
   "models": [
     {
-      "id": "claude-sonnet-4-5-20250929-thinking",
+      "id": "claude-sonnet-4-5-20250929",
       "name": "Claude Sonnet 4",
       "price": "Input: 3$/1M Output: 15$/1M",
       "context_limit": 200000
     },
     {
-      "id": "claude-opus-4-5-20251101",
+      "id": "claude-opus-4-6-thinking",
       "name": "Claude Opus 4",
       "price": "Input: 5$/1M Output: 25$/1M",
       "context_limit": 200000
@@ -30,9 +30,9 @@
       "context_limit": 128000
     },
     {
-      "id": "gpt-5.2-codex",
+      "id": "gpt-5.3-codex-high",
       "name": "GPT 5 Codex",
-      "price": "Input: 1$/1M Output: 8$/1M",
+      "price": "Input: 1.4$/1M Output: 11.2$/1M",
       "context_limit": 128000
     },
     {
@@ -54,5 +54,5 @@
       "context_limit": 128000
     }
   ],
-  "default_model": "claude-sonnet-4-5-20250929"
+  "default_model": "gpt-5.3-codex-high"
 }
