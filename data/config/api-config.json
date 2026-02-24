@@ -6,7 +6,7 @@
   },
   "models": [
     {
-      "id": "claude-sonnet-4-5-20250929",
+      "id": "claude-sonnet-4-6",
       "name": "Claude Sonnet 4",
       "price": "Input: 3$/1M Output: 15$/1M",
       "context_limit": 200000
@@ -18,16 +18,10 @@
       "context_limit": 200000
     },
     {
-      "id": "gemini-3-pro-preview-thinking",
+      "id": "gemini-3.1-pro-preview",
       "name": "Gemini 3 Pro",
       "price": "Input: 2$/1M Output: 12$/1M",
       "context_limit": 2000000
-    },
-    {
-      "id": "gpt-5.2-chat",
-      "name": "GPT 5",
-      "price": "Input: 1.75$/1M Output: 14$/1M",
-      "context_limit": 128000
     },
     {
       "id": "gpt-5.3-codex-high",
@@ -52,7 +46,13 @@
       "name": "Kimi K2",
       "price": "Input: 4$/1M Output: 21$/1M",
       "context_limit": 128000
+    },
+    {
+      "id": "qwen3.5-plus",
+      "name": "Qwen 3",
+      "price": "Input: 1.8$/1M Output: 4.8$/1M",
+      "context_limit": 128000
     }
   ],
-  "default_model": "gpt-5.3-codex-high"
+  "default_model": "claude-sonnet-4-6"
 }
