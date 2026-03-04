@@ -7,49 +7,67 @@
   "models": [
     {
       "id": "claude-sonnet-4-6",
-      "name": "Claude Sonnet 4",
+      "name": "Claude Sonnet 4.6",
       "price": "Input: 3$/1M Output: 15$/1M",
       "context_limit": 200000
     },
     {
       "id": "claude-opus-4-6-thinking",
-      "name": "Claude Opus 4",
+      "name": "Claude Opus 4.6",
       "price": "Input: 5$/1M Output: 25$/1M",
       "context_limit": 200000
     },
     {
       "id": "gemini-3.1-pro-preview",
+      "name": "Gemini 3.1 Pro",
+      "price": "Input: 1.6$/1M Output: 9.6$/1M",
+      "context_limit": 2000000
+    },
+    {
+      "id": "gemini-3-pro-preview",
       "name": "Gemini 3 Pro",
-      "price": "Input: 2$/1M Output: 12$/1M",
+      "price": "Input: 1.6$/1M Output: 9.6$/1M",
+      "context_limit": 2000000
+    },
+    {
+      "id": "gemini-3-flash-preview",
+      "name": "Gemini 3 Flash",
+      "price": "Input: 0.4$/1M Output: 2.4$/1M",
       "context_limit": 2000000
     },
     {
       "id": "gpt-5.3-codex-high",
-      "name": "GPT 5 Codex",
+      "name": "GPT 5.3 Codex",
       "price": "Input: 1.4$/1M Output: 11.2$/1M",
       "context_limit": 128000
     },
     {
       "id": "grok-4.1-fast",
-      "name": "Grok 4 Fast",
+      "name": "Grok 4.1 Fast",
       "price": "Input: 0.4$/1M Output: 3$/1M",
       "context_limit": 1000000
     },
     {
       "id": "deepseek-v3.2",
-      "name": "DeepSeek V3",
+      "name": "DeepSeek V3.2",
       "price": "Input: 2$/1M Output: 3$/1M",
       "context_limit": 128000
     },
     {
       "id": "kimi-k2.5",
-      "name": "Kimi K2",
+      "name": "Kimi K2.5",
       "price": "Input: 4$/1M Output: 21$/1M",
       "context_limit": 128000
     },
     {
+      "id": "MiniMax-M2.5",
+      "name": "MiniMax M2.5",
+      "price": "Input: 2.1$/1M Output: 8.4$/1M",
+      "context_limit": 128000
+    },
+    {
       "id": "qwen3.5-plus",
-      "name": "Qwen 3",
+      "name": "Qwen 3.5 Plus",
       "price": "Input: 1.8$/1M Output: 4.8$/1M",
       "context_limit": 128000
     }
