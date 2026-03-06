@@ -7,65 +7,70 @@
   "models": [
     {
       "id": "claude-sonnet-4-6",
-      "name": "Claude Sonnet 4.6",
-      "price": "Input: 3$/1M Output: 15$/1M",
+      "name": "Claude Sonnet 4.6 [Claude Code专属 x2.4]",
+      "price": "Input: 7.2$/1M Output: 36$/1M",
       "context_limit": 200000
     },
     {
       "id": "claude-opus-4-6-thinking",
-      "name": "Claude Opus 4.6",
-      "price": "Input: 5$/1M Output: 25$/1M",
+      "name": "Claude Opus 4.6 [Claude Code专属 x2.4]",
+      "price": "Input: 12$/1M Output: 60$/1M",
       "context_limit": 200000
     },
     {
       "id": "gemini-3.1-pro-preview",
-      "name": "Gemini 3.1 Pro",
-      "price": "Input: 1.6$/1M Output: 9.6$/1M",
+      "name": "Gemini 3.1 Pro [官转 x3]",
+      "price": "Input: 6$/1M Output: 36$/1M",
       "context_limit": 2000000
     },
     {
       "id": "gemini-3-pro-preview",
-      "name": "Gemini 3 Pro",
-      "price": "Input: 1.6$/1M Output: 9.6$/1M",
+      "name": "Gemini 3 Pro [官转 x3]",
+      "price": "Input: 6$/1M Output: 36$/1M",
       "context_limit": 2000000
     },
     {
       "id": "gemini-3-flash-preview",
-      "name": "Gemini 3 Flash",
-      "price": "Input: 0.4$/1M Output: 2.4$/1M",
+      "name": "Gemini 3 Flash [官转 x3]",
+      "price": "Input: 1.5$/1M Output: 9$/1M",
       "context_limit": 2000000
     },
     {
+      "id": "gpt-5.4",
+      "name": "GPT 5.4 [Codex专属 x0.8]",
+      "price": "Input: 2$/1M Output: 16$/1M",
+      "context_limit": 128000
+    },
+    {
       "id": "gpt-5.3-codex-high",
-      "name": "GPT 5.3 Codex",
+      "name": "GPT 5.3 Codex High [Codex专属 x0.8]",
       "price": "Input: 1.4$/1M Output: 11.2$/1M",
       "context_limit": 128000
     },
     {
       "id": "grok-4.1-fast",
-      "name": "Grok 4.1 Fast",
+      "name": "Grok 4.1 Fast [default x1]",
       "price": "Input: 0.4$/1M Output: 3$/1M",
       "context_limit": 1000000
     },
     {
-      "id": "deepseek-v3.2",
-      "name": "DeepSeek V3.2",
-      "price": "Input: 2$/1M Output: 3$/1M",
-      "context_limit": 128000
-    },
-    {
       "id": "kimi-k2.5",
-      "name": "Kimi K2.5",
+      "name": "Kimi K2.5 [企业 x1]",
       "price": "Input: 4$/1M Output: 21$/1M",
       "context_limit": 128000
     },
     {
       "id": "qwen3.5-plus",
-      "name": "Qwen 3.5 Plus",
+      "name": "Qwen 3.5 Plus [企业 x1]",
       "price": "Input: 1.8$/1M Output: 4.8$/1M",
+      "context_limit": 128000
+    },
+    {
+      "id": "deepseek-v3.2",
+      "name": "DeepSeek V3.2 [企业 x1]",
+      "price": "Input: 2$/1M Output: 3$/1M",
       "context_limit": 128000
     }
   ],
-  "default_model": "claude-sonnet-4-6"
+  "default_model": "gemini-3-flash-preview"
 }
-
