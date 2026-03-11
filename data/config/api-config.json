@@ -19,20 +19,20 @@
     },
     {
       "id": "gemini-3.1-pro-preview",
-      "name": "Gemini 3.1 Pro | 官转 x3",
-      "price": "Input: 6$/1M Output: 36$/1M",
+      "name": "Gemini 3.1 Pro | 优质 x1.5",
+      "price": "Input: 3$/1M Output: 18$/1M",
       "context_limit": 2000000
     },
     {
       "id": "gemini-3-pro-preview",
-      "name": "Gemini 3 Pro | 官转 x3",
-      "price": "Input: 6$/1M Output: 36$/1M",
+      "name": "Gemini 3 Pro | 优质 x1.5",
+      "price": "Input: 3$/1M Output: 18$/1M",
       "context_limit": 2000000
     },
     {
       "id": "gemini-3-flash-preview",
-      "name": "Gemini 3 Flash | 官转 x3",
-      "price": "Input: 1.5$/1M Output: 9$/1M",
+      "name": "Gemini 3 Flash | 优质 x1.5",
+      "price": "Input: 0.75$/1M Output: 4.5$/1M",
       "context_limit": 2000000
     },
     {
