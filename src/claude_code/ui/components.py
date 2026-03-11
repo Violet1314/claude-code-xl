@@ -35,19 +35,29 @@ CODE_LOGO = [
     r"     ╚═════╝  ╚═════╝  ╚═════╝  ╚══════╝",
 ]
 
+# def show_logo() -> None:
+#     """显示渐变色 Logo"""
+#     con = console.get_console()
+#     # 渲染 CLAUDE
+#     for i, line in enumerate(CLAUDE_LOGO):
+#         color = LOGO_GRADIENT[i % len(LOGO_GRADIENT)]
+#         con.print(f"[bold {color}]{line}[/]")
+#     # 渲染 CODE
+#     for i, line in enumerate(CODE_LOGO):
+#         color = LOGO_GRADIENT[i % len(LOGO_GRADIENT)]
+#         con.print(f"[bold {color}]{line}[/]")
+        
 def show_logo() -> None:
-    """显示渐变色 Logo"""
+    """显示 Claude 官方土橙色 Logo"""
     con = console.get_console()
-    
+    # Claude 官方标志性的土橙色 (Terracotta/Earthy Orange)
+    CLAUDE_COLOR = "#D97757"
     # 渲染 CLAUDE
-    for i, line in enumerate(CLAUDE_LOGO):
-        color = LOGO_GRADIENT[i % len(LOGO_GRADIENT)]
-        con.print(f"[bold {color}]{line}[/]")
-    
+    for line in CLAUDE_LOGO:
+        con.print(f"[bold {CLAUDE_COLOR}]{line}[/]")
     # 渲染 CODE
-    for i, line in enumerate(CODE_LOGO):
-        color = LOGO_GRADIENT[i % len(LOGO_GRADIENT)]
-        con.print(f"[bold {color}]{line}[/]")
+    for line in CODE_LOGO:
+        con.print(f"[bold {CLAUDE_COLOR}]{line}[/]")
 
 def show_welcome(model_name: str = "Claude") -> None:
     """
