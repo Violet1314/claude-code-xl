@@ -39,6 +39,7 @@ ICONS = {
     "success": "✓",
     "error": "✗",
     "warning": "⚠",
+    "info": "ℹ",
     "thinking": "⠋",
     "file": "📎",
 }

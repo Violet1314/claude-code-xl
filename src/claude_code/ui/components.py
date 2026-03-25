@@ -37,7 +37,7 @@ CODE_LOGO = [
 
 # def show_logo() -> None:
 #     """显示渐变色 Logo"""
-#     con = console.get_console()
+#     con = console.get_console() 
 #     # 渲染 CLAUDE
 #     for i, line in enumerate(CLAUDE_LOGO):
 #         color = LOGO_GRADIENT[i % len(LOGO_GRADIENT)]
@@ -46,7 +46,7 @@ CODE_LOGO = [
 #     for i, line in enumerate(CODE_LOGO):
 #         color = LOGO_GRADIENT[i % len(LOGO_GRADIENT)]
 #         con.print(f"[bold {color}]{line}[/]")
-        
+
 def show_logo() -> None:
     """显示 Claude 官方土橙色 Logo"""
     con = console.get_console()
@@ -256,19 +256,19 @@ def show_files_list(files: List[Dict], total_tokens: int = 0) -> None:
 
 def get_input_border(width: int = None) -> tuple:
     """
-    获取圆角输入框边框（左侧开口）
-    
+    获取输入框边框（上下纯直线）
+
     Args:
         width: 边框宽度，默认自动计算
-        
+
     Returns:
         (top_border, bottom_border)
     """
     if width is None:
         cols = shutil.get_terminal_size().columns
         width = min(max(cols - 2, 40), 120)
-    
-    top = '╭' + '─' * width
-    bottom = '╰' + '─' * width
-    
+
+    top = '─' * width           # ───────────
+    bottom = '─' * width        # ───────────
+
     return top, bottom

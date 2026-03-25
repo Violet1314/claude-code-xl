@@ -30,6 +30,11 @@ class HelpCommand(Command):
         console.print("  • [dim]Esc + Enter[/] = 发送消息")
         console.print("  • [dim]Ctrl+C[/] = 中断生成")
         console.blank()
+        console.print(f"[bold {COLORS['info']}]🔧 工具系统[/]")
+        console.print("  • AI 可以读取、创建、编辑文件")
+        console.print("  • 每次操作前会请求权限确认")
+        console.print("  • 支持 once/always 两种权限模式，或按Esc取消")
+        console.blank()
 
 class NewCommand(Command):
     """新建会话命令"""
@@ -58,72 +63,20 @@ class StyleCommand(Command):
     """切换风格命令"""
     
     name = "style"
-    description = "切换 AI 人格风格"
+    description = "切换 AI 风格"
     aliases = ["persona", "p"]
     
     def execute(self, args: List[str]) -> None:
         if self.app:
             self.app.select_style()
 
-class AddCommand(Command):
-    """添加文件命令"""
-    
-    name = "add"
-    description = "挂载文件 (支持通配符)"
-    aliases = ["attach", "a"]
-    
-    def execute(self, args: List[str]) -> None:
-        if not args:
-            console.warning("用法: /add <路径> [路径2] ... 或 /add *.py")
-            return
-        
-        if self.app:
-            self.app.add_files(args)
-
-class DropCommand(Command):
-    """移除文件命令"""
-    
-    name = "drop"
-    description = "移除挂载文件"
-    aliases = ["remove", "rm"]
-    
-    def execute(self, args: List[str]) -> None:
-        if not args:
-            console.warning("用法: /drop <路径> 或 /drop all")
-            return
-        
-        if self.app:
-            self.app.drop_files(args)
-
-class FilesCommand(Command):
-    """查看文件命令"""
-    
-    name = "files"
-    description = "查看挂载文件列表"
-    aliases = ["ls", "list"]
-    
-    def execute(self, args: List[str]) -> None:
-        if self.app:
-            self.app.show_files()
-
-class RefreshCommand(Command):
-    """刷新文件命令"""
-    
-    name = "refresh"
-    description = "刷新挂载文件内容"
-    aliases = ["reload"]
-    
-    def execute(self, args: List[str]) -> None:
-        if self.app:
-            self.app.refresh_files()
-
 class SaveCommand(Command):
     """保存会话命令"""
-    
+
     name = "save"
     description = "保存当前会话"
     aliases = ["s"]
-    
+
     def execute(self, args: List[str]) -> None:
         if self.app:
             self.app.save_conversation()
@@ -152,13 +105,24 @@ class QuitCommand(Command):
 
 class CopyCommand(Command):
     """导出代码块命令"""
-    
+
     name = "copy"
     description = "导出最后回复中的代码块到文件"
     aliases = ["cp"]
-    
+
     def execute(self, args: str) -> None:
         self.app.export_code()
+
+class ToolsCommand(Command):
+    """工具历史命令"""
+
+    name = "tools"
+    description = "查看工具执行历史"
+    aliases = ["tool", "history_tools"]
+
+    def execute(self, args: List[str]) -> None:
+        if self.app:
+            self.app.show_tools_history()
 
 # 所有内置命令
 BUILTIN_COMMANDS = [
@@ -166,12 +130,9 @@ BUILTIN_COMMANDS = [
     NewCommand,
     ModelCommand,
     StyleCommand,
-    AddCommand,
-    DropCommand,
-    FilesCommand,
-    RefreshCommand,
     SaveCommand,
     HistoryCommand,
     CopyCommand,
+    ToolsCommand,
     QuitCommand,
 ]
