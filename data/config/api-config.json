@@ -7,69 +7,80 @@
   "models": [
     {
       "id": "claude-sonnet-4-6",
-      "name": "Claude Sonnet 4.6 | Claude Code专属 x2.4",
-      "price": "Input: 7.2$/1M Output: 36$/1M",
-      "context_limit": 200000
+      "name": "Claude Sonnet 4.6 | 官转 x4",
+      "price": "Input: 12$/1M Output: 60$/1M",
+      "context_limit": 200000,
+      "tool_mode": "native"
     },
     {
       "id": "claude-opus-4-6-thinking",
-      "name": "Claude Opus 4.6 | Claude Code专属 x2.4",
-      "price": "Input: 12$/1M Output: 60$/1M",
-      "context_limit": 200000
+      "name": "Claude Opus 4.6 | 官转 x4",
+      "price": "Input: 20$/1M Output: 100$/1M",
+      "context_limit": 200000,
+      "tool_mode": "native"
     },
     {
       "id": "gemini-3.1-pro-preview",
-      "name": "Gemini 3.1 Pro | 优质 x1.5",
-      "price": "Input: 3$/1M Output: 18$/1M",
-      "context_limit": 2000000
+      "name": "Gemini 3.1 Pro | 官转 x3",
+      "price": "Input: 6$/1M Output: 36$/1M",
+      "context_limit": 2000000,
+      "tool_mode": "native"
     },
     {
       "id": "gemini-3-pro-preview",
-      "name": "Gemini 3 Pro | 优质 x1.5",
-      "price": "Input: 3$/1M Output: 18$/1M",
-      "context_limit": 2000000
+      "name": "Gemini 3 Pro | 官转 x3",
+      "price": "Input: 6$/1M Output: 36$/1M",
+      "context_limit": 2000000,
+      "tool_mode": "native"
     },
     {
       "id": "gemini-3-flash-preview",
-      "name": "Gemini 3 Flash | 优质 x1.5",
-      "price": "Input: 0.75$/1M Output: 4.5$/1M",
-      "context_limit": 2000000
+      "name": "Gemini 3 Flash | 官转 x3",
+      "price": "Input: 1.5$/1M Output: 9$/1M",
+      "context_limit": 2000000,
+      "tool_mode": "native"
     },
     {
       "id": "gpt-5.4",
       "name": "GPT 5.4 | Codex专属 x0.8",
       "price": "Input: 2$/1M Output: 16$/1M",
-      "context_limit": 128000
+      "context_limit": 128000,
+      "tool_mode": "native"
     },
     {
       "id": "gpt-5.3-codex-high",
       "name": "GPT 5.3 Codex High | Codex专属 x0.8",
       "price": "Input: 1.4$/1M Output: 11.2$/1M",
-      "context_limit": 128000
+      "context_limit": 128000,
+      "tool_mode": "native"
     },
     {
       "id": "grok-4.1-fast",
       "name": "Grok 4.1 Fast | default x1",
       "price": "Input: 0.4$/1M Output: 3$/1M",
-      "context_limit": 1000000
+      "context_limit": 1000000,
+      "tool_mode": "native"
     },
     {
       "id": "kimi-k2.5",
       "name": "Kimi K2.5 | 企业 x1",
       "price": "Input: 4$/1M Output: 21$/1M",
-      "context_limit": 128000
+      "context_limit": 128000,
+      "tool_mode": "kimi"
     },
     {
       "id": "qwen3.5-plus",
       "name": "Qwen 3.5 Plus | 企业 x1",
       "price": "Input: 1.8$/1M Output: 4.8$/1M",
-      "context_limit": 128000
+      "context_limit": 128000,
+      "tool_mode": "native"
     },
     {
       "id": "deepseek-v3.2",
       "name": "DeepSeek V3.2 | 企业 x1",
       "price": "Input: 2$/1M Output: 3$/1M",
-      "context_limit": 128000
+      "context_limit": 128000,
+      "tool_mode": "native"
     }
   ],
   "default_model": "gemini-3-flash-preview"

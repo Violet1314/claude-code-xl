@@ -103,16 +103,6 @@ class QuitCommand(Command):
         """返回 True 表示退出"""
         return True
 
-class CopyCommand(Command):
-    """导出代码块命令"""
-
-    name = "copy"
-    description = "导出最后回复中的代码块到文件"
-    aliases = ["cp"]
-
-    def execute(self, args: str) -> None:
-        self.app.export_code()
-
 class ToolsCommand(Command):
     """工具历史命令"""
 
@@ -132,7 +122,6 @@ BUILTIN_COMMANDS = [
     StyleCommand,
     SaveCommand,
     HistoryCommand,
-    CopyCommand,
     ToolsCommand,
     QuitCommand,
 ]

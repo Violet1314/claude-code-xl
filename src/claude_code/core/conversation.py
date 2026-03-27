@@ -132,6 +132,7 @@ class Conversation:
     
     def reset(self) -> None:
         """重置会话（保留 system prompt）"""
+        """重置会话（保留 system prompt）"""
         self._messages.clear()
         
         if self._system_prompt:

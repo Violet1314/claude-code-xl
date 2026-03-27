@@ -11,6 +11,8 @@ from .parser import ToolParser, parse_tool_calls, remove_tool_blocks
 from .permission import PermissionManager, PermissionDecision
 from .permission_ui import PermissionUI
 from .executor import ToolExecutor, ExecutionResult, ExecutionReport, create_executor
+from .tool_calling import ToolCallingManager, tool_calling_manager
+from .file_cache import FileCacheManager, file_cache
 
 # 便捷函数
 def register_builtin_tools() -> None:
@@ -39,6 +41,12 @@ __all__ = [
     "ExecutionResult",
     "ExecutionReport",
     "create_executor",
+    # 工具调用管理器
+    "ToolCallingManager",
+    "tool_calling_manager",
+    # 文件缓存
+    "FileCacheManager",
+    "file_cache",
     # 全局注册表
     "registry",
     # 便捷函数

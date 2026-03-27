@@ -4,6 +4,7 @@ from .glob import GlobTool
 from .grep import GrepTool
 from .write import WriteTool
 from .edit import EditTool
+from .bash import BashTool
 
 # 导出所有工具类
 __all__ = [
@@ -12,6 +13,7 @@ __all__ = [
     "GrepTool",
     "WriteTool",
     "EditTool",
+    "BashTool",
 ]
 
 
@@ -22,3 +24,4 @@ def register_all_tools(registry):
     registry.register(GrepTool())
     registry.register(WriteTool())
     registry.register(EditTool())
+    registry.register(BashTool())

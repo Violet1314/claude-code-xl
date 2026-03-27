@@ -10,11 +10,11 @@ class GrepTool(Tool):
     """文件内容搜索工具"""
 
     name = "Grep"
-    description = "在文件中搜索匹配正则表达式的内容。返回匹配的行及其上下文。"
+    description = "在文件中搜索匹配正则表达式的内容。返回匹配的行及其上下文。建议使用精确模式减少匹配数量。"
 
     # 搜索限制
     MAX_FILE_SIZE = 1 * 1024 * 1024  # 1MB
-    MAX_MATCHES = 100  # 最大匹配数
+    MAX_MATCHES = 30  # 最大匹配数（降低以节省 token）
 
     def get_parameters_schema(self) -> Dict[str, Any]:
         """参数定义"""

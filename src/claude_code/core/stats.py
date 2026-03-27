@@ -62,12 +62,25 @@ class StatsManager:
     
     def update_output(self, text: str) -> None:
         """
-        更新输出 token 统计
-        
+        更新输出 token 统计（估算值，作为后备）
+
         Args:
             text: 输出文本
         """
         self._session.output_tokens += estimate_tokens(text)
+
+    def set_real_usage(self, input_tokens: int, output_tokens: int) -> None:
+        """
+        设置 API 返回的真实 token 使用量（优先于估算值）
+
+        Args:
+            input_tokens: 输入 token 数
+            output_tokens: 输出 token 数
+        """
+        if input_tokens > 0:
+            self._session.input_tokens = input_tokens
+        if output_tokens > 0:
+            self._session.output_tokens = output_tokens
     
     def reset_session(self) -> None:
         """重置会话统计"""

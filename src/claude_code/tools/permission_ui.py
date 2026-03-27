@@ -15,7 +15,9 @@ class PermissionUI:
         tool_name: str,
         operation_desc: str,
         details: str = "",
-        is_read_only: bool = False
+        is_read_only: bool = False,
+        force_once: bool = False,
+        path_warning: str = ""
     ) -> Optional[str]:
         """
         显示权限确认菜单
@@ -25,6 +27,8 @@ class PermissionUI:
             operation_desc: 操作描述
             details: 详细信息
             is_read_only: 是否为只读操作
+            force_once: 强制只允许 once（不显示 always 选项）
+            path_warning: 路径范围警告信息
 
         Returns:
             "once" | "always" | None（取消）
@@ -35,34 +39,54 @@ class PermissionUI:
 
         # 显示工具名称
         type_hint = "[只读]" if is_read_only else "[写入]"
-        console.print(f"\n[bold]工具: {tool_name}[/] [dim]{type_hint}[/]")
+        console.print(f"\n[bold]工具:[/] ", end="")
+        console.print_raw(tool_name)
+        console.print(f" [dim]{type_hint}[/]")
 
         # 显示操作描述
         console.print(f"[bold]操作:[/]")
-        console.print(f"  {operation_desc}")
+        console.print(f"  ", end="")
+        console.print_raw(operation_desc)
+
+        # 显示路径范围警告
+        if path_warning:
+            console.print(f"\n[bold {COLORS['warning']}]⚠️ 路径范围警告[/]")
+            for line in path_warning.split('\n'):
+                console.print(f"  ", end="")
+                console.print_raw(line)
 
         # 显示详细信息
         if details:
             console.print(f"\n[dim]详细信息:[/]")
             for line in details.split('\n'):
-                console.print(f"  {line}")
+                console.print(f"  ", end="")
+                console.print_raw(line)
 
         console.print(f"\n[{COLORS['primary']}]{'─' * 60}[/]")
         console.print(f"[dim]↑↓ 选择 | Enter 确认 | Esc/q 取消[/]\n")
 
         # 构建菜单选项
-        options = [
-            {
-                "name": "Yes (once)",
-                "value": "once",
-                "desc": "仅本次允许"
-            },
-            {
-                "name": "Yes (always)",
-                "value": "always",
-                "desc": "本次会话总是允许"
-            },
-        ]
+        if force_once:
+            options = [
+                {
+                    "name": "Yes (仅本次)",
+                    "value": "once",
+                    "desc": "允许本次操作"
+                },
+            ]
+        else:
+            options = [
+                {
+                    "name": "Yes (once)",
+                    "value": "once",
+                    "desc": "仅本次允许"
+                },
+                {
+                    "name": "Yes (always)",
+                    "value": "always",
+                    "desc": "本次会话总是允许"
+                },
+            ]
 
         # 使用项目中现有的交互式菜单
         return interactive_menu("权限选择", options)
@@ -108,7 +132,8 @@ class PermissionUI:
             color = COLORS['warning']
             msg = "✗ 使用缓存：拒绝"
 
-        console.print(f"[{color}]{msg}[/] [dim]{tool_name}[/]")
+        console.print(f"[{color}]{msg}[/] ", end="")
+        console.print_raw(tool_name)
 
     @staticmethod
     def show_progress(tool_name: str, status: str = "执行中") -> None:
@@ -119,7 +144,9 @@ class PermissionUI:
             tool_name: 工具名称
             status: 状态文本
         """
-        console.print(f"[{COLORS['info']}]{ICONS['info']} {tool_name}: {status}[/]")
+        console.print(f"[{COLORS['info']}]{ICONS['info']}[/] ", end="")
+        console.print_raw(tool_name)
+        console.print(f": {status}")
 
     @staticmethod
     def show_tool_result(tool_name: str, success: bool, output: str) -> None:
@@ -129,16 +156,24 @@ class PermissionUI:
         Args:
             tool_name: 工具名称
             success: 是否成功
-            output: 输出内容
+            output: 输出内容（可能包含 Rich 标记）
         """
         if success:
-            icon = ICONS['success']
-            color = COLORS['success']
-            console.print(f"[{color}]{icon} {tool_name} 完成[/]")
+            # 检查输出是否是 Edit 工具的 diff 输出
+            # Edit diff 同时包含 "✓ Updated" 和颜色标记
+            is_edit_diff = "✓ Updated" in output and "[white on" in output
+            if is_edit_diff:
+                # Edit diff 输出：使用 Rich markup（安全的，是我们自己生成的）
+                console.print(output)
+            else:
+                # 普通输出：直接打印，不解析 markup
+                console.print_raw(output)
         else:
             icon = ICONS['error']
             color = COLORS['error']
-            console.print(f"[{color}]{icon} {tool_name} 失败: {output}[/]")
+            # 分开打印，避免 output 中的 markup 标签被解析
+            console.print(f"[{color}]{icon} {tool_name} 失败:[/] ", end="")
+            console.print_raw(output)
 
     @staticmethod
     def show_tool_start(tool_name: str, operation: str) -> None:
@@ -149,5 +184,7 @@ class PermissionUI:
             tool_name: 工具名称
             operation: 操作描述
         """
-        console.print(f"\n[{COLORS['primary']}]{ICONS['claude']} 执行工具:[/] [bold]{tool_name}[/]")
-        console.print(f"  [dim]{operation}[/]")
+        console.print(f"\n[{COLORS['primary']}]{ICONS['claude']} 执行工具:[/] ", end="")
+        console.print_raw(tool_name)
+        console.print(f"  ", end="")
+        console.print_raw(operation)

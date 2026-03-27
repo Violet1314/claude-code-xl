@@ -13,8 +13,9 @@ class ModelConfig:
     name: str
     desc: str = ""
     context_limit: int = 100_000
-    price: str = ""  # 新增
-    
+    price: str = ""
+    tool_mode: str = "native"  # native | xml | kimi
+
     @classmethod
     def from_dict(cls, data: Dict) -> "ModelConfig":
         return cls(
@@ -22,7 +23,8 @@ class ModelConfig:
             name=data.get("name", ""),
             desc=data.get("desc", ""),
             context_limit=data.get("context_limit", 100_000),
-            price=data.get("price", ""),  # 新增
+            price=data.get("price", ""),
+            tool_mode=data.get("tool_mode", "native"),  # 默认使用原生 tool calling
         )
     
     def get_price_short(self) -> str:

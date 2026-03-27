@@ -1,5 +1,5 @@
 """工具执行器 - 执行工具调用并显示进度"""
-from typing import List, Optional, Tuple, Callable
+from typing import List, Optional, Tuple, Callable, Dict, Set
 from dataclasses import dataclass, field
 import time
 
@@ -18,6 +18,38 @@ class ExecutionResult:
     skipped: bool = False           # 是否被跳过（用户拒绝或取消）
     permission_denied: bool = False  # 是否因权限拒绝
     duration_ms: int = 0
+
+
+@dataclass
+class ReadCache:
+    """已读文件缓存"""
+    # 文件路径 -> (总行数, 已读取的行范围列表)
+    files: Dict[str, Tuple[int, List[Tuple[int, int]]]] = field(default_factory=dict)
+
+    def record(self, file_path: str, total_lines: int, start_line: int, end_line: int) -> None:
+        """记录读取范围"""
+        if file_path not in self.files:
+            self.files[file_path] = (total_lines, [])
+        _, ranges = self.files[file_path]
+        ranges.append((start_line, end_line))
+
+    def get_read_files(self) -> Dict[str, Tuple[int, List[Tuple[int, int]]]]:
+        """获取已读文件列表"""
+        return self.files.copy()
+
+    def has_read(self, file_path: str) -> bool:
+        """检查是否已读取过该文件"""
+        return file_path in self.files
+
+    def get_read_ranges(self, file_path: str) -> Optional[List[Tuple[int, int]]]:
+        """获取文件的已读取范围"""
+        if file_path in self.files:
+            return self.files[file_path][1]
+        return None
+
+    def clear(self) -> None:
+        """清空缓存"""
+        self.files.clear()
 
 
 @dataclass
@@ -74,6 +106,8 @@ class ToolExecutor:
 
         # 执行历史
         self.execution_history: List[dict] = []
+        # 已读文件缓存
+        self.read_cache = ReadCache()
 
     def execute_single(
         self,
@@ -206,13 +240,33 @@ class ToolExecutor:
             "duration_ms": duration_ms,
         })
 
+        # 记录 Read 操作到缓存
+        if tool_call.name == "Read" and result.success:
+            metadata = result.metadata or {}
+            file_path = metadata.get("file_path") or tool_call.parameters.get("file_path")
+            total_lines = metadata.get("total_lines", 0)
+            start_line = metadata.get("start_line", 1)
+            end_line = metadata.get("end_line", total_lines)
+
+            if file_path:
+                self.read_cache.record(file_path, total_lines, start_line, end_line)
+
     def get_history(self, limit: int = 10) -> List[dict]:
         """获取执行历史"""
         return self.execution_history[-limit:]
 
+    def get_read_files(self) -> Dict[str, Tuple[int, List[Tuple[int, int]]]]:
+        """获取已读文件列表"""
+        return self.read_cache.get_read_files()
+
+    def has_read_file(self, file_path: str) -> bool:
+        """检查是否已读取过该文件"""
+        return self.read_cache.has_read(file_path)
+
     def clear_history(self) -> None:
         """清空执行历史"""
         self.execution_history.clear()
+        self.read_cache.clear()
 
 
 def create_executor(registry: ToolRegistry) -> ToolExecutor:

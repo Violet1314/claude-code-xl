@@ -25,7 +25,6 @@ from claude_code.ui.components import (
     show_status_bar,
     show_model_list,
     show_style_list,
-    show_files_list,
     show_history_list,
     get_input_border,
 )
@@ -41,6 +40,7 @@ from claude_code.tools import (
     ToolCall,
     ExecutionReport,
     PermissionManager,
+    tool_calling_manager,
 )
 
 
@@ -76,7 +76,7 @@ class Application:
 
         # 初始化工具系统
         register_builtin_tools()  # 注册内置工具
-        self.permission_manager = PermissionManager()
+        self.permission_manager = PermissionManager(project_dir=os.getcwd())
         self.tool_executor = ToolExecutor(registry, self.permission_manager)
 
         # 设置系统提示词（包含工具说明）
@@ -97,23 +97,23 @@ class Application:
         self.history_dir = "data/history"
         os.makedirs(self.history_dir, exist_ok=True)
 
-        # 代码导出目录
-        self.copy_code_dir = "data/copy_code"
-        os.makedirs(self.copy_code_dir, exist_ok=True)
-
         # 注册退出处理
         atexit.register(self._on_exit)
         signal.signal(signal.SIGINT, self._signal_handler)
 
     def _setup_system_prompt(self) -> None:
-        """设置系统提示词（包含工具说明）"""
+        """设置系统提示词（根据模型工具模式）"""
         base_prompt = self.settings.get_prompt(self.current_style_id)
 
-        # 获取工具使用说明
-        tools_prompt = registry.get_tools_prompt()
+        # 获取当前模型的工具模式
+        tool_mode = self.current_model.tool_mode if self.current_model else "native"
 
-        # 组合提示词
-        full_prompt = f"{base_prompt}\n\n{tools_prompt}"
+        # 只有非原生模式才在 prompt 中加入工具说明
+        if tool_mode != "native":
+            tools_prompt = tool_calling_manager.get_tools_prompt()
+            full_prompt = f"{base_prompt}\n\n{tools_prompt}"
+        else:
+            full_prompt = base_prompt
 
         self.conversation.set_system_prompt(full_prompt)
 
@@ -199,49 +199,27 @@ class Application:
         Returns:
             (响应文本, 是否有工具调用)
         """
-        full_response = ""
         model_name = self.current_model.name if self.current_model else "AI"
-        start_time = time.time()
+        tool_mode = self.current_model.tool_mode if self.current_model else "native"
+
+        # 原生模式需要传入工具定义
+        tools_definition = None
+        if tool_mode == "native":
+            tools_definition = tool_calling_manager.get_tools_definition()
 
         try:
-            with Progress(
-                SpinnerColumn(spinner_name="dots", style=COLORS['primary']),
-                TextColumn(f"[bold {COLORS['primary']}]{model_name}[/] [dim]正在思考...[/]"),
-                BarColumn(bar_width=20, pulse_style=COLORS['primary']),
-                TextColumn("[cyan]已生成 {task.completed:,} 字符[/]"),
-                console=console.get_console(),
-                transient=True,
-            ) as progress:
-                task = progress.add_task("", total=None, completed=0)
+            # 收集流式响应
+            full_response, native_tool_calls, real_usage, duration = self._collect_streaming_response(
+                messages, tools_definition, model_name
+            )
 
-                for chunk in self.client.send_message(
-                    model_id=self.current_model.id if self.current_model else "",
-                    messages=messages,
-                    stream=True,
-                ):
-                    content = self.client.extract_content(chunk)
-                    if content:
-                        full_response += content
-                        progress.update(task, completed=len(full_response))
-
-            duration = time.time() - start_time
-
-            if not full_response.strip():
+            if not full_response.strip() and not native_tool_calls:
                 return "", False
 
-            # 解析工具调用
-            tool_calls = ToolParser.parse(full_response)
-
-            # 移除工具代码块，只显示文本内容
-            clean_response = ToolParser.remove_tool_blocks(full_response)
-
-            # 渲染清理后的响应
-            if clean_response.strip():
-                render_response(clean_response, model_name, duration)
-
-            # 保存 AI 响应
-            self.stats.update_output(full_response)
-            self.conversation.add_assistant_message(full_response)
+            # 处理响应（解析工具、渲染、保存）
+            tool_calls = self._process_response(
+                full_response, native_tool_calls, tool_mode, model_name, duration, real_usage
+            )
 
             # 执行工具调用
             if tool_calls:
@@ -260,6 +238,134 @@ class Application:
         except Exception as e:
             console.error(f"生成失败: {e}")
             return "", False
+
+    def _collect_streaming_response(
+        self,
+        messages: list,
+        tools_definition: list,
+        model_name: str
+    ) -> tuple:
+        """
+        收集流式响应
+
+        Args:
+            messages: 消息列表
+            tools_definition: 工具定义（原生模式）
+            model_name: 模型名称（用于显示）
+
+        Returns:
+            (响应文本, 原生工具调用列表, 真实 token 使用量, 耗时)
+        """
+        start_time = time.time()
+        full_response = ""
+        native_tool_calls = []
+        real_usage = {"input": 0, "output": 0}
+        tool_mode = self.current_model.tool_mode if self.current_model else "native"
+
+        with Progress(
+            SpinnerColumn(spinner_name="dots", style=COLORS['primary']),
+            TextColumn(f"[bold {COLORS['primary']}]{model_name}[/] [dim]正在思考...[/]"),
+            BarColumn(bar_width=20, pulse_style=COLORS['primary']),
+            TextColumn("[cyan]已生成 {task.completed:,} 字符[/]"),
+            console=console.get_console(),
+            transient=True,
+        ) as progress:
+            task = progress.add_task("", total=None, completed=0)
+
+            for chunk in self.client.send_message(
+                model_id=self.current_model.id if self.current_model else "",
+                messages=messages,
+                tools=tools_definition,
+                stream=True,
+            ):
+                # 提取文本内容
+                content = self.client.extract_content(chunk)
+                if content:
+                    full_response += content
+                    progress.update(task, completed=len(full_response))
+
+                # 提取原生工具调用（流式）
+                if tool_mode == "native":
+                    self._accumulate_native_tool_calls(chunk, native_tool_calls)
+
+                # 提取真实 token 使用量（最后一个 chunk 包含 usage）
+                usage = self.client.extract_usage(chunk)
+                if usage:
+                    real_usage = usage
+
+        duration = time.time() - start_time
+        return full_response, native_tool_calls, real_usage, duration
+
+    def _accumulate_native_tool_calls(self, chunk: dict, native_tool_calls: list) -> None:
+        """
+        累积原生工具调用（流式）
+
+        Args:
+            chunk: API 响应块
+            native_tool_calls: 工具调用累积列表（会被修改）
+        """
+        tool_chunks = self.client.extract_tool_calls(chunk)
+        for tc in tool_chunks:
+            idx = tc.get("index", 0)
+            func = tc.get("function", {})
+
+            # 确保列表足够长
+            while len(native_tool_calls) <= idx:
+                native_tool_calls.append({"id": "", "function": {"name": "", "arguments": ""}})
+
+            # 累积工具调用信息
+            if tc.get("id"):
+                native_tool_calls[idx]["id"] = tc["id"]
+            if func.get("name"):
+                native_tool_calls[idx]["function"]["name"] = func["name"]
+            if func.get("arguments"):
+                native_tool_calls[idx]["function"]["arguments"] += func["arguments"]
+
+    def _process_response(
+        self,
+        full_response: str,
+        native_tool_calls: list,
+        tool_mode: str,
+        model_name: str,
+        duration: float,
+        real_usage: dict
+    ) -> list:
+        """
+        处理响应（解析工具调用、渲染、保存）
+
+        Args:
+            full_response: 完整响应文本
+            native_tool_calls: 原生工具调用列表
+            tool_mode: 工具模式
+            model_name: 模型名称
+            duration: 响应耗时
+            real_usage: 真实 token 使用量
+
+        Returns:
+            解析后的工具调用列表
+        """
+        # 统一解析工具调用
+        tool_calls = tool_calling_manager.parse_tool_calls(
+            response_text=full_response,
+            native_tool_calls=native_tool_calls if tool_mode == "native" else None,
+            mode=tool_mode,
+        )
+
+        # 移除工具代码块，只显示文本内容
+        clean_response = ToolParser.remove_tool_blocks(full_response)
+
+        # 渲染清理后的响应
+        if clean_response.strip():
+            render_response(clean_response, model_name, duration)
+
+        # 保存 AI 响应：优先使用真实 token，否则回退到估算
+        if real_usage["input"] > 0:
+            self.stats.set_real_usage(real_usage["input"], real_usage["output"])
+        else:
+            self.stats.update_output(full_response)
+        self.conversation.add_assistant_message(full_response)
+
+        return tool_calls
 
     def _execute_tools(self, tool_calls: List[ToolCall]) -> ExecutionReport:
         """
@@ -305,10 +411,12 @@ class Application:
                 lines.append("用户取消或拒绝执行")
             elif result.success:
                 lines.append(f"<result tool=\"{result.tool_call.name}\" status=\"success\">")
-                # 限制输出长度
-                output = result.output
-                if len(output) > 5000:
-                    output = output[:5000] + "\n... (输出过长，已截断)"
+                # 压缩大结果
+                output = self._compress_tool_output(
+                    result.output,
+                    result.tool_call.name,
+                    result.tool_call.parameters
+                )
                 lines.append(output)
             else:
                 lines.append(f"<result tool=\"{result.tool_call.name}\" status=\"error\">")
@@ -318,6 +426,68 @@ class Application:
         lines.append("</tool_results>")
 
         return "\n".join(lines)
+
+    def _compress_tool_output(
+        self,
+        output: str,
+        tool_name: str,
+        parameters: dict
+    ) -> str:
+        """
+        压缩工具输出（减少历史膨胀）
+
+        Args:
+            output: 原始输出
+            tool_name: 工具名称
+            parameters: 工具参数
+
+        Returns:
+            压缩后的输出
+        """
+        MAX_OUTPUT_LEN = 3000  # 压缩阈值
+
+        if len(output) <= MAX_OUTPUT_LEN:
+            return output
+
+        # Read 工具：已经是摘要模式，保留原文
+        if tool_name == "Read":
+            # 检查是否是摘要输出
+            if "📄" in output or "结构概览" in output:
+                return output  # 摘要已经很精简
+            # 非摘要的大输出，压缩
+            return self._compress_large_output(output, MAX_OUTPUT_LEN)
+
+        # Grep/Glob：保留结果但压缩
+        if tool_name in ("Grep", "Glob"):
+            return self._compress_large_output(output, MAX_OUTPUT_LEN)
+
+        # Bash：保留前后部分
+        if tool_name == "Bash":
+            return self._compress_large_output(output, MAX_OUTPUT_LEN)
+
+        # 其他工具：通用压缩
+        return self._compress_large_output(output, MAX_OUTPUT_LEN)
+
+    def _compress_large_output(self, output: str, max_len: int = 3000) -> str:
+        """
+        压缩大输出（保留前后部分）
+
+        Args:
+            output: 原始输出
+            max_len: 最大长度
+
+        Returns:
+            压缩后的输出
+        """
+        if len(output) <= max_len:
+            return output
+
+        half = max_len // 2
+        head = output[:half]
+        tail = output[-half:]
+        omitted = len(output) - max_len
+
+        return f"{head}\n\n... (省略 {omitted} 字符) ...\n\n{tail}"
 
     def show_tools_history(self) -> None:
         """显示工具执行历史"""
@@ -337,7 +507,8 @@ class Application:
             console.print(f"[{COLORS['system']}]{timestamp}[/] {status} {tool_name}")
 
             if entry.get('error'):
-                console.print(f"  [{COLORS['error']}]{entry['error']}[/]")
+                console.print(f"  ", end="")
+                console.print(entry['error'], markup=False, highlight=False, style=COLORS['error'])
 
         console.print()
 
@@ -421,212 +592,8 @@ class Application:
             console.success(f"已应用风格: {choice.upper()}")
 
     # ============================================================
-    # 文件管理
-    # ============================================================
-
-    def add_files(self, patterns: list) -> None:
-        """添加文件"""
-        added, skipped = self.files.add(patterns)
-
-        if added:
-            console.success(f"已挂载 {len(added)} 个文件")
-            for p in added[:5]:
-                console.dim(f"    + {os.path.basename(p)}")
-            if len(added) > 5:
-                console.dim(f"    ... 及其他 {len(added) - 5} 个")
-
-        if skipped:
-            console.warning(f"跳过 {len(skipped)} 个文件")
-            for p, reason in skipped[:3]:
-                console.dim(f"    - {os.path.basename(p)}: {reason}")
-
-        self._update_input_state()
-
-    def drop_files(self, patterns: list) -> None:
-        """移除文件"""
-        removed = self.files.drop(patterns)
-
-        if removed:
-            console.success(f"已移除 {len(removed)} 个文件")
-        else:
-            console.warning("未找到匹配的文件")
-
-        self._update_input_state()
-
-    def show_files(self) -> None:
-        """显示文件列表"""
-        if self.files.is_empty:
-            console.warning("当前无挂载文件，使用 /add <路径> 添加")
-            return
-
-        files_data = [
-            {"path": path, "tokens": f.tokens}
-            for path, f in self.files.get_files().items()
-        ]
-        show_files_list(files_data, self.files.total_tokens)
-
-    def refresh_files(self) -> None:
-        """刷新文件"""
-        if self.files.is_empty:
-            console.warning("当前无挂载文件")
-            return
-
-        refreshed, removed = self.files.refresh()
-
-        if refreshed:
-            console.success(f"已刷新 {len(refreshed)} 个文件")
-        if removed:
-            console.warning(f"已移除 {len(removed)} 个失效文件")
-
-        self._update_input_state()
-
-    # ============================================================
     # 会话保存/加载
     # ============================================================
-
-    def export_code(self) -> None:
-        """导出最后回复中的代码块到文件"""
-        # 获取最后一次 AI 回复
-        messages = self.conversation.get_messages()
-        assistant_msgs = [m for m in messages if m["role"] == "assistant"]
-
-        if not assistant_msgs:
-            console.warning("没有可导出的内容")
-            return
-
-        last_response = assistant_msgs[-1]["content"]
-
-        # 提取代码块：```language\ncode\n```
-        pattern = r'```(\w*)\n(.*?)```'
-        matches = re.findall(pattern, last_response, re.DOTALL)
-
-        if not matches:
-            console.warning("最后一次回复中没有代码块")
-            return
-
-        # 获取用户最后的请求
-        user_msgs = [m for m in messages if m["role"] == "user"]
-        user_request = user_msgs[-1]["content"][:200] if user_msgs else "未知请求"
-
-        # 判断代码类型
-        user_has_code = bool(re.search(r'```', user_request))
-        code_type = "代码修改" if user_has_code else "完整代码"
-
-        # 生成标题
-        title = self._generate_code_title(user_request)
-
-        # 生成目录名
-        timestamp = datetime.now().strftime("%m%d_%H%M")
-        dir_name = f"{timestamp}_{title}"
-
-        # 清理非法字符
-        for c in ['/', '\\', ':', '*', '?', '"', '<', '>', '|']:
-            dir_name = dir_name.replace(c, '_')
-
-        dir_path = os.path.join(self.copy_code_dir, dir_name)
-
-        # 处理目录冲突
-        if os.path.exists(dir_path):
-            counter = 1
-            while os.path.exists(f"{dir_path}_{counter}"):
-                counter += 1
-            dir_path = f"{dir_path}_{counter}"
-
-        # 创建目录
-        os.makedirs(dir_path, exist_ok=True)
-
-        # 语言到扩展名映射
-        lang_ext = {
-            'python': '.py', 'py': '.py',
-            'javascript': '.js', 'js': '.js',
-            'typescript': '.ts', 'ts': '.ts',
-            'java': '.java',
-            'c': '.c', 'cpp': '.cpp', 'c++': '.cpp',
-            'go': '.go',
-            'rust': '.rs',
-            'ruby': '.rb',
-            'php': '.php',
-            'swift': '.swift',
-            'kotlin': '.kt',
-            'sql': '.sql',
-            'html': '.html',
-            'css': '.css',
-            'json': '.json',
-            'yaml': '.yaml', 'yml': '.yaml',
-            'xml': '.xml',
-            'shell': '.sh', 'bash': '.sh', 'sh': '.sh',
-            'powershell': '.ps1', 'ps1': '.ps1',
-            'text': '.txt', '': '.txt',
-        }
-
-        # 保存代码文件
-        saved_files = []
-        for idx, (lang, code) in enumerate(matches, 1):
-            lang_lower = lang.lower() if lang else ''
-            ext = lang_ext.get(lang_lower, '.txt')
-            code = code.strip()
-
-            # 代码文件名
-            code_filename = f"code_{idx}{ext}"
-            code_filepath = os.path.join(dir_path, code_filename)
-
-            # 提取代码说明
-            desc = self._extract_code_description(last_response, code, idx)
-
-            # 写入代码文件（带头部注释）
-            comment_char = '#' if ext in ['.py', '.rb', '.sh', '.yaml', '.yml'] else '//'
-            if ext in ['.html', '.xml']:
-                code_header = f"<!-- 来源: {title} | 时间: {datetime.now().strftime('%Y-%m-%d %H:%M')} -->\n\n"
-            elif ext in ['.css']:
-                code_header = f"/* 来源: {title} | 时间: {datetime.now().strftime('%Y-%m-%d %H:%M')} */\n\n"
-            else:
-                code_header = f"{comment_char} 来源: {title}\n{comment_char} 时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n{comment_char} 说明: {desc}\n\n"
-
-            code_content = code_header + code + '\n'
-            code_content = code_content.encode('utf-8', errors='replace').decode('utf-8')
-
-            with open(code_filepath, 'w', encoding='utf-8') as f:
-                f.write(code_content)
-
-            saved_files.append(code_filename)
-
-        # 输出结果
-        console.success(f"已导出 {len(matches)} 个代码块")
-        console.dim(f"  📁 {dir_path}/")
-        for f in saved_files:
-            console.dim(f"     └─ {f}")
-
-    def _generate_code_title(self, user_request: str) -> str:
-        """生成代码文件标题"""
-        prefixes = ["帮我", "请", "给我", "写一个", "写个", "生成", "创建"]
-        title = user_request.strip()
-        for p in prefixes:
-            if title.startswith(p):
-                title = title[len(p):]
-
-        title = title[:15].strip()
-        title = title.replace('\n', ' ').replace('\r', '')
-
-        if not title:
-            title = "代码导出"
-
-        return title
-
-    def _extract_code_description(self, response: str, code: str, idx: int) -> str:
-        """从 AI 回复中提取代码说明"""
-        code_pos = response.find(code)
-        if code_pos > 0:
-            before_text = response[max(0, code_pos - 200):code_pos]
-
-            for sep in ['：', ':', '。', '\n']:
-                if sep in before_text:
-                    desc = before_text.split(sep)[-1].strip()
-                    if desc and len(desc) > 5:
-                        desc = re.sub(r'```\w*', '', desc).strip()
-                        if desc:
-                            return desc[:50]
-
-        return f"代码块 {idx}"
 
     def save_conversation(self) -> None:
         """保存会话"""

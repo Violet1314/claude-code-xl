@@ -1,4 +1,6 @@
 """控制台输出 - 统一的 Rich 封装"""
+import sys
+
 from rich.console import Console as RichConsole
 from rich.markdown import Markdown
 from rich.syntax import Syntax
@@ -6,6 +8,14 @@ from rich.padding import Padding
 from rich.rule import Rule
 
 from claude_code.ui.theme import COLORS, ICONS
+
+# Windows 终端编码修复
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
 
 # 全局 Console 实例
 _console = RichConsole()
@@ -20,23 +30,29 @@ def get_console() -> RichConsole:
 
 def success(msg: str) -> None:
     """显示成功消息"""
-    _console.print(f"  [{COLORS['success']}]{ICONS['success']}[/] {msg}")
+    # 分开打印，避免消息内容被解析为 markup
+    _console.print(f"  [{COLORS['success']}]{ICONS['success']}[/] ", end="")
+    _console.print(msg, markup=False, highlight=False)
 
 def error(msg: str) -> None:
     """显示错误消息"""
-    _console.print(f"  [{COLORS['error']}]{ICONS['error']}[/] {msg}")
+    _console.print(f"  [{COLORS['error']}]{ICONS['error']}[/] ", end="")
+    _console.print(msg, markup=False, highlight=False)
 
 def warning(msg: str) -> None:
     """显示警告消息"""
-    _console.print(f"  [{COLORS['warning']}]{ICONS['warning']}[/] {msg}")
+    _console.print(f"  [{COLORS['warning']}]{ICONS['warning']}[/] ", end="")
+    _console.print(msg, markup=False, highlight=False)
 
 def info(msg: str) -> None:
     """显示信息消息"""
-    _console.print(f"  [{COLORS['info']}]ℹ[/] {msg}")
+    _console.print(f"  [{COLORS['info']}]ℹ[/] ", end="")
+    _console.print(msg, markup=False, highlight=False)
 
 def dim(msg: str) -> None:
     """显示暗色消息"""
-    _console.print(f"  [dim]{msg}[/]")
+    _console.print(f"  ", end="")
+    _console.print(msg, markup=False, highlight=False, style="dim")
 
 # ============================================================
 # 内容渲染

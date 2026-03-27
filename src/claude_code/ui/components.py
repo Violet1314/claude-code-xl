@@ -220,36 +220,6 @@ def show_history_list(history: List[Dict]) -> None:
         expand=False,
     ))
 
-def show_files_list(files: List[Dict], total_tokens: int = 0) -> None:
-    """
-    显示挂载文件列表
-    
-    Args:
-        files: 文件列表 [{"path": ..., "tokens": ...}]
-        total_tokens: 总 token 数
-    """
-    table = Table(box=None, padding=(0, 2))
-    table.add_column("#", style=COLORS['primary'], width=3)
-    table.add_column("路径", style=COLORS['info'])
-    table.add_column("Tokens", style="dim", justify="right", width=10)
-    
-    for idx, file in enumerate(files, 1):
-        table.add_row(
-            str(idx),
-            file.get('path', ''),
-            f"{file.get('tokens', 0):,}",
-        )
-    
-    console.get_console().print(Panel(
-        table,
-        title=f"[bold white]Attached Files ({len(files)})[/]",
-        border_style=COLORS['border'],
-        expand=False,
-    ))
-    
-    console.dim(f"  Total Tokens: {total_tokens:,}")
-    console.blank()
-
 # ============================================================
 # 输入边框
 # ============================================================

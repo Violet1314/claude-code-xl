@@ -11,6 +11,9 @@ class GlobTool(Tool):
     name = "Glob"
     description = "按文件名模式搜索文件。支持通配符：* 匹配任意字符，** 递归匹配目录。"
 
+    # 最大返回数量
+    MAX_RESULTS = 100
+
     def get_parameters_schema(self) -> Dict[str, Any]:
         """参数定义"""
         return {
@@ -45,11 +48,16 @@ class GlobTool(Tool):
             # 执行 glob 搜索
             matches = list(base_path.glob(pattern))
 
-            # 排序并格式化输出
+            # 排序
             matches.sort(key=lambda p: str(p).lower())
 
             if not matches:
                 return ToolResult(success=True, output="未找到匹配的文件")
+
+            # 限制数量
+            total_count = len(matches)
+            if len(matches) > self.MAX_RESULTS:
+                matches = matches[:self.MAX_RESULTS]
 
             # 格式化输出
             output_lines = []
@@ -62,13 +70,18 @@ class GlobTool(Tool):
 
             output = '\n'.join(output_lines)
 
+            # 添加截断提示
+            if total_count > self.MAX_RESULTS:
+                output += f"\n... 共 {total_count} 个结果，仅显示前 {self.MAX_RESULTS} 个"
+
             return ToolResult(
                 success=True,
                 output=output,
                 metadata={
                     "pattern": pattern,
                     "path": search_path,
-                    "count": len(matches)
+                    "count": len(matches),
+                    "total_count": total_count
                 }
             )
 
