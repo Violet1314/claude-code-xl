@@ -80,19 +80,24 @@ class EditTool(Tool):
             reference = cache_result.get("reference", "")
             version = cache_result.get("version", 0)
 
-            # 生成简洁的 diff 摘要
-            diff_summary = self._make_diff_summary(old_string, new_string)
+            # 生成 diff 显示
+            diff_output = self._generate_diff(
+                str(path),
+                original_content,
+                new_content,
+                old_string,
+                new_string
+            )
 
             # 构建输出
             result = []
             result.append(f"✅ 编辑成功: {path.name}")
             result.append(f"📌 新引用: {reference} (v{version})")
-            result.append(f"📝 变更: {diff_summary}")
+            result.append("")  # 空行
+            result.append(diff_output)  # diff 显示
 
             if match_count > 1:
-                result.append(f"⚠️ 共 {match_count} 处匹配，已替换第 1 处")
-
-            result.append(f"💡 缓存已更新，后续操作使用引用 {reference}")
+                result.append(f"\n⚠️ 共 {match_count} 处匹配，已替换第 1 处")
 
             return ToolResult(
                 success=True,
@@ -148,19 +153,14 @@ class EditTool(Tool):
             格式化的 diff 输出
         """
         original_lines = original_content.splitlines()
-        old_lines = old_string.splitlines()
-        new_lines = new_string.splitlines()
+        old_lines = old_string.splitlines() if old_string else []
+        new_lines = new_string.splitlines() if new_string else []
 
         removed_count = len(old_lines)
         added_count = len(new_lines)
 
         # 找到变化在文件中的起始行号
         start_line = self._find_start_line(original_lines, old_string)
-
-        # 计算显示范围
-        context_lines = 2  # 上下文行数
-        display_start = max(1, start_line - context_lines)
-        display_end = min(len(new_content.splitlines()), start_line + max(removed_count, added_count) + context_lines)
 
         # 构建输出
         result = []
@@ -170,40 +170,36 @@ class EditTool(Tool):
         result.append(f"  [dim]  [/][green bold]+{added_count}[/] [red bold]-{removed_count}[/]")
         result.append("")
 
-        # 新文件的行列表（用于显示）
+        # 上下文行数
+        context_lines = 2
+
+        # 显示上文（变化之前的行）
+        for i in range(max(0, start_line - context_lines - 1), start_line - 1):
+            if i < len(original_lines):
+                content = self._truncate_line(original_lines[i])
+                result.append(f"     [dim]{i + 1:4d}[/]  [dim]{content}[/]")
+
+        # 显示删除的行（红色背景）
+        for i, line in enumerate(old_lines):
+            content = self._truncate_line(line)
+            result.append(f"     [dim]{start_line + i:4d}[/]  [white on #b85450]- {content}[/]")
+
+        # 显示新增的行（绿色背景）
+        for i, line in enumerate(new_lines):
+            content = self._truncate_line(line)
+            result.append(f"     [dim]{start_line + i:4d}[/]  [white on #3d8c40]+ {content}[/]")
+
+        # 显示下文（变化之后的行）
+        # 删除/替换后的行号从 start_line + added_count 开始
+        after_start = start_line + removed_count  # 原文件中的行号
         new_file_lines = new_content.splitlines()
+        after_start_new = start_line + added_count  # 新文件中的行号
 
-        # 记录当前在新文件中的位置
-        new_line_idx = display_start - 1
-
-        for line_num in range(display_start, display_end + 1):
-            # 判断这一行是上下文还是变化
-            is_before_context = line_num < start_line
-            is_after_context = line_num >= start_line + added_count
-
-            if is_before_context:
-                # 上文（灰色，未变化）
-                if line_num - 1 < len(new_file_lines):
-                    content = self._truncate_line(new_file_lines[line_num - 1])
-                    result.append(f"     [dim]{line_num:4d}[/]  [dim]{content}[/]")
-            elif is_after_context:
-                # 下文（灰色，未变化）
-                if line_num - 1 < len(new_file_lines):
-                    content = self._truncate_line(new_file_lines[line_num - 1])
-                    result.append(f"     [dim]{line_num:4d}[/]  [dim]{content}[/]")
-            else:
-                # 变化区域
-                change_idx = line_num - start_line
-
-                # 显示删除的行
-                if change_idx < removed_count:
-                    old_line_content = self._truncate_line(old_lines[change_idx])
-                    result.append(f"     [dim]{start_line + change_idx:4d}[/]  [white on #b85450]- {old_line_content}[/]")
-
-                # 显示新增的行
-                if change_idx < added_count:
-                    new_line_content = self._truncate_line(new_lines[change_idx])
-                    result.append(f"     [dim]{start_line + change_idx:4d}[/]  [white on #3d8c40]+ {new_line_content}[/]")
+        for i in range(context_lines):
+            line_num_new = after_start_new + i
+            if line_num_new < len(new_file_lines):
+                content = self._truncate_line(new_file_lines[line_num_new])
+                result.append(f"     [dim]{line_num_new + 1:4d}[/]  [dim]{content}[/]")
 
         return "\n".join(result)
 
@@ -222,22 +218,39 @@ class EditTool(Tool):
         if not old_lines:
             return 1
 
-        first_line = old_lines[0].strip()
+        # 使用精确匹配：检查连续多行是否完全匹配
+        first_line = old_lines[0]
 
-        for i, line in enumerate(original_lines):
-            if first_line in line.strip() or line.strip() in first_line:
-                # 检查后续行是否匹配
+        for i in range(len(original_lines) - len(old_lines) + 1):
+            # 检查从第 i 行开始是否完全匹配
+            match = True
+            for j, old_line in enumerate(old_lines):
+                if i + j >= len(original_lines):
+                    match = False
+                    break
+                # 精确匹配（不使用 strip，保留缩进）
+                if original_lines[i + j] != old_line:
+                    match = False
+                    break
+
+            if match:
+                return i + 1  # 行号从 1 开始
+
+        # 如果精确匹配失败，尝试宽松匹配
+        first_line_stripped = old_lines[0].strip()
+        for i in range(len(original_lines) - len(old_lines) + 1):
+            if original_lines[i].strip() == first_line_stripped:
+                # 检查后续行
                 match = True
                 for j, old_line in enumerate(old_lines):
                     if i + j >= len(original_lines):
                         match = False
                         break
-                    # 放宽匹配条件
-                    if old_line.strip() and old_line.strip() not in original_lines[i + j].strip():
-                        # 允许部分不匹配
-                        pass
+                    if original_lines[i + j].strip() != old_line.strip():
+                        match = False
+                        break
                 if match:
-                    return i + 1  # 行号从 1 开始
+                    return i + 1
 
         return 1  # 默认返回第一行
 
@@ -259,3 +272,18 @@ class EditTool(Tool):
     def is_read_only(self) -> bool:
         """非只读操作"""
         return False
+
+    def validate_parameters(self, parameters: Dict[str, Any]) -> Optional[str]:
+        """验证参数"""
+        file_path = parameters.get("file_path")
+        if not file_path:
+            return "缺少 file_path 参数"
+
+        old_string = parameters.get("old_string")
+        if not old_string:
+            return "缺少 old_string 参数"
+
+        # new_string 可以为空（表示删除内容）
+        # old_string 不能为空（无法匹配空字符串）
+
+        return None

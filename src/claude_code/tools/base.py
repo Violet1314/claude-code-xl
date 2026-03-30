@@ -7,8 +7,9 @@ from enum import Enum
 
 class PermissionLevel(Enum):
     """权限级别"""
-    ONCE = "once"       # 仅本次
-    ALWAYS = "always"   # 总是允许（当前会话）
+    ONCE = "once"           # 仅本次允许
+    ALL = "all"             # 全局授权（所有工具自动通过）
+    NO_ONCE = "no_once"     # 仅本次拒绝
 
 
 @dataclass
@@ -40,8 +41,23 @@ class ToolCall:
         return result
 
     def __str__(self) -> str:
-        params_str = ", ".join(f"{k}={v!r}" for k, v in self.parameters.items())
-        return f"{self.name}({params_str})"
+        """返回简洁的字符串表示，长内容会被截断"""
+        parts = []
+        for k, v in self.parameters.items():
+            if k == "content" and len(str(v)) > 100:
+                # content 参数：只显示字符数
+                parts.append(f"{k}=({len(str(v))} 字符)")
+            elif k in ["old_string", "new_string"] and len(str(v)) > 50:
+                # Edit 参数：显示前 50 字符
+                preview = str(v)[:50].replace('\n', '\\n')
+                parts.append(f"{k}=\"{preview}...\"")
+            elif isinstance(v, str) and len(v) > 200:
+                # 其他长字符串：截断
+                preview = v[:100].replace('\n', '\\n')
+                parts.append(f"{k}=\"{preview}...\" ({len(v)} 字符)")
+            else:
+                parts.append(f"{k}={v!r}")
+        return f"{self.name}({', '.join(parts)})"
 
 
 class Tool(ABC):

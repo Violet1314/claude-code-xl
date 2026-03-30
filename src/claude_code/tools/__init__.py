@@ -7,7 +7,6 @@ from .base import (
     PermissionLevel,
     registry,
 )
-from .parser import ToolParser, parse_tool_calls, remove_tool_blocks
 from .permission import PermissionManager, PermissionDecision
 from .permission_ui import PermissionUI
 from .executor import ToolExecutor, ExecutionResult, ExecutionReport, create_executor
@@ -28,10 +27,6 @@ __all__ = [
     "ToolResult",
     "ToolRegistry",
     "PermissionLevel",
-    # 解析器
-    "ToolParser",
-    "parse_tool_calls",
-    "remove_tool_blocks",
     # 权限
     "PermissionManager",
     "PermissionDecision",

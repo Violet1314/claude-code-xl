@@ -15,6 +15,7 @@ class GrepTool(Tool):
     # 搜索限制
     MAX_FILE_SIZE = 1 * 1024 * 1024  # 1MB
     MAX_MATCHES = 30  # 最大匹配数（降低以节省 token）
+    PREVIEW_WIDTH = 80  # 行内容预览宽度
 
     def get_parameters_schema(self) -> Dict[str, Any]:
         """参数定义"""
@@ -32,8 +33,7 @@ class GrepTool(Tool):
                 },
                 "type": {
                     "type": "string",
-                    "description": "文件类型过滤，如 py, js, md",
-                    "default": None
+                    "description": "文件类型过滤，如 py, js, md（可选）"
                 },
                 "-i": {
                     "type": "boolean",
@@ -88,16 +88,12 @@ class GrepTool(Tool):
 
             # 格式化输出
             if output_mode == "files_with_matches":
-                output = '\n'.join(str(f) for f in matched_files)
+                output = self._format_files_output(matched_files, pattern)
             else:
-                output_lines = []
-                for match in all_matches[:self.MAX_MATCHES]:
-                    file_path, line_num, line_content = match
-                    output_lines.append(f"{file_path}:{line_num}:{line_content}")
-                output = '\n'.join(output_lines)
+                output = self._format_content_output(all_matches[:self.MAX_MATCHES], pattern, len(all_matches))
 
             if not all_matches:
-                output = "未找到匹配的内容"
+                output = f"🔍 未找到匹配: {pattern}"
 
             return ToolResult(
                 success=True,
@@ -188,6 +184,62 @@ class GrepTool(Tool):
 
         return matches
 
+    def _format_files_output(self, matched_files: List[Path], pattern: str) -> str:
+        """格式化文件列表输出"""
+        lines = []
+        lines.append(f"🔍 搜索 \"{pattern}\" 找到 {len(matched_files)} 个文件")
+        lines.append("")
+
+        for f in matched_files[:20]:
+            lines.append(f"  📄 {f}")
+
+        if len(matched_files) > 20:
+            lines.append(f"  ... 还有 {len(matched_files) - 20} 个文件")
+
+        return '\n'.join(lines)
+
+    def _format_content_output(self, matches: List[tuple], pattern: str, total: int) -> str:
+        """格式化内容输出"""
+        lines = []
+        lines.append(f"🔍 搜索 \"{pattern}\" 找到 {total} 处匹配")
+        lines.append("")
+
+        # 按文件分组
+        current_file = None
+        for file_path, line_num, line_content in matches:
+            if file_path != current_file:
+                if current_file is not None:
+                    lines.append("")  # 文件间空行
+                lines.append(f"📄 [cyan]{file_path}[/]")
+                current_file = file_path
+
+            # 截断长行
+            if len(line_content) > self.PREVIEW_WIDTH:
+                line_content = line_content[:self.PREVIEW_WIDTH - 3] + "..."
+
+            # 高亮匹配部分（简单实现：显示行号和内容）
+            lines.append(f"   [dim]{line_num:5d}[/]  {line_content}")
+
+        if total > self.MAX_MATCHES:
+            lines.append("")
+            lines.append(f"[dim]... 共 {total} 处匹配，仅显示前 {self.MAX_MATCHES} 处[/]")
+
+        return '\n'.join(lines)
+
     def is_read_only(self) -> bool:
         """只读操作"""
         return True
+
+    def validate_parameters(self, parameters: Dict[str, Any]) -> Optional[str]:
+        """验证参数"""
+        pattern = parameters.get("pattern")
+        if not pattern:
+            return "缺少 pattern 参数"
+
+        # 验证正则表达式是否合法
+        try:
+            re.compile(pattern, re.DOTALL)
+        except re.error as e:
+            return f"无效的正则表达式: {str(e)}"
+
+        return None

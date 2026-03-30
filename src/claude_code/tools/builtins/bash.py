@@ -1,13 +1,16 @@
-"""Bash 工具 - 执行 shell 命令"""
+"""Bash 工具 - 执行 shell 命令（支持流式输出）"""
 import os
 import re
 import subprocess
 import shlex
 import locale
-from typing import Any, Dict, List, Optional, Tuple
+import threading
+import queue
+from typing import Any, Dict, List, Optional, Tuple, Generator
 from pathlib import Path
 
 from ..base import Tool, ToolResult
+from claude_code.ui.progress_display import BashStreamingDisplay
 
 
 class BashTool(Tool):
@@ -16,7 +19,10 @@ class BashTool(Tool):
     name = "Bash"
     description = (
         "执行 shell 命令。"
-        "Windows 系统优先使用 PowerShell 语法（如 Get-Content, Remove-Item, Test-Path 等）。"
+        "当前环境：Windows PowerShell。"
+        "注意：必须使用 PowerShell 语法，不支持 Unix 参数如 -p、-r。"
+        "正确示例：mkdir data, output（逗号分隔）| Get-ChildItem（或简写 ls）| Remove-Item -Recurse -Force | Copy-Item -Recurse"
+        "错误示例：mkdir -p data output | ls -la | rm -rf | cp -r"
         "所有命令都需要用户确认。"
     )
 
@@ -156,6 +162,16 @@ class BashTool(Tool):
                 error=f"危险命令已拦截: {danger_reason}"
             )
 
+        # Windows 环境下检查 Unix 不兼容语法
+        if os.name == 'nt':
+            unix_error = self._check_unix_syntax(command)
+            if unix_error:
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error=unix_error
+                )
+
         # 检查工作目录
         work_dir = Path(cwd).resolve()
         if not work_dir.exists():
@@ -165,61 +181,110 @@ class BashTool(Tool):
             # 判断操作系统
             is_windows = os.name == 'nt'
 
-            # 执行命令
+            # 创建进度显示
+            progress = BashStreamingDisplay(command, timeout)
+            progress.start()
+
+            # 执行命令（流式输出）
             if is_windows:
-                # Windows: 使用 PowerShell，强制 UTF-8 输出
-                # 使用 [Console]::OutputEncoding 设置输出编码
-                ps_command = f"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; {command}"
-                result = subprocess.run(
+                # Windows: 使用 PowerShell
+                win_command = command.replace('&&', ';')
+                ps_command = f"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; {win_command}"
+
+                process = subprocess.Popen(
                     ["powershell", "-NoProfile", "-Command", ps_command],
-                    capture_output=True,
-                    timeout=timeout,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
                     cwd=str(work_dir)
                 )
-                # 合并 stdout 和 stderr
-                output_bytes = result.stdout + result.stderr
-
-                # 尝试多种编码解码
-                output = None
-                for encoding in ['utf-8', 'utf-16-le', 'gbk']:
-                    try:
-                        output = output_bytes.decode(encoding)
-                        break
-                    except (UnicodeDecodeError, UnicodeError):
-                        continue
-
-                if output is None:
-                    output = output_bytes.decode('utf-8', errors='replace')
             else:
                 # Unix: 使用 bash
-                result = subprocess.run(
+                process = subprocess.Popen(
                     command,
                     shell=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
                     cwd=str(work_dir)
                 )
-                output = result.stdout
-                if result.stderr:
-                    if output:
-                        output += "\n[stderr]\n" + result.stderr
-                    else:
-                        output = result.stderr
+
+            # 流式读取输出
+            output_lines = []
+            output_bytes = b""
+
+            try:
+                while True:
+                    # 检查超时
+                    if progress.is_timeout():
+                        process.kill()
+                        progress.stop(False, -1)
+                        return ToolResult(
+                            success=False,
+                            output="",
+                            error=f"命令执行超时（{timeout}秒）"
+                        )
+
+                    # 读取一行
+                    line = process.stdout.readline()
+                    if not line:
+                        # 检查进程是否结束
+                        if process.poll() is not None:
+                            break
+                        continue
+
+                    output_bytes += line
+
+                    # 解码并显示
+                    try:
+                        if is_windows:
+                            # 尝试多种编码
+                            decoded = None
+                            for encoding in ['utf-8', 'utf-16-le', 'gbk']:
+                                try:
+                                    decoded = line.decode(encoding).rstrip('\r\n')
+                                    break
+                                except (UnicodeDecodeError, UnicodeError):
+                                    continue
+                            if decoded is None:
+                                decoded = line.decode('utf-8', errors='replace').rstrip('\r\n')
+                        else:
+                            decoded = line.decode('utf-8', errors='replace').rstrip('\r\n')
+
+                        if decoded:
+                            output_lines.append(decoded)
+                            progress.feed_output(decoded)
+
+                    except Exception:
+                        pass
+
+            except Exception as e:
+                process.kill()
+                progress.stop(False, -1)
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error=f"读取输出失败: {str(e)}"
+                )
+
+            # 等待进程结束
+            return_code = process.wait()
+
+            # 合并输出
+            output = '\n'.join(output_lines)
 
             # 截断输出
             if len(output) > self.MAX_OUTPUT_LENGTH:
                 output = output[:self.MAX_OUTPUT_LENGTH] + f"\n... (输出过长，已截断，共 {len(output)} 字符)"
 
-            # 构建结果
-            success = result.returncode == 0
+            # 停止进度显示
+            success = return_code == 0
+            progress.stop(success, return_code)
 
             return ToolResult(
                 success=success,
                 output=output if output else "(命令执行完成，无输出)",
                 metadata={
                     "command": command,
-                    "return_code": result.returncode,
+                    "return_code": return_code,
                     "cwd": str(work_dir),
                     "timeout": timeout
                 }
@@ -253,6 +318,50 @@ class BashTool(Tool):
                 return True, "此命令可能导致系统损坏或数据丢失"
 
         return False, ""
+
+    def _check_unix_syntax(self, command: str) -> Optional[str]:
+        """
+        检查 Windows PowerShell 不兼容的 Unix 语法
+
+        Args:
+            command: 命令字符串
+
+        Returns:
+            错误提示字符串，如果兼容则返回 None
+        """
+        # Unix 不兼容语法检测规则
+        unix_patterns = [
+            # mkdir -p
+            (r'mkdir\s+-p\s+', "PowerShell 不支持 -p 参数。\n正确语法：mkdir dir1, dir2（多个目录用逗号分隔）"),
+            # ls -la, ls -l, ls -a
+            (r'ls\s+-[la]+\b', "PowerShell 的 ls 不支持 -l/-a/-la 参数。\n正确语法：Get-ChildItem（显示详细信息）或 ls（简单列表）"),
+            # rm -rf, rm -r, rm -f
+            (r'rm\s+-[rf]+\b', "PowerShell 的 rm 不支持 -r/-f 参数。\n正确语法：Remove-Item -Recurse -Force path"),
+            # cp -r
+            (r'cp\s+-r\b', "PowerShell 的 cp 不支持 -r 参数。\n正确语法：Copy-Item -Recurse src dst"),
+            # mv (基本兼容，但提示)
+            # cat -n
+            (r'cat\s+-n\b', "PowerShell 的 cat 不支持 -n 参数。\n正确语法：Get-Content path"),
+            # touch
+            (r'^touch\s+', "PowerShell 没有 touch 命令。\n正确语法：New-Item -Type File -Path name -Force"),
+            # which
+            (r'^which\s+', "PowerShell 没有 which 命令。\n正确语法：Get-Command name"),
+            # find（Unix find）
+            (r'^find\s+', "PowerShell 没有 Unix find 命令。\n正确语法：Get-ChildItem -Recurse -Filter pattern"),
+            # grep（作为命令调用，不是 Select-String）
+            (r'^grep\s+', "PowerShell 没有 grep 命令。\n正确语法：Select-String -Pattern regex -Path file"),
+            # chmod
+            (r'^chmod\s+', "PowerShell 没有 chmod 命令。\n正确语法：icacls 或 Set-Acl"),
+            # chown
+            (r'^chown\s+', "PowerShell 没有 chown 命令。\n正确语法：icacls 或 Set-Acl"),
+        ]
+
+        cmd_lower = command.lower()
+        for pattern, message in unix_patterns:
+            if re.search(pattern, cmd_lower, re.IGNORECASE):
+                return message
+
+        return None
 
     def is_sensitive(self, command: str) -> bool:
         """

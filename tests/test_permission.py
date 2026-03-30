@@ -18,11 +18,14 @@ class TestPermissionLevel:
     def test_permission_values(self):
         """测试权限值"""
         assert PermissionLevel.ONCE.value == "once"
-        assert PermissionLevel.ALWAYS.value == "always"
+        assert PermissionLevel.ALL.value == "all"
+        assert PermissionLevel.NO_ONCE.value == "no_once"
 
     def test_permission_comparison(self):
         """测试权限比较"""
-        assert PermissionLevel.ONCE != PermissionLevel.ALWAYS
+        assert PermissionLevel.ONCE != PermissionLevel.ALL
+        assert PermissionLevel.ONCE != PermissionLevel.NO_ONCE
+        assert PermissionLevel.ALL != PermissionLevel.NO_ONCE
 
 
 class TestPermissionDecision:
@@ -39,10 +42,20 @@ class TestPermissionDecision:
         """测试缓存决定"""
         decision = PermissionDecision(
             allowed=True,
-            level=PermissionLevel.ALWAYS,
+            level=PermissionLevel.ALL,
             cached=True
         )
         assert decision.cached is True
+
+    def test_no_once_decision(self):
+        """测试拒绝决定"""
+        decision = PermissionDecision(
+            allowed=False,
+            level=PermissionLevel.NO_ONCE,
+            cached=False
+        )
+        assert decision.allowed is False
+        assert decision.level == PermissionLevel.NO_ONCE
 
 
 class TestPermissionManager:
@@ -52,10 +65,19 @@ class TestPermissionManager:
         """测试设置和获取权限"""
         manager = PermissionManager()
 
-        manager.set_permission("Read", PermissionLevel.ALWAYS, "test.py")
+        manager.set_permission("Read", PermissionLevel.ONCE, "test.py")
         level = manager.get_cached_permission("Read", "test.py")
 
-        assert level == PermissionLevel.ALWAYS
+        assert level == PermissionLevel.ONCE
+
+    def test_global_allowed_flag(self):
+        """测试全局授权标志"""
+        manager = PermissionManager()
+        assert manager.global_allowed is False
+
+        # 设置全局授权（模拟 Yes (all) 选择）
+        manager.global_allowed = True
+        assert manager.global_allowed is True
 
     def test_get_nonexistent_permission(self):
         """测试获取不存在的权限"""
@@ -67,11 +89,13 @@ class TestPermissionManager:
     def test_clear_session(self):
         """测试清除会话"""
         manager = PermissionManager()
-        manager.set_permission("Read", PermissionLevel.ALWAYS, "test.py")
+        manager.set_permission("Read", PermissionLevel.ONCE, "test.py")
+        manager.global_allowed = True
 
         manager.clear_session()
 
         assert len(manager.session_rules) == 0
+        assert manager.global_allowed is False
 
     def test_rule_key_format(self):
         """测试规则 key 格式"""

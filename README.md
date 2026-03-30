@@ -2,7 +2,7 @@
 
 仿照官方 Claude Code 风格构建的 CLI AI 编程助手，支持 AI 驱动的文件操作和命令执行。
 
-**版本**：v2.6.1
+**版本**：v2.7.7
 
 ---
 
@@ -15,6 +15,9 @@
 - **流式输出** - SSE 流式响应，实时显示生成进度
 - **Token 优化** - 文件缓存系统，减少重复传输
 - **权限系统** - 所有敏感操作需用户授权
+- **主动交互** - AI 可向用户询问选择，澄清需求
+- **美化输出** - 工具结果格式化显示，易于阅读
+- **执行进度** - 工具执行时显示进度和状态
 
 ---
 
@@ -90,14 +93,15 @@ python -m claude_code
 
 | 工具 | 说明 |
 |------|------|
-| **Read** | 读取文件内容（支持缓存，limit=1000） |
-| **Write** | 创建或覆盖文件 |
-| **Edit** | 精确替换文件内容 |
-| **Glob** | 按文件名模式搜索 |
-| **Grep** | 按内容正则搜索 |
-| **Bash** | 执行 Shell 命令 |
+| **Read** | 读取文件内容（支持缓存，≤1500 行完整显示） |
+| **Write** | 创建或覆盖文件（含语法检查） |
+| **Edit** | 精确替换文件内容（含 diff 显示） |
+| **Glob** | 按文件名模式搜索（美化输出） |
+| **Grep** | 按内容正则搜索（美化输出） |
+| **Bash** | 执行 Shell 命令（流式输出） |
+| **AskUserQuestion** | 向用户询问问题，获取选择或输入 |
 
-所有工具操作都需要用户授权，支持 once/always 两种权限模式。
+所有工具操作都需要用户授权，支持 once/all 两种权限模式。
 
 ---
 
@@ -130,7 +134,8 @@ claude-code/
 │   │   ├── theme.py            # 主题配置
 │   │   ├── components.py       # UI 组件
 │   │   ├── input.py            # 输入处理
-│   │   └── renderer.py         # 响应渲染
+│   │   ├── renderer.py         # 响应渲染
+│   │   └── progress_display.py # 进度显示
 │   │
 │   ├── commands/               # 命令系统
 │   │   ├── base.py             # 命令基类
@@ -139,12 +144,19 @@ claude-code/
 │   │
 │   ├── tools/                  # 工具系统
 │   │   ├── base.py             # 工具基类
-│   │   ├── parser.py           # XML 解析
 │   │   ├── executor.py         # 工具执行
 │   │   ├── permission.py       # 权限管理
-│   │   ├── tool_calling.py     # 多模型兼容
+│   │   ├── permission_ui.py    # 权限确认 UI
+│   │   ├── tool_calling.py     # Native Tool Calling
 │   │   ├── file_cache.py       # 文件缓存
 │   │   └── builtins/           # 内置工具
+│   │       ├── read.py         # Read 工具
+│   │       ├── write.py        # Write 工具
+│   │       ├── edit.py         # Edit 工具
+│   │       ├── glob.py         # Glob 工具
+│   │       ├── grep.py         # Grep 工具
+│   │       ├── bash.py         # Bash 工具
+│   │       └── ask_user.py     # AskUserQuestion 工具
 │   │
 │   └── utils/                  # 工具函数
 │       ├── tokens.py           # Token 估算
@@ -153,9 +165,9 @@ claude-code/
 ├── tests/                      # 测试文件
 │   ├── test_conversation.py    # 会话测试
 │   ├── test_file_cache.py      # 缓存测试
-│   ├── test_parser.py          # 解析器测试
 │   ├── test_tools.py           # 工具测试
-│   └── test_permission.py      # 权限测试
+│   ├── test_permission.py      # 权限测试
+│   └── test_connection_recovery.py  # 连接恢复测试
 │
 └── data/
     ├── config/                 # 配置文件
@@ -172,10 +184,10 @@ claude-code/
 ### 运行测试
 
 ```powershell
-python -m pytest tests/ -v
+python -m pytest tests/ -v --ignore=tests/test_api_stability.py
 ```
 
-当前测试覆盖：111 个测试用例
+当前测试覆盖：104+ 个测试用例
 
 ### 打包 EXE
 
@@ -195,18 +207,28 @@ python -m pytest tests/ -v
 
 ## 更新日志
 
-### v2.6.1 (2026-03-27)
-- 代码质量重构：方法拆分、文档补充
-- 异常兜底优化：`httpx.HTTPError` 统一捕获
-- 测试覆盖提升：从 48 个增加到 111 个
-- 提示词优化：移除 XML 相关残留文字
+### v2.7.7 (2026-03-30)
+- **AskUserQuestion 工具**：AI 可主动询问用户，获取选择或输入
+- **输出格式增强**：Read/Grep/Glob 美化输出，图标+颜色+结构
+- **工具执行进度**：Bash 流式输出 + Read 大文件进度条
+- **权限系统优化**：Yes (once/all)、No (once) 三级权限
 
-### v2.6.0
+### v2.7.6 (2026-03-30)
+- PowerShell 兼容性：检测 Unix 语法并返回错误提示
+- 环境信息注入 system prompt
+- 执行轮次从 3 提升到 5
+
+### v2.7.0 (2026-03-28)
+- 统一使用 Native Tool Calling（OpenAI 格式）
+- 文件缓存系统优化
+- Edit diff 显示
+
+### v2.6.0 (2026-03-27)
 - 文件缓存系统：Token 节省 60-75%
-- Read limit 提升：从 500 到 1000 行
+- Read limit 提升：从 500 到 1500 行
 
 ### v2.5.0
-- 多模型工具调用兼容：native/xml/kimi 三种格式
+- 多模型工具调用兼容
 
 ---
 

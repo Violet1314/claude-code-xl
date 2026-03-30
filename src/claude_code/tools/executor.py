@@ -134,6 +134,16 @@ class ToolExecutor:
                 error=f"未知工具: {tool_call.name}"
             )
 
+        # 验证参数
+        validation_error = tool.validate_parameters(tool_call.parameters)
+        if validation_error:
+            return ExecutionResult(
+                tool_call=tool_call,
+                success=False,
+                output="",
+                error=f"参数错误: {validation_error}"
+            )
+
         # 请求权限
         decision = self.permission_manager.request_permission(tool_call, tool)
 
@@ -221,6 +231,11 @@ class ToolExecutor:
 
             result = self.execute_single(tool_call, on_progress)
             report.add(result)
+
+            # 用户取消时中断后续执行
+            if result.skipped and not result.permission_denied:
+                # 用户按 Esc 取消，停止执行剩余工具
+                break
 
         return report
 

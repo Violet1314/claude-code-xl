@@ -27,13 +27,6 @@
       "tool_mode": "native"
     },
     {
-      "id": "gemini-3-pro-preview",
-      "name": "Gemini 3 Pro | 官转 x3",
-      "price": "Input: 6$/1M Output: 36$/1M",
-      "context_limit": 2000000,
-      "tool_mode": "native"
-    },
-    {
       "id": "gemini-3-flash-preview",
       "name": "Gemini 3 Flash | 官转 x3",
       "price": "Input: 1.5$/1M Output: 9$/1M",
@@ -48,25 +41,11 @@
       "tool_mode": "native"
     },
     {
-      "id": "gpt-5.3-codex-high",
-      "name": "GPT 5.3 Codex High | Codex专属 x0.8",
-      "price": "Input: 1.4$/1M Output: 11.2$/1M",
-      "context_limit": 128000,
-      "tool_mode": "native"
-    },
-    {
       "id": "grok-4.1-fast",
       "name": "Grok 4.1 Fast | default x1",
       "price": "Input: 0.4$/1M Output: 3$/1M",
       "context_limit": 1000000,
       "tool_mode": "native"
-    },
-    {
-      "id": "kimi-k2.5",
-      "name": "Kimi K2.5 | 企业 x1",
-      "price": "Input: 4$/1M Output: 21$/1M",
-      "context_limit": 128000,
-      "tool_mode": "kimi"
     },
     {
       "id": "qwen3.5-plus",
@@ -83,5 +62,5 @@
       "tool_mode": "native"
     }
   ],
-  "default_model": "gemini-3-flash-preview"
+  "default_model": "qwen3.5-plus"
 }

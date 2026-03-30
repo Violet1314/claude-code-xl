@@ -35,7 +35,6 @@ from claude_code.ui.renderer import render_response
 from claude_code.tools import (
     registry,
     register_builtin_tools,
-    ToolParser,
     ToolExecutor,
     ToolCall,
     ExecutionReport,
@@ -102,20 +101,54 @@ class Application:
         signal.signal(signal.SIGINT, self._signal_handler)
 
     def _setup_system_prompt(self) -> None:
-        """设置系统提示词（根据模型工具模式）"""
+        """设置系统提示词"""
         base_prompt = self.settings.get_prompt(self.current_style_id)
 
-        # 获取当前模型的工具模式
-        tool_mode = self.current_model.tool_mode if self.current_model else "native"
-
-        # 只有非原生模式才在 prompt 中加入工具说明
-        if tool_mode != "native":
-            tools_prompt = tool_calling_manager.get_tools_prompt()
-            full_prompt = f"{base_prompt}\n\n{tools_prompt}"
-        else:
-            full_prompt = base_prompt
+        # 注入环境信息
+        env_info = self._get_environment_info()
+        full_prompt = f"{base_prompt}\n\n{env_info}"
 
         self.conversation.set_system_prompt(full_prompt)
+
+    def _get_environment_info(self) -> str:
+        """
+        获取当前环境信息（用于注入系统提示词）
+
+        Returns:
+            环境信息文本
+        """
+        import platform
+
+        # 检测操作系统
+        system = platform.system()
+        if system == "Windows":
+            shell_info = (
+                "当前环境：Windows PowerShell。\n"
+                "重要：必须使用 PowerShell 语法，不支持 Unix 参数。\n"
+                "正确示例：\n"
+                "  - mkdir data, output（多个目录用逗号分隔）\n"
+                "  - Get-ChildItem 或 ls（不带 -la 参数）\n"
+                "  - Remove-Item -Recurse -Force path\n"
+                "  - Copy-Item -Recurse src dst\n"
+                "错误示例（不支持）：\n"
+                "  - mkdir -p data output\n"
+                "  - ls -la\n"
+                "  - rm -rf path\n"
+                "  - cp -r src dst"
+            )
+        elif system == "Darwin":
+            shell_info = "当前环境：macOS (Unix-like)。可使用标准 bash 命令。"
+        else:
+            shell_info = "当前环境：Linux (Unix-like)。可使用标准 bash 命令。"
+
+        # 自主完成指令
+        autonomy_info = (
+            "## 执行原则\n"
+            "遇到错误时，根据报错信息自行分析原因并修复，持续尝试直到任务完成。\n"
+            "不要中途放弃或等待用户干预，除非遇到无法解决的问题（如权限不足、路径不存在等）。"
+        )
+
+        return f"## 环境信息\n{shell_info}\n\n{autonomy_info}"
 
     def _update_input_state(self) -> None:
         """更新输入处理器状态"""
@@ -200,12 +233,9 @@ class Application:
             (响应文本, 是否有工具调用)
         """
         model_name = self.current_model.name if self.current_model else "AI"
-        tool_mode = self.current_model.tool_mode if self.current_model else "native"
 
-        # 原生模式需要传入工具定义
-        tools_definition = None
-        if tool_mode == "native":
-            tools_definition = tool_calling_manager.get_tools_definition()
+        # 传入工具定义（Native Tool Calling）
+        tools_definition = tool_calling_manager.get_tools_definition()
 
         try:
             # 收集流式响应
@@ -218,13 +248,17 @@ class Application:
 
             # 处理响应（解析工具、渲染、保存）
             tool_calls = self._process_response(
-                full_response, native_tool_calls, tool_mode, model_name, duration, real_usage
+                full_response, native_tool_calls, model_name, duration, real_usage
             )
 
             # 执行工具调用
             if tool_calls:
                 console.print()  # 空行
                 report = self._execute_tools(tool_calls)
+
+                # 如果所有工具都被跳过（用户取消），停止循环
+                if report.skipped_count == report.total:
+                    return full_response, False
 
                 # 构建反馈消息
                 feedback = self._build_tool_feedback(report)
@@ -246,7 +280,7 @@ class Application:
         model_name: str
     ) -> tuple:
         """
-        收集流式响应
+        收集流式响应（完成后一次性渲染）
 
         Args:
             messages: 消息列表
@@ -260,8 +294,8 @@ class Application:
         full_response = ""
         native_tool_calls = []
         real_usage = {"input": 0, "output": 0}
-        tool_mode = self.current_model.tool_mode if self.current_model else "native"
 
+        # 思考状态：显示进度条
         with Progress(
             SpinnerColumn(spinner_name="dots", style=COLORS['primary']),
             TextColumn(f"[bold {COLORS['primary']}]{model_name}[/] [dim]正在思考...[/]"),
@@ -285,8 +319,7 @@ class Application:
                     progress.update(task, completed=len(full_response))
 
                 # 提取原生工具调用（流式）
-                if tool_mode == "native":
-                    self._accumulate_native_tool_calls(chunk, native_tool_calls)
+                self._accumulate_native_tool_calls(chunk, native_tool_calls)
 
                 # 提取真实 token 使用量（最后一个 chunk 包含 usage）
                 usage = self.client.extract_usage(chunk)
@@ -294,6 +327,9 @@ class Application:
                     real_usage = usage
 
         duration = time.time() - start_time
+        return full_response, native_tool_calls, real_usage, duration
+        console.print(f"  [dim]🕒 耗时: {duration:.2f}s[/]\n")
+
         return full_response, native_tool_calls, real_usage, duration
 
     def _accumulate_native_tool_calls(self, chunk: dict, native_tool_calls: list) -> None:
@@ -325,7 +361,6 @@ class Application:
         self,
         full_response: str,
         native_tool_calls: list,
-        tool_mode: str,
         model_name: str,
         duration: float,
         real_usage: dict
@@ -336,7 +371,6 @@ class Application:
         Args:
             full_response: 完整响应文本
             native_tool_calls: 原生工具调用列表
-            tool_mode: 工具模式
             model_name: 模型名称
             duration: 响应耗时
             real_usage: 真实 token 使用量
@@ -344,19 +378,12 @@ class Application:
         Returns:
             解析后的工具调用列表
         """
-        # 统一解析工具调用
-        tool_calls = tool_calling_manager.parse_tool_calls(
-            response_text=full_response,
-            native_tool_calls=native_tool_calls if tool_mode == "native" else None,
-            mode=tool_mode,
-        )
+        # 解析工具调用
+        tool_calls = tool_calling_manager.parse_tool_calls(native_tool_calls)
 
-        # 移除工具代码块，只显示文本内容
-        clean_response = ToolParser.remove_tool_blocks(full_response)
-
-        # 渲染清理后的响应
-        if clean_response.strip():
-            render_response(clean_response, model_name, duration)
+        # 渲染响应（完成后一次性渲染）
+        if full_response.strip():
+            render_response(full_response, model_name, duration)
 
         # 保存 AI 响应：优先使用真实 token，否则回退到估算
         if real_usage["input"] > 0:

@@ -16,7 +16,7 @@ class PermissionUI:
         operation_desc: str,
         details: str = "",
         is_read_only: bool = False,
-        force_once: bool = False,
+        force_limited: bool = False,
         path_warning: str = ""
     ) -> Optional[str]:
         """
@@ -27,11 +27,11 @@ class PermissionUI:
             operation_desc: 操作描述
             details: 详细信息
             is_read_only: 是否为只读操作
-            force_once: 强制只允许 once（不显示 always 选项）
+            force_limited: 强制只显示三个选项（敏感操作，不含 Yes (all))
             path_warning: 路径范围警告信息
 
         Returns:
-            "once" | "always" | None（取消）
+            "once" | "all" | "no_once" | None（取消）
         """
         # 显示确认对话框
         console.print(f"\n[{COLORS['warning']}]{ICONS['warning']} 权限确认[/]")
@@ -66,12 +66,18 @@ class PermissionUI:
         console.print(f"[dim]↑↓ 选择 | Enter 确认 | Esc/q 取消[/]\n")
 
         # 构建菜单选项
-        if force_once:
+        # 敏感操作强制只显示三个选项（不含 Yes (all))
+        if force_limited:
             options = [
                 {
-                    "name": "Yes (仅本次)",
+                    "name": "Yes (once)",
                     "value": "once",
-                    "desc": "允许本次操作"
+                    "desc": "仅本次允许"
+                },
+                {
+                    "name": "No (once)",
+                    "value": "no_once",
+                    "desc": "仅本次拒绝"
                 },
             ]
         else:
@@ -82,9 +88,14 @@ class PermissionUI:
                     "desc": "仅本次允许"
                 },
                 {
-                    "name": "Yes (always)",
-                    "value": "always",
-                    "desc": "本次会话总是允许"
+                    "name": "Yes (all)",
+                    "value": "all",
+                    "desc": "授予所有工具权限"
+                },
+                {
+                    "name": "No (once)",
+                    "value": "no_once",
+                    "desc": "仅本次拒绝"
                 },
             ]
 
@@ -104,8 +115,8 @@ class PermissionUI:
             icon = ICONS['success']
             color = COLORS['success']
             msg = "✓ 允许执行"
-            if level == PermissionLevel.ALWAYS:
-                msg += "（已记住）"
+            if level == PermissionLevel.ALL:
+                msg += "（全局授权已开启）"
         else:
             icon = ICONS['error']
             color = COLORS['error']
@@ -123,10 +134,14 @@ class PermissionUI:
             level: 权限级别
             operation: 操作描述
         """
-        if level == PermissionLevel.ALWAYS:
+        if level == PermissionLevel.ALL:
             icon = ICONS['success']
             color = COLORS['success']
-            msg = "✓ 使用缓存：总是允许"
+            msg = "✓ 全局授权：自动通过"
+        elif level == PermissionLevel.ONCE:
+            icon = ICONS['success']
+            color = COLORS['success']
+            msg = "✓ 使用缓存：允许"
         else:
             icon = ICONS['warning']
             color = COLORS['warning']
@@ -160,8 +175,8 @@ class PermissionUI:
         """
         if success:
             # 检查输出是否是 Edit 工具的 diff 输出
-            # Edit diff 同时包含 "✓ Updated" 和颜色标记
-            is_edit_diff = "✓ Updated" in output and "[white on" in output
+            # Edit diff 包含 "[bold green]Update" 或 "[white on" 颜色标记
+            is_edit_diff = "[bold green]Update" in output or "[white on" in output
             if is_edit_diff:
                 # Edit diff 输出：使用 Rich markup（安全的，是我们自己生成的）
                 console.print(output)
