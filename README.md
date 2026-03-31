@@ -2,7 +2,7 @@
 
 仿照官方 Claude Code 风格构建的 CLI AI 编程助手，支持 AI 驱动的文件操作和命令执行。
 
-**版本**：v2.7.7
+**版本**：v2.7.9
 
 ---
 
@@ -16,8 +16,9 @@
 - **Token 优化** - 文件缓存系统，减少重复传输
 - **权限系统** - 所有敏感操作需用户授权
 - **主动交互** - AI 可向用户询问选择，澄清需求
-- **美化输出** - 工具结果格式化显示，易于阅读
-- **执行进度** - 工具执行时显示进度和状态
+- **卡片式输出** - 工具结果美化显示，边框+图标+颜色
+- **文件图标** - 根据文件类型显示不同图标（.py 🐍、.js 📜 等）
+- **执行进度** - Bash 流式输出 + Read 进度显示
 
 ---
 
@@ -93,15 +94,50 @@ python -m claude_code
 
 | 工具 | 说明 |
 |------|------|
-| **Read** | 读取文件内容（支持缓存，≤1500 行完整显示） |
+| **Read** | 读取文件内容（卡片式输出，支持缓存） |
 | **Write** | 创建或覆盖文件（含语法检查） |
 | **Edit** | 精确替换文件内容（含 diff 显示） |
-| **Glob** | 按文件名模式搜索（美化输出） |
-| **Grep** | 按内容正则搜索（美化输出） |
+| **Glob** | 按文件名模式搜索（卡片式输出） |
+| **Grep** | 按内容正则搜索（卡片式输出） |
 | **Bash** | 执行 Shell 命令（流式输出） |
 | **AskUserQuestion** | 向用户询问问题，获取选择或输入 |
 
 所有工具操作都需要用户授权，支持 once/all 两种权限模式。
+
+---
+
+## UI 预览
+
+### 欢迎界面
+```
+     ██████╗ ██╗       █████╗  ██╗   ██╗ ██████╗  ███████╗
+    ██╔════╝ ██║      ██╔══██╗ ██║   ██║ ██╔══██╗ ██╔════╝
+    ...
+
+  Claude Code Terminal v2.7.9 │ GPT 5.4
+  ────────────────────────────────────────────────────────
+  "Code is poetry." — WordPress
+
+  /help 查看命令  │  Tab 自动补全  │  Esc+Enter 发送
+```
+
+### 卡片式输出
+```
+╭─ 🐍 defaults.py
+│
+│  44 行  │  1.7 KB  │  ✓ 已缓存
+│  📌 [file:defaults.py:v0]
+│
+│     1  """默认配置"""
+│     2  from dataclasses import dataclass
+│     ...
+╰──────────────────────────────────────────────────
+```
+
+### 状态栏
+```
+◆ GPT 5.4  │ $2/16 $/M │ 📁 3 │ ◆ 1.2K
+```
 
 ---
 
@@ -150,29 +186,13 @@ claude-code/
 │   │   ├── tool_calling.py     # Native Tool Calling
 │   │   ├── file_cache.py       # 文件缓存
 │   │   └── builtins/           # 内置工具
-│   │       ├── read.py         # Read 工具
-│   │       ├── write.py        # Write 工具
-│   │       ├── edit.py         # Edit 工具
-│   │       ├── glob.py         # Glob 工具
-│   │       ├── grep.py         # Grep 工具
-│   │       ├── bash.py         # Bash 工具
-│   │       └── ask_user.py     # AskUserQuestion 工具
 │   │
 │   └── utils/                  # 工具函数
-│       ├── tokens.py           # Token 估算
-│       └── paths.py            # 路径处理
 │
 ├── tests/                      # 测试文件
-│   ├── test_conversation.py    # 会话测试
-│   ├── test_file_cache.py      # 缓存测试
-│   ├── test_tools.py           # 工具测试
-│   ├── test_permission.py      # 权限测试
-│   └── test_connection_recovery.py  # 连接恢复测试
 │
 └── data/
     ├── config/                 # 配置文件
-    │   ├── api-config.json     # API 配置
-    │   └── system-prompts.json # 提示词
     ├── history/                # 会话历史
     └── stats/                  # 统计数据
 ```
@@ -207,11 +227,23 @@ python -m pytest tests/ -v --ignore=tests/test_api_stability.py
 
 ## 更新日志
 
+### v2.7.9 (2026-03-31)
+- **卡片式输出**：Read/Grep/Glob 工具美化，边框 + 图标 + 颜色
+- **文件类型图标**：.py 🐍、.js 📜、.json 📋 等
+- **配色体系**：背景/边框/文字三层层次
+- **欢迎界面**：随机编程名言 + 快捷键提示
+- **状态栏简化**：竖线分隔，清晰可见
+- **边框颜色**：调亮至 `#6A6A6A`，深色终端可见
+
+### v2.7.8 (2026-03-31)
+- **API 超时优化**：连接 30s、读取 180s、重试 5 次
+- **随机 jitter**：避免重试惊群效应
+- **429 限流处理**：读取 Retry-After，智能等待
+
 ### v2.7.7 (2026-03-30)
-- **AskUserQuestion 工具**：AI 可主动询问用户，获取选择或输入
-- **输出格式增强**：Read/Grep/Glob 美化输出，图标+颜色+结构
-- **工具执行进度**：Bash 流式输出 + Read 大文件进度条
-- **权限系统优化**：Yes (once/all)、No (once) 三级权限
+- **AskUserQuestion 工具**：AI 可主动询问用户
+- **输出格式增强**：工具结果美化
+- **工具执行进度**：Bash 流式输出
 
 ### v2.7.6 (2026-03-30)
 - PowerShell 兼容性：检测 Unix 语法并返回错误提示
@@ -222,13 +254,6 @@ python -m pytest tests/ -v --ignore=tests/test_api_stability.py
 - 统一使用 Native Tool Calling（OpenAI 格式）
 - 文件缓存系统优化
 - Edit diff 显示
-
-### v2.6.0 (2026-03-27)
-- 文件缓存系统：Token 节省 60-75%
-- Read limit 提升：从 500 到 1500 行
-
-### v2.5.0
-- 多模型工具调用兼容
 
 ---
 

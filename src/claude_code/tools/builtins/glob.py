@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 from collections import Counter
 
 from ..base import Tool, ToolResult
+from claude_code.ui.theme import COLORS, ICONS
 
 
 class GlobTool(Tool):
@@ -80,8 +81,11 @@ class GlobTool(Tool):
     def _format_output(self, matches: List[Path], base_path: Path, pattern: str, total: int) -> str:
         """格式化输出"""
         lines = []
-        lines.append(f"📁 Glob \"{pattern}\" 找到 {total} 个结果")
-        lines.append("")
+
+        # 卡片头部
+        lines.append(f"[dim {COLORS['border_subtle']}]╭─[/] {ICONS.get('glob', '📁')} [bold]Glob 结果[/]")
+        lines.append(f"[dim {COLORS['border_subtle']}]│[/]")
+        lines.append(f"[dim {COLORS['border_subtle']}]│[/] 模式 [cyan]\"{pattern}\"[/] 找到 [bold]{total}[/] 个结果")
 
         # 统计文件类型
         ext_count = Counter()
@@ -96,42 +100,52 @@ class GlobTool(Tool):
 
         # 显示文件类型统计
         if ext_count or dirs_count:
+            lines.append(f"[dim {COLORS['border_subtle']}]│[/]")
             stats_parts = []
             if dirs_count:
-                stats_parts.append(f"{dirs_count} 个目录")
+                stats_parts.append(f"目录: {dirs_count}")
             if ext_count:
                 top_exts = ext_count.most_common(5)
                 for ext, count in top_exts:
                     stats_parts.append(f"{ext}: {count}")
-            lines.append(f"  [dim]类型: {' | '.join(stats_parts)}[/]")
-            lines.append("")
+            lines.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]类型: {' | '.join(stats_parts)}[/]")
 
         # 按目录分组
+        lines.append(f"[dim {COLORS['border_subtle']}]│[/]")
+
         current_dir = None
-        for match in matches[:30]:  # 限制显示数量
+        display_count = 0
+
+        for match in matches[:25]:  # 限制显示数量
             rel_path = match.relative_to(base_path) if match.is_relative_to(base_path) else match
             parent = str(rel_path.parent) if rel_path.parent != Path('.') else "."
 
             if parent != current_dir:
                 if current_dir is not None:
-                    lines.append("")  # 目录间空行
-                lines.append(f"  📂 {parent}/")
+                    lines.append(f"[dim {COLORS['border_subtle']}]│[/]")  # 目录间分隔
+                lines.append(f"[dim {COLORS['border_subtle']}]│[/] {ICONS.get('folder', '📂')} [dim]{parent}/[/]")
                 current_dir = parent
 
             if match.is_dir():
-                lines.append(f"      📁 {match.name}/")
+                lines.append(f"[dim {COLORS['border_subtle']}]│[/]     {ICONS.get('folder', '📁')} {match.name}/")
             else:
+                # 获取文件图标
+                file_icon = self._get_file_icon(match.suffix.lower())
                 # 显示文件大小
                 try:
                     size = match.stat().st_size
                     size_str = self._format_size(size)
-                    lines.append(f"      📄 {match.name} [dim]({size_str})[/]")
+                    lines.append(f"[dim {COLORS['border_subtle']}]│[/]     {file_icon} {match.name} [dim]({size_str})[/]")
                 except:
-                    lines.append(f"      📄 {match.name}")
+                    lines.append(f"[dim {COLORS['border_subtle']}]│[/]     {file_icon} {match.name}")
 
-        if total > 30:
-            lines.append("")
-            lines.append(f"  [dim]... 还有 {total - 30} 个结果[/]")
+            display_count += 1
+
+        if total > 25:
+            lines.append(f"[dim {COLORS['border_subtle']}]│[/]")
+            lines.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]... 还有 {total - 25} 个结果[/]")
+
+        lines.append(f"[dim {COLORS['border_subtle']}]╰{'─' * 50}[/]")
 
         return '\n'.join(lines)
 
@@ -143,6 +157,25 @@ class GlobTool(Tool):
             return f"{size / 1024:.1f}KB"
         else:
             return f"{size / 1024 / 1024:.1f}MB"
+
+    def _get_file_icon(self, file_ext: str) -> str:
+        """根据文件扩展名获取图标"""
+        icons = {
+            '.py': ICONS.get('file_py', '📄'),
+            '.js': ICONS.get('file_js', '📄'),
+            '.ts': ICONS.get('file_ts', '📄'),
+            '.jsx': ICONS.get('file_js', '📄'),
+            '.tsx': ICONS.get('file_ts', '📄'),
+            '.json': ICONS.get('file_json', '📄'),
+            '.md': ICONS.get('file_md', '📄'),
+            '.txt': ICONS.get('file_txt', '📄'),
+            '.yaml': ICONS.get('file_yaml', '📄'),
+            '.yml': ICONS.get('file_yaml', '📄'),
+            '.html': ICONS.get('file_html', '📄'),
+            '.css': ICONS.get('file_css', '📄'),
+            '.scss': ICONS.get('file_css', '📄'),
+        }
+        return icons.get(file_ext, ICONS.get('file_default', '📄'))
 
     def is_read_only(self) -> bool:
         """只读操作"""

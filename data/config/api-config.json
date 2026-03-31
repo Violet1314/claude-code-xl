@@ -27,13 +27,6 @@
       "tool_mode": "native"
     },
     {
-      "id": "gemini-3-flash-preview",
-      "name": "Gemini 3 Flash | 官转 x3",
-      "price": "Input: 1.5$/1M Output: 9$/1M",
-      "context_limit": 2000000,
-      "tool_mode": "native"
-    },
-    {
       "id": "gpt-5.4",
       "name": "GPT 5.4 | Codex专属 x0.8",
       "price": "Input: 2$/1M Output: 16$/1M",
@@ -62,5 +55,5 @@
       "tool_mode": "native"
     }
   ],
-  "default_model": "qwen3.5-plus"
+  "default_model": "gpt-5.4"
 }

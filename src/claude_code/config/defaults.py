@@ -11,14 +11,14 @@ class FileDefaults:
 
 @dataclass(frozen=True)
 class APIDefaults:
-    """API 请求相关配置"""
+    """API 请求相关配置（针对国内中转 API 优化）"""
     MAX_TOKENS: int = 32768                   # 最大输出 token（适配 Kimi K2.5）
     TEMPERATURE: float = 0.7                  # 默认温度
-    MAX_RETRIES: int = 3                      # 最大重试次数
-    CONNECT_TIMEOUT: float = 10.0             # 连接超时（秒）
-    READ_TIMEOUT: float = 120.0               # 读取超时（秒）
+    MAX_RETRIES: int = 5                      # 最大重试次数（中转服务不稳定）
+    CONNECT_TIMEOUT: float = 30.0             # 连接超时（秒）- 国内→境外链路较长
+    READ_TIMEOUT: float = 180.0               # 读取超时（秒）- 大文件/复杂任务预留
     WRITE_TIMEOUT: float = 30.0               # 写入超时（秒）
-    POOL_TIMEOUT: float = 10.0                # 连接池超时（秒）
+    POOL_TIMEOUT: float = 15.0                # 连接池超时（秒）- 高峰期可能排队
 
 @dataclass(frozen=True)
 class ConversationDefaults:
@@ -39,5 +39,5 @@ CONVERSATION = ConversationDefaults()
 UI = UIDefaults()
 
 # 版本信息
-VERSION = "2.7.7"
+VERSION = "2.7.9"
 APP_NAME = "Claude Code Terminal"

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..base import Tool, ToolResult
+from claude_code.ui.theme import COLORS, ICONS
 
 
 class GrepTool(Tool):
@@ -187,44 +188,79 @@ class GrepTool(Tool):
     def _format_files_output(self, matched_files: List[Path], pattern: str) -> str:
         """格式化文件列表输出"""
         lines = []
-        lines.append(f"🔍 搜索 \"{pattern}\" 找到 {len(matched_files)} 个文件")
-        lines.append("")
 
-        for f in matched_files[:20]:
-            lines.append(f"  📄 {f}")
+        # 卡片头部
+        lines.append(f"[dim {COLORS['border_subtle']}]╭─[/] {ICONS.get('grep', '🔍')} [bold]Grep 结果[/]")
+        lines.append(f"[dim {COLORS['border_subtle']}]│[/]")
+        lines.append(f"[dim {COLORS['border_subtle']}]│[/] 搜索 [cyan]\"{pattern}\"[/] 找到 [bold]{len(matched_files)}[/] 个文件")
 
-        if len(matched_files) > 20:
-            lines.append(f"  ... 还有 {len(matched_files) - 20} 个文件")
+        if matched_files:
+            lines.append(f"[dim {COLORS['border_subtle']}]│[/]")
+            for f in matched_files[:15]:
+                # 获取文件图标
+                file_icon = self._get_file_icon(f.suffix.lower())
+                lines.append(f"[dim {COLORS['border_subtle']}]│[/]   {file_icon} {f}")
+
+            if len(matched_files) > 15:
+                lines.append(f"[dim {COLORS['border_subtle']}]│[/]   [dim]... 还有 {len(matched_files) - 15} 个文件[/]")
+
+        lines.append(f"[dim {COLORS['border_subtle']}]╰{'─' * 50}[/]")
 
         return '\n'.join(lines)
 
     def _format_content_output(self, matches: List[tuple], pattern: str, total: int) -> str:
         """格式化内容输出"""
         lines = []
-        lines.append(f"🔍 搜索 \"{pattern}\" 找到 {total} 处匹配")
-        lines.append("")
+
+        # 卡片头部
+        lines.append(f"[dim {COLORS['border_subtle']}]╭─[/] {ICONS.get('grep', '🔍')} [bold]Grep 结果[/]")
+        lines.append(f"[dim {COLORS['border_subtle']}]│[/]")
+        lines.append(f"[dim {COLORS['border_subtle']}]│[/] 搜索 [cyan]\"{pattern}\"[/] 找到 [bold]{total}[/] 处匹配")
 
         # 按文件分组
         current_file = None
+        file_count = 0
+
         for file_path, line_num, line_content in matches:
             if file_path != current_file:
                 if current_file is not None:
-                    lines.append("")  # 文件间空行
-                lines.append(f"📄 [cyan]{file_path}[/]")
+                    lines.append(f"[dim {COLORS['border_subtle']}]│[/]")  # 文件间分隔
+                # 文件头
+                file_icon = self._get_file_icon(Path(file_path).suffix.lower())
+                lines.append(f"[dim {COLORS['border_subtle']}]│[/]")
+                lines.append(f"[dim {COLORS['border_subtle']}]│[/] {file_icon} [cyan]{file_path}[/]")
                 current_file = file_path
+                file_count += 1
 
             # 截断长行
             if len(line_content) > self.PREVIEW_WIDTH:
                 line_content = line_content[:self.PREVIEW_WIDTH - 3] + "..."
 
-            # 高亮匹配部分（简单实现：显示行号和内容）
-            lines.append(f"   [dim]{line_num:5d}[/]  {line_content}")
+            lines.append(f"[dim {COLORS['border_subtle']}]│[/]   [dim]{line_num:5d}[/]  {line_content}")
 
         if total > self.MAX_MATCHES:
-            lines.append("")
-            lines.append(f"[dim]... 共 {total} 处匹配，仅显示前 {self.MAX_MATCHES} 处[/]")
+            lines.append(f"[dim {COLORS['border_subtle']}]│[/]")
+            lines.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]... 共 {total} 处匹配，仅显示前 {self.MAX_MATCHES} 处[/]")
+
+        lines.append(f"[dim {COLORS['border_subtle']}]╰{'─' * 50}[/]")
 
         return '\n'.join(lines)
+
+    def _get_file_icon(self, file_ext: str) -> str:
+        """根据文件扩展名获取图标"""
+        icons = {
+            '.py': ICONS.get('file_py', '📄'),
+            '.js': ICONS.get('file_js', '📄'),
+            '.ts': ICONS.get('file_ts', '📄'),
+            '.json': ICONS.get('file_json', '📄'),
+            '.md': ICONS.get('file_md', '📄'),
+            '.txt': ICONS.get('file_txt', '📄'),
+            '.yaml': ICONS.get('file_yaml', '📄'),
+            '.yml': ICONS.get('file_yaml', '📄'),
+            '.html': ICONS.get('file_html', '📄'),
+            '.css': ICONS.get('file_css', '📄'),
+        }
+        return icons.get(file_ext, ICONS.get('file_default', '📄'))
 
     def is_read_only(self) -> bool:
         """只读操作"""

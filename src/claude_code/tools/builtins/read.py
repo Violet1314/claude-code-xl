@@ -150,58 +150,65 @@ class ReadTool(Tool):
                 and total_lines >= self.SUMMARY_THRESHOLD
             )
 
-            # 构建输出
+            # 构建输出（美化卡片式）
             output_parts = []
 
-            # 文件头信息（美化）
+            # 获取文件图标
+            file_icon = self._get_file_icon(path.suffix.lower())
+
+            # 卡片头部
             size_kb = file_size / 1024
             cache_status = "✓ 已缓存" if was_cached else "+ 新缓存"
-            output_parts.append(f"📄 [bold]{path.name}[/]  [dim]│[/]  {total_lines} 行  [dim]│[/]  {size_kb:.1f} KB  [dim]│[/]  {cache_status}")
-            output_parts.append(f"📌 引用: [cyan]{reference}[/]")
-            output_parts.append("")
+
+            output_parts.append(f"[dim {COLORS['border_subtle']}]╭─[/] {file_icon} [bold]{path.name}[/]")
+            output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
+            output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]  {total_lines} 行  [dim]│[/]  {size_kb:.1f} KB  [dim]│[/]  {cache_status}")
+            output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]  📌 [cyan]{reference}[/]")
 
             if use_summary:
-                # 摘要模式 - 文件已完整缓存，可以编辑
+                # 摘要模式
                 structure = self._analyze_structure(lines, path.suffix.lower())
                 if structure:
-                    output_parts.append("\n结构概览:")
+                    output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
+                    output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]结构概览:[/]")
                     for item in structure[:15]:
-                        output_parts.append(f"  {item}")
+                        output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]   {item}")
                     if len(structure) > 15:
-                        output_parts.append("  ... (更多结构省略)")
+                        output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]   [dim]... (更多结构省略)[/]")
 
-                output_parts.append(f"\n预览 (前 {self.PREVIEW_LINES} 行):")
+                output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
+                output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]预览 (前 {self.PREVIEW_LINES} 行):[/]")
                 for i, line in enumerate(lines[:self.PREVIEW_LINES], 1):
                     line_content = line.rstrip('\n\r')
                     if len(line_content) > 80:
                         line_content = line_content[:77] + "..."
-                    output_parts.append(f"{i:6d}\t{line_content}")
+                    output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]{i:5d}[/]  {line_content}")
 
                 if total_lines > self.PREVIEW_LINES:
-                    output_parts.append(f"\n       ... (省略 {total_lines - self.PREVIEW_LINES} 行)")
+                    output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]  ... 省略 {total_lines - self.PREVIEW_LINES} 行[/]")
 
-                # 关键提示：文件已完整缓存
-                output_parts.append(f"\n💡 文件已完整缓存，可使用 Edit 工具直接编辑，无需再次 Read")
-                output_parts.append(f"   使用 summary=false 可显示完整内容")
+                # 提示
+                output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
+                output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] 💡 [dim]文件已完整缓存，可使用 Edit 工具直接编辑[/]")
+                output_parts.append(f"[dim {COLORS['border_subtle']}]╰{'─' * 50}[/]")
             else:
                 # 完整/分段模式
                 start_line = max(1, offset)
                 end_line = min(total_lines, start_line + limit - 1)
 
-                output_parts.append(f"\n显示 {start_line}-{end_line} 行:")
+                output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
+                output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]显示 {start_line}-{end_line} 行:[/]")
 
                 for i in range(start_line - 1, end_line):
                     line = lines[i]
-                    if len(line) > 120:
-                        line = line[:117] + "..."
-                    output_parts.append(f"{i+1:6d}\t{line.rstrip(chr(10))}")
+                    if len(line) > 100:
+                        line = line[:97] + "..."
+                    output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]{i+1:5d}[/]  {line.rstrip(chr(10))}")
 
                 if end_line < total_lines:
-                    output_parts.append(f"\n... (还有 {total_lines - end_line} 行)")
+                    output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]  ... 还有 {total_lines - end_line} 行[/]")
 
-            # 缓存提示
-            if not was_cached:
-                output_parts.append(f"\n📊 文件已完整缓存，后续操作使用引用节省 Token")
+                output_parts.append(f"[dim {COLORS['border_subtle']}]╰{'─' * 50}[/]")
 
             output = '\n'.join(output_parts)
 
@@ -407,3 +414,22 @@ class ReadTool(Tool):
     def is_read_only(self) -> bool:
         """只读操作"""
         return True
+
+    def _get_file_icon(self, file_ext: str) -> str:
+        """根据文件扩展名获取图标"""
+        icons = {
+            '.py': ICONS.get('file_py', '📄'),
+            '.js': ICONS.get('file_js', '📄'),
+            '.ts': ICONS.get('file_ts', '📄'),
+            '.jsx': ICONS.get('file_js', '📄'),
+            '.tsx': ICONS.get('file_ts', '📄'),
+            '.json': ICONS.get('file_json', '📄'),
+            '.md': ICONS.get('file_md', '📄'),
+            '.txt': ICONS.get('file_txt', '📄'),
+            '.yaml': ICONS.get('file_yaml', '📄'),
+            '.yml': ICONS.get('file_yaml', '📄'),
+            '.html': ICONS.get('file_html', '📄'),
+            '.css': ICONS.get('file_css', '📄'),
+            '.scss': ICONS.get('file_css', '📄'),
+        }
+        return icons.get(file_ext, ICONS.get('file_default', '📄'))

@@ -1,5 +1,6 @@
 """API 客户端 - 统一的流式请求处理"""
 import json
+import random
 import time
 from typing import Generator, Optional, Dict, List, Any
 
@@ -116,22 +117,35 @@ class APIClient:
                 self._reset_client()
 
                 if attempt < self.max_retries - 1:
-                    wait = 2 ** attempt
-                    console.dim(f"   {wait}s 后重试...")
+                    # 指数退避 + 随机 jitter（避免惊群效应）
+                    wait = 2 ** attempt + random.uniform(0, 1)
+                    console.dim(f"   {wait:.1f}s 后重试...")
                     time.sleep(wait)
 
             except httpx.HTTPStatusError as e:
-                # 4xx 错误不重试
+                # 429 限流：等待更长时间
+                if e.response.status_code == 429:
+                    retry_after = e.response.headers.get("Retry-After")
+                    wait = int(retry_after) if retry_after else 60
+                    console.warning(f"API 限流，等待 {wait}s 后重试...")
+                    self._reset_client()
+
+                    if attempt < self.max_retries - 1:
+                        time.sleep(wait)
+                    continue
+
+                # 其他 4xx 错误不重试
                 if 400 <= e.response.status_code < 500:
                     console.error(f"API 错误 [{e.response.status_code}]: {e.response.text}")
                     return
+
                 # 5xx 错误重试
                 last_error = f"HTTP {e.response.status_code}"
                 console.warning(f"服务器错误: {last_error}")
                 self._reset_client()
 
                 if attempt < self.max_retries - 1:
-                    wait = 2 ** attempt
+                    wait = 2 ** attempt + random.uniform(0, 1)
                     time.sleep(wait)
 
         if last_error:

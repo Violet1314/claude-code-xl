@@ -383,7 +383,7 @@ class Application:
 
         # 渲染响应（完成后一次性渲染）
         if full_response.strip():
-            render_response(full_response, model_name, duration)
+            render_response(full_response, model_name, duration, real_usage)
 
         # 保存 AI 响应：优先使用真实 token，否则回退到估算
         if real_usage["input"] > 0:

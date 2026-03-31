@@ -33,40 +33,59 @@ class PermissionUI:
         Returns:
             "once" | "all" | "no_once" | None（取消）
         """
-        # 显示确认对话框
-        console.print(f"\n[{COLORS['warning']}]{ICONS['warning']} 权限确认[/]")
-        console.print(f"[{COLORS['primary']}]{'─' * 60}[/]")
+        con = console.get_console()
 
-        # 显示工具名称
+        # 顶部标题框
+        console.print(f"  [dim {COLORS['border_subtle']}]╭─[/] [{COLORS['warning']}]{ICONS['warning']}[/] [bold {COLORS['warning']}]权限确认[/]")
+
+        # 工具信息
         type_hint = "[只读]" if is_read_only else "[写入]"
-        console.print(f"\n[bold]工具:[/] ", end="")
-        console.print_raw(tool_name)
-        console.print(f" [dim]{type_hint}[/]")
+        type_color = COLORS['info'] if is_read_only else COLORS['warning']
 
-        # 显示操作描述
-        console.print(f"[bold]操作:[/]")
-        console.print(f"  ", end="")
-        console.print_raw(operation_desc)
+        # 工具图标
+        tool_icon = PermissionUI._get_tool_icon(tool_name)
 
-        # 显示路径范围警告
+        console.print(f"  [dim {COLORS['border_subtle']}]│[/]")
+        console.print(f"  [dim {COLORS['border_subtle']}]│[/] [{COLORS['text_primary']}]{tool_icon} {tool_name}[/] [dim {type_color}]{type_hint}[/]")
+
+        # 操作描述
+        console.print(f"  [dim {COLORS['border_subtle']}]│[/] [dim]操作:[/]")
+        # 截断长操作描述
+        desc_lines = operation_desc.split('\n') if '\n' in operation_desc else [operation_desc]
+        for line in desc_lines[:3]:
+            if len(line) > 60:
+                line = line[:57] + "..."
+            console.print(f"  [dim {COLORS['border_subtle']}]│[/]   {line}")
+
+        # 路径范围警告
         if path_warning:
-            console.print(f"\n[bold {COLORS['warning']}]⚠️ 路径范围警告[/]")
-            for line in path_warning.split('\n'):
-                console.print(f"  ", end="")
-                console.print_raw(line)
+            console.print(f"  [dim {COLORS['border_subtle']}]│[/]")
+            console.print(f"  [dim {COLORS['border_subtle']}]│[/] [{COLORS['warning']}]⚠️ 路径范围警告[/]")
+            for line in path_warning.split('\n')[:2]:
+                console.print(f"  [dim {COLORS['border_subtle']}]│[/]   [dim]{line}[/]")
 
-        # 显示详细信息
+        # 详细信息
         if details:
-            console.print(f"\n[dim]详细信息:[/]")
-            for line in details.split('\n'):
-                console.print(f"  ", end="")
-                console.print_raw(line)
+            console.print(f"  [dim {COLORS['border_subtle']}]│[/]")
+            console.print(f"  [dim {COLORS['border_subtle']}]│[/] [dim]详情:[/]")
+            for line in details.split('\n')[:4]:
+                if len(line) > 60:
+                    line = line[:57] + "..."
+                console.print(f"  [dim {COLORS['border_subtle']}]│[/]   [dim]{line}[/]")
 
-        console.print(f"\n[{COLORS['primary']}]{'─' * 60}[/]")
-        console.print(f"[dim]↑↓ 选择 | Enter 确认 | Esc/q 取消[/]\n")
+        # 敏感操作警告
+        if force_limited:
+            console.print(f"  [dim {COLORS['border_subtle']}]│[/]")
+            console.print(f"  [dim {COLORS['border_subtle']}]│[/] [{COLORS['error']}]⚠️ 敏感操作 - 每次都需要确认[/]")
+
+        # 底部边框
+        console.print(f"  [dim {COLORS['border_subtle']}]│[/]")
+        console.print(f"  [dim {COLORS['border_subtle']}]╰{'─' * 50}[/]")
+
+        # 快捷键提示
+        console.print(f"  [dim]↑↓ 选择 │ Enter 确认 │ Esc/q 取消[/]\n")
 
         # 构建菜单选项
-        # 敏感操作强制只显示三个选项（不含 Yes (all))
         if force_limited:
             options = [
                 {
@@ -99,8 +118,21 @@ class PermissionUI:
                 },
             ]
 
-        # 使用项目中现有的交互式菜单
         return interactive_menu("权限选择", options)
+
+    @staticmethod
+    def _get_tool_icon(tool_name: str) -> str:
+        """获取工具图标"""
+        icons = {
+            "Read": ICONS.get('read', '📄'),
+            "Write": ICONS.get('write', '📝'),
+            "Edit": ICONS.get('edit', '✏️'),
+            "Bash": ICONS.get('bash', '⚡'),
+            "Grep": ICONS.get('grep', '🔍'),
+            "Glob": ICONS.get('glob', '📁'),
+            "AskUserQuestion": ICONS.get('ask', '❓'),
+        }
+        return icons.get(tool_name, ICONS.get('file', '📎'))
 
     @staticmethod
     def show_result(allowed: bool, level: PermissionLevel) -> None:
@@ -122,7 +154,7 @@ class PermissionUI:
             color = COLORS['error']
             msg = "✗ 拒绝执行"
 
-        console.print(f"[{color}]{msg}[/]\n")
+        console.print(f"  [{color}]{msg}[/]\n")
 
     @staticmethod
     def show_cached_decision(tool_name: str, level: PermissionLevel, operation: str) -> None:
@@ -135,19 +167,16 @@ class PermissionUI:
             operation: 操作描述
         """
         if level == PermissionLevel.ALL:
-            icon = ICONS['success']
             color = COLORS['success']
             msg = "✓ 全局授权：自动通过"
         elif level == PermissionLevel.ONCE:
-            icon = ICONS['success']
             color = COLORS['success']
             msg = "✓ 使用缓存：允许"
         else:
-            icon = ICONS['warning']
             color = COLORS['warning']
             msg = "✗ 使用缓存：拒绝"
 
-        console.print(f"[{color}]{msg}[/] ", end="")
+        console.print(f"  [{color}]{msg}[/] ", end="")
         console.print_raw(tool_name)
 
     @staticmethod
@@ -159,7 +188,7 @@ class PermissionUI:
             tool_name: 工具名称
             status: 状态文本
         """
-        console.print(f"[{COLORS['info']}]{ICONS['info']}[/] ", end="")
+        console.print(f"  [{COLORS['info']}]{ICONS['info']}[/] ", end="")
         console.print_raw(tool_name)
         console.print(f": {status}")
 
@@ -174,11 +203,18 @@ class PermissionUI:
             output: 输出内容（可能包含 Rich 标记）
         """
         if success:
-            # 检查输出是否是 Edit 工具的 diff 输出
-            # Edit diff 包含 "[bold green]Update" 或 "[white on" 颜色标记
-            is_edit_diff = "[bold green]Update" in output or "[white on" in output
-            if is_edit_diff:
-                # Edit diff 输出：使用 Rich markup（安全的，是我们自己生成的）
+            # 检查输出是否包含 Rich markup（卡片式输出或 diff 输出）
+            # Read/Grep/Glob 工具使用卡片式输出，Edit 使用 diff 输出
+            is_rich_output = (
+                "[dim" in output or
+                "[bold" in output or
+                "[cyan]" in output or
+                "╭─" in output or
+                "[bold green]Update" in output or
+                "[white on" in output
+            )
+            if is_rich_output:
+                # Rich markup 输出：使用 console.print 渲染
                 console.print(output)
             else:
                 # 普通输出：直接打印，不解析 markup
@@ -186,8 +222,7 @@ class PermissionUI:
         else:
             icon = ICONS['error']
             color = COLORS['error']
-            # 分开打印，避免 output 中的 markup 标签被解析
-            console.print(f"[{color}]{icon} {tool_name} 失败:[/] ", end="")
+            console.print(f"  [{color}]{icon} {tool_name} 失败:[/] ", end="")
             console.print_raw(output)
 
     @staticmethod
@@ -199,7 +234,8 @@ class PermissionUI:
             tool_name: 工具名称
             operation: 操作描述
         """
-        console.print(f"\n[{COLORS['primary']}]{ICONS['claude']} 执行工具:[/] ", end="")
+        tool_icon = PermissionUI._get_tool_icon(tool_name)
+        console.print(f"\n  [{COLORS['primary']}]{tool_icon} 执行工具:[/] ", end="")
         console.print_raw(tool_name)
         console.print(f"  ", end="")
         console.print_raw(operation)

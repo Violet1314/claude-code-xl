@@ -59,7 +59,6 @@ class ToolProgressDisplay:
         if self._progress and self._task_id is not None:
             self._progress.update(self._task_id, advance=advance)
             if description:
-                # 更新描述需要重新设置 columns
                 pass
 
     def set_progress(self, progress: float) -> None:
@@ -88,6 +87,7 @@ class ToolProgressDisplay:
         duration = time.time() - self._start_time
         icon = ICONS['success'] if success else ICONS['error']
         color = COLORS['success'] if success else COLORS['error']
+        tool_icon = self._get_tool_icon(self._tool_name)
 
         if message:
             app_console.print(
@@ -103,15 +103,15 @@ class ToolProgressDisplay:
     def _get_tool_icon(self, tool_name: str) -> str:
         """获取工具对应的图标"""
         icons = {
-            "Read": ICONS.get('file', '📄'),
+            "Read": ICONS.get('read', '📄'),
             "Write": ICONS.get('write', '📝'),
             "Edit": ICONS.get('edit', '✏️'),
-            "Bash": ICONS.get('terminal', '⚡'),
-            "Grep": ICONS.get('search', '🔍'),
-            "Glob": ICONS.get('folder', '📁'),
-            "AskUserQuestion": ICONS.get('question', '❓'),
+            "Bash": ICONS.get('bash', '⚡'),
+            "Grep": ICONS.get('grep', '🔍'),
+            "Glob": ICONS.get('glob', '📁'),
+            "AskUserQuestion": ICONS.get('ask', '❓'),
         }
-        return icons.get(tool_name, ICONS.get('tool', '🔧'))
+        return icons.get(tool_name, ICONS.get('file', '📎'))
 
 
 class BashStreamingDisplay:
@@ -128,14 +128,14 @@ class BashStreamingDisplay:
         """开始显示"""
         self._start_time = time.time()
 
-        # 显示命令头
-        app_console.print(f"\n  [bold {COLORS['primary']}]{ICONS.get('terminal', '⚡')} Bash[/]")
         # 截断长命令
         display_cmd = self.command
         if len(display_cmd) > 60:
             display_cmd = display_cmd[:57] + "..."
-        app_console.print(f"  [dim]$ {display_cmd}[/]")
-        app_console.print(f"  [dim]{'─' * 40}[/]")
+
+        # 美化的头部
+        app_console.print(f"\n  [dim {COLORS['border_subtle']}]╭─[/] [{COLORS['primary']}]{ICONS.get('bash', '⚡')} Bash[/]")
+        app_console.print(f"  [dim {COLORS['border_subtle']}]│[/] [dim]$ {display_cmd}[/]")
 
     def feed_output(self, line: str) -> None:
         """
@@ -177,9 +177,10 @@ class BashStreamingDisplay:
         icon = ICONS['success'] if success else ICONS['error']
         color = COLORS['success'] if success else COLORS['error']
 
-        app_console.print(f"  [dim]{'─' * 40}[/]")
+        # 底部边框
+        app_console.print(f"  [dim {COLORS['border_subtle']}]│[/]")
         app_console.print(
-            f"  [{color}]{icon}[/] [dim]完成[/] "
+            f"  [dim {COLORS['border_subtle']}]╰─[/] [{color}]{icon}[/] "
             f"[dim]return={return_code} | {duration:.1f}s[/]"
         )
 
@@ -195,7 +196,6 @@ class ReadProgressDisplay:
 
     def start(self) -> None:
         """开始显示"""
-        # 显示文件信息头
         from pathlib import Path
         path = Path(self.file_path)
 
@@ -204,8 +204,9 @@ class ReadProgressDisplay:
         if len(display_path) > 40:
             display_path = display_path[:37] + "..."
 
+        # 美化的头部
         app_console.print(
-            f"\n  [bold {COLORS['primary']}]{ICONS.get('file', '📄')} Read[/] "
+            f"\n  [dim {COLORS['border_subtle']}]╭─[/] [{COLORS['primary']}]{ICONS.get('read', '📄')} Read[/] "
             f"[cyan]{display_path}[/]"
         )
 
@@ -237,7 +238,7 @@ class ReadProgressDisplay:
         # 显示完成信息
         size_kb = file_size / 1024
         app_console.print(
-            f"  [{COLORS['success']}]{ICONS['success']}[/] "
+            f"  [dim {COLORS['border_subtle']}]╰─[/] [{COLORS['success']}]{ICONS['success']}[/] "
             f"[dim]{total_lines} 行 | {size_kb:.1f} KB[/]"
         )
 

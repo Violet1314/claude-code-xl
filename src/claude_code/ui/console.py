@@ -6,6 +6,7 @@ from rich.markdown import Markdown
 from rich.syntax import Syntax
 from rich.padding import Padding
 from rich.rule import Rule
+from rich.panel import Panel
 
 from claude_code.ui.theme import COLORS, ICONS
 
@@ -25,29 +26,70 @@ def get_console() -> RichConsole:
     return _console
 
 # ============================================================
-# 状态消息
+# 状态消息（美化版本）
 # ============================================================
 
 def success(msg: str) -> None:
     """显示成功消息"""
-    # 分开打印，避免消息内容被解析为 markup
     _console.print(f"  [{COLORS['success']}]{ICONS['success']}[/] ", end="")
     _console.print(msg, markup=False, highlight=False)
+
+
+def success_box(title: str, content: str = None) -> None:
+    """显示成功消息框"""
+    _console.print(f"  [dim {COLORS['border_subtle']}]╭─[/] [{COLORS['success']}]{ICONS['success']}[/] [bold {COLORS['success']}]{title}[/]")
+    if content:
+        for line in content.split('\n'):
+            _console.print(f"  [dim {COLORS['border_subtle']}]│[/] {line}")
+    _console.print(f"  [dim {COLORS['border_subtle']}]╰{'─' * 50}[/]")
+
 
 def error(msg: str) -> None:
     """显示错误消息"""
     _console.print(f"  [{COLORS['error']}]{ICONS['error']}[/] ", end="")
     _console.print(msg, markup=False, highlight=False)
 
+
+def error_box(title: str, content: str = None, suggestion: str = None) -> None:
+    """显示错误消息框"""
+    _console.print(f"  [dim {COLORS['border_subtle']}]╭─[/] [{COLORS['error']}]{ICONS['error']}[/] [bold {COLORS['error']}]{title}[/]")
+    if content:
+        for line in content.split('\n'):
+            _console.print(f"  [dim {COLORS['border_subtle']}]│[/] {line}")
+    if suggestion:
+        _console.print(f"  [dim {COLORS['border_subtle']}]│[/] [dim]💡 {suggestion}[/]")
+    _console.print(f"  [dim {COLORS['border_subtle']}]╰{'─' * 50}[/]")
+
+
 def warning(msg: str) -> None:
     """显示警告消息"""
     _console.print(f"  [{COLORS['warning']}]{ICONS['warning']}[/] ", end="")
     _console.print(msg, markup=False, highlight=False)
 
+
+def warning_box(title: str, content: str = None) -> None:
+    """显示警告消息框"""
+    _console.print(f"  [dim {COLORS['border_subtle']}]╭─[/] [{COLORS['warning']}]{ICONS['warning']}[/] [bold {COLORS['warning']}]{title}[/]")
+    if content:
+        for line in content.split('\n'):
+            _console.print(f"  [dim {COLORS['border_subtle']}]│[/] {line}")
+    _console.print(f"  [dim {COLORS['border_subtle']}]╰{'─' * 50}[/]")
+
+
 def info(msg: str) -> None:
     """显示信息消息"""
     _console.print(f"  [{COLORS['info']}]ℹ[/] ", end="")
     _console.print(msg, markup=False, highlight=False)
+
+
+def info_box(title: str, content: str = None) -> None:
+    """显示信息消息框"""
+    _console.print(f"  [dim {COLORS['border_subtle']}]╭─[/] [{COLORS['info']}]{ICONS['info']}[/] [bold {COLORS['info']}]{title}[/]")
+    if content:
+        for line in content.split('\n'):
+            _console.print(f"  [dim {COLORS['border_subtle']}]│[/] {line}")
+    _console.print(f"  [dim {COLORS['border_subtle']}]╰{'─' * 50}[/]")
+
 
 def dim(msg: str) -> None:
     """显示暗色消息"""
@@ -68,6 +110,7 @@ def markdown(text: str) -> None:
         _console.print(content)
     except Exception:
         _console.print(text)
+
 
 def code(content: str, language: str = "python") -> None:
     """渲染代码块"""
@@ -92,12 +135,14 @@ def code(content: str, language: str = "python") -> None:
 
 def rule(style: str = None) -> None:
     """显示分割线"""
-    _console.print(Rule(style=style or COLORS['border']))
+    _console.print(Rule(style=style or COLORS['border_default']))
+
 
 def blank(count: int = 1) -> None:
     """显示空行"""
     for _ in range(count):
         _console.print()
+
 
 def clear() -> None:
     """清屏"""
@@ -110,6 +155,7 @@ def clear() -> None:
 def print(msg: str = "", **kwargs) -> None:
     """原始打印（支持 Rich 标记）"""
     _console.print(msg, **kwargs)
+
 
 def print_raw(msg: str) -> None:
     """原始打印（不解析标记）"""
