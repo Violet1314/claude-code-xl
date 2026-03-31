@@ -32,13 +32,30 @@ class ModelConfig:
         """
         if not self.price:
             return ""
-        
+
         import re
         # 匹配数字（包括小数）
         numbers = re.findall(r'(\d+(?:\.\d+)?)\$', self.price)
         if len(numbers) >= 2:
             return f"{numbers[0]}/{numbers[1]}"
         return ""
+
+    def get_prices(self) -> tuple:
+        """
+        解析价格为数值
+        'Input: 5$/1M Output: 25$/1M' -> (5.0, 25.0)
+
+        Returns:
+            (input_price, output_price) 或 (0, 0)
+        """
+        if not self.price:
+            return (0.0, 0.0)
+
+        import re
+        numbers = re.findall(r'(\d+(?:\.\d+)?)\$', self.price)
+        if len(numbers) >= 2:
+            return (float(numbers[0]), float(numbers[1]))
+        return (0.0, 0.0)
     
 @dataclass
 class Settings:

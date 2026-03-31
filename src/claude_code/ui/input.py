@@ -2,6 +2,27 @@
 from typing import List, Optional, Callable
 
 from prompt_toolkit import PromptSession
+
+
+def display_width(s: str) -> int:
+    """计算字符串的终端显示宽度（中文=2，英文=1）"""
+    width = 0
+    for ch in s:
+        # CJK 字符范围：U+4E00-U+9FFF（常用汉字）
+        # 扩展：U+3400-U+4DBF, U+20000-U+2A6DF 等
+        if '\u4e00' <= ch <= '\u9fff':
+            width += 2
+        else:
+            width += 1
+    return width
+
+
+def pad_to_width(s: str, width: int) -> str:
+    """将字符串 pad 到指定显示宽度"""
+    current = display_width(s)
+    if current >= width:
+        return s
+    return s + ' ' * (width - current)
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.layout import Layout
@@ -167,25 +188,28 @@ def interactive_menu(
     """
     if not options:
         return None
-    
+
     selected_idx = 0
     kb = KeyBindings()
-    
+
+    # 计算名称最大显示宽度（考虑中文字符）
+    name_width = max(display_width(opt['name']) for opt in options)
+
     def get_formatted_text():
         result = []
         for i, opt in enumerate(options):
             is_selected = (i == selected_idx)
             style = 'class:menu-selected' if is_selected else 'class:menu-text'
-            
-            # 选中指示器
+
+            # 选中指示器 + 名称（动态宽度左对齐）
             prefix = ' ❯ ' if is_selected else '   '
-            result.append((style, f"{prefix}{opt['name']:<25}"))
-            
+            result.append((style, prefix + pad_to_width(opt['name'], name_width)))
+
             # 描述
             if opt.get('desc'):
                 desc_style = style if is_selected else 'class:menu-dim'
                 result.append((desc_style, f" │ {opt['desc']}"))
-            
+
             result.append(('', '\n'))
         
         return result

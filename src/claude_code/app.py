@@ -388,11 +388,36 @@ class Application:
         # 保存 AI 响应：优先使用真实 token，否则回退到估算
         if real_usage["input"] > 0:
             self.stats.set_real_usage(real_usage["input"], real_usage["output"])
+            # 计算并累加费用
+            cost = self._calculate_cost(real_usage["input"], real_usage["output"])
+            self.stats.add_cost(cost)
         else:
             self.stats.update_output(full_response)
         self.conversation.add_assistant_message(full_response)
 
         return tool_calls
+
+    def _calculate_cost(self, input_tokens: int, output_tokens: int) -> float:
+        """
+        计算本次请求费用
+
+        Args:
+            input_tokens: 输入 token 数
+            output_tokens: 输出 token 数
+
+        Returns:
+            费用（美元）
+        """
+        if not self.current_model:
+            return 0.0
+
+        input_price, output_price = self.current_model.get_prices()
+        if input_price == 0 and output_price == 0:
+            return 0.0
+
+        # 费用 = (input × input_price + output × output_price) / 1,000,000
+        cost = (input_tokens * input_price + output_tokens * output_price) / 1_000_000
+        return cost
 
     def _execute_tools(self, tool_calls: List[ToolCall]) -> ExecutionReport:
         """
@@ -744,6 +769,7 @@ class Application:
                         total_tokens=self.stats.session.total_tokens,
                         file_count=self.files.count,
                         price_short=self.current_model.get_price_short() if self.current_model else "",
+                        total_cost=self.stats.session.cost,
                     )
 
                     console.print(f"[{COLORS['primary']}]{top_border}[/]")

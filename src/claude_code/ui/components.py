@@ -94,6 +94,7 @@ def show_status_bar(
     total_tokens: int,
     file_count: int = 0,
     price_short: str = "",
+    total_cost: float = 0.0,
 ) -> None:
     """
     显示状态栏
@@ -103,6 +104,7 @@ def show_status_bar(
         total_tokens: 总 token 数
         file_count: 挂载文件数
         price_short: 价格简写 (如 "5/25")
+        total_cost: 累计费用（美元）
     """
     con = console.get_console()
 
@@ -139,6 +141,12 @@ def show_status_bar(
     segments.append(f" [dim]{sep}[/] ")
     segments.append(f"[{COLORS['text_muted']}]{ICONS.get('token', '◆')} {token_display}[/]")
 
+    # 段5: 累计费用
+    if total_cost > 0:
+        cost_display = _format_cost(total_cost)
+        segments.append(f" [dim]{sep}[/] ")
+        segments.append(f"[{COLORS['text_muted']}]≈${cost_display}[/]")
+
     # 输出
     console.blank()
     con.print("".join(segments))
@@ -153,6 +161,16 @@ def _format_token_count(count: int) -> str:
         return f"{count / 1_000:.1f}K"
     else:
         return str(count)
+
+
+def _format_cost(cost: float) -> str:
+    """格式化费用显示"""
+    if cost >= 1.0:
+        return f"{cost:.2f}"
+    elif cost >= 0.01:
+        return f"{cost:.3f}"
+    else:
+        return f"{cost:.4f}"
 
 
 # ============================================================

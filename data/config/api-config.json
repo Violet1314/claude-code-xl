@@ -9,14 +9,14 @@
       "id": "claude-sonnet-4-6",
       "name": "Claude Sonnet 4.6 | 官转 x4",
       "price": "Input: 12$/1M Output: 60$/1M",
-      "context_limit": 200000,
+      "context_limit": 1000000,
       "tool_mode": "native"
     },
     {
       "id": "claude-opus-4-6-thinking",
       "name": "Claude Opus 4.6 | 官转 x4",
       "price": "Input: 20$/1M Output: 100$/1M",
-      "context_limit": 200000,
+      "context_limit": 1000000,
       "tool_mode": "native"
     },
     {
@@ -30,21 +30,21 @@
       "id": "gpt-5.4",
       "name": "GPT 5.4 | Codex专属 x0.8",
       "price": "Input: 2$/1M Output: 16$/1M",
-      "context_limit": 128000,
+      "context_limit": 1000000,
       "tool_mode": "native"
     },
     {
-      "id": "grok-4.1-fast",
-      "name": "Grok 4.1 Fast | default x1",
-      "price": "Input: 0.4$/1M Output: 3$/1M",
-      "context_limit": 1000000,
+      "id": "grok-4.2",
+      "name": "Grok 4.2 | default x1",
+      "price": "Input: 3$/1M Output: 15$/1M",
+      "context_limit": 256000,
       "tool_mode": "native"
     },
     {
       "id": "qwen3.5-plus",
       "name": "Qwen 3.5 Plus | 企业 x1",
       "price": "Input: 1.8$/1M Output: 4.8$/1M",
-      "context_limit": 128000,
+      "context_limit": 1000000,
       "tool_mode": "native"
     },
     {

@@ -14,16 +14,18 @@ class SessionStats:
     """会话统计"""
     input_tokens: int = 0
     output_tokens: int = 0
-    
+    cost: float = 0.0  # 累计费用（美元）
+
     @property
     def total_tokens(self) -> int:
         return self.input_tokens + self.output_tokens
-    
+
     def to_dict(self) -> Dict[str, int]:
         return {
             "input": self.input_tokens,
             "output": self.output_tokens,
             "total": self.total_tokens,
+            "cost": self.cost,
         }
 
 class StatsManager:
@@ -81,7 +83,16 @@ class StatsManager:
             self._session.input_tokens = input_tokens
         if output_tokens > 0:
             self._session.output_tokens = output_tokens
-    
+
+    def add_cost(self, cost: float) -> None:
+        """
+        累加费用
+
+        Args:
+            cost: 本次请求费用（美元）
+        """
+        self._session.cost += cost
+
     def reset_session(self) -> None:
         """重置会话统计"""
         self._session = SessionStats()

@@ -35,6 +35,7 @@ def render_response(content: str, model_name: str, duration: float, tokens: dict
 
     # 顶部边框
     con.print(f"\n  [dim {COLORS['border_subtle']}]╭─[/] {header}")
+    con.print("")  # 头部与内容之间空一行
 
     # 内容区域
     if content.strip():
@@ -42,6 +43,7 @@ def render_response(content: str, model_name: str, duration: float, tokens: dict
         console.markdown(content)
 
     # 底部边框
+    con.print("")  # 内容与底部之间空一行
     con.print(f"  [dim {COLORS['border_subtle']}]╰{'─' * 50}[/]")
 
 

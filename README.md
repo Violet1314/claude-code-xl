@@ -2,7 +2,7 @@
 
 仿照官方 Claude Code 风格构建的 CLI AI 编程助手，支持 AI 驱动的文件操作和命令执行。
 
-**版本**：v2.7.9
+**版本**：v2.7.10
 
 ---
 
@@ -19,6 +19,7 @@
 - **卡片式输出** - 工具结果美化显示，边框+图标+颜色
 - **文件图标** - 根据文件类型显示不同图标（.py 🐍、.js 📜 等）
 - **执行进度** - Bash 流式输出 + Read 进度显示
+- **费用统计** - 实时显示会话累计费用，与中转平台一致
 
 ---
 
@@ -114,7 +115,7 @@ python -m claude_code
     ██╔════╝ ██║      ██╔══██╗ ██║   ██║ ██╔══██╗ ██╔════╝
     ...
 
-  Claude Code Terminal v2.7.9 │ GPT 5.4
+  Claude Code Terminal v2.7.10 │ GPT 5.4
   ────────────────────────────────────────────────────────
   "Code is poetry." — WordPress
 
@@ -136,7 +137,7 @@ python -m claude_code
 
 ### 状态栏
 ```
-◆ GPT 5.4  │ $2/16 $/M │ 📁 3 │ ◆ 1.2K
+◆ GPT 5.4  │ $2/16 $/M │ 📁 3 │ ◆ 1.8K │ ≈$0.018
 ```
 
 ---
@@ -163,13 +164,13 @@ claude-code/
 │   │   ├── client.py           # API 客户端
 │   │   ├── conversation.py     # 会话管理
 │   │   ├── files.py            # 文件挂载
-│   │   └── stats.py            # Token 统计
+│   │   └── stats.py            # Token 统计（含费用累计）
 │   │
 │   ├── ui/                     # 界面模块
 │   │   ├── console.py          # Rich 封装
 │   │   ├── theme.py            # 主题配置
-│   │   ├── components.py       # UI 组件
-│   │   ├── input.py            # 输入处理
+│   │   ├── components.py       # UI 组件（状态栏含费用）
+│   │   ├── input.py            # 输入处理（含中文宽度）
 │   │   ├── renderer.py         # 响应渲染
 │   │   └── progress_display.py # 进度显示
 │   │
@@ -204,7 +205,7 @@ claude-code/
 ### 运行测试
 
 ```powershell
-python -m pytest tests/ -v --ignore=tests/test_api_stability.py
+python -m pytest tests/ -q --ignore=tests/test_api_stability.py
 ```
 
 当前测试覆盖：104+ 个测试用例
@@ -226,6 +227,12 @@ python -m pytest tests/ -v --ignore=tests/test_api_stability.py
 ---
 
 ## 更新日志
+
+### v2.7.10 (2026-03-31)
+- **菜单中文对齐**：修复中文字符显示宽度，分隔符正确对齐
+- **响应空行美化**：头部/尾部添加空行，视觉更舒适
+- **累计费用统计**：状态栏显示会话累计费用，与中转平台一致
+- **费用计算公式**：`(input × input_price + output × output_price) / 1M`
 
 ### v2.7.9 (2026-03-31)
 - **卡片式输出**：Read/Grep/Glob 工具美化，边框 + 图标 + 颜色
