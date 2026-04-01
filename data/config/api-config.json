@@ -27,9 +27,16 @@
       "tool_mode": "native"
     },
     {
+      "id": "gemini-3-flash-preview",
+      "name": "Gemini 3 Flash | 官转 x3",
+      "price": "Input: 1.5$/1M Output: 9$/1M",
+      "context_limit": 2000000,
+      "tool_mode": "native"
+    },
+    {
       "id": "gpt-5.4",
-      "name": "GPT 5.4 | Codex专属 x0.8",
-      "price": "Input: 2$/1M Output: 16$/1M",
+      "name": "GPT 5.4 | 纯AZ x1.5",
+      "price": "Input: 3.75$/1M Output: 22.5$/1M",
       "context_limit": 1000000,
       "tool_mode": "native"
     },
@@ -41,16 +48,23 @@
       "tool_mode": "native"
     },
     {
+      "id": "MiniMax-M2.7",
+      "name": "MiniMax M2.7 | 纯AZ x1.5",
+      "price": "Input: 3.15$/1M Output: 12.6$/1M",
+      "context_limit": 128000,
+      "tool_mode": "native"
+    },
+    {
       "id": "qwen3.5-plus",
-      "name": "Qwen 3.5 Plus | 企业 x1",
-      "price": "Input: 1.8$/1M Output: 4.8$/1M",
+      "name": "Qwen 3.5 Plus | 纯AZ x1.5",
+      "price": "Input: 1.2$/1M Output: 7.2$/1M",
       "context_limit": 1000000,
       "tool_mode": "native"
     },
     {
       "id": "deepseek-v3.2",
-      "name": "DeepSeek V3.2 | 企业 x1",
-      "price": "Input: 2$/1M Output: 3$/1M",
+      "name": "DeepSeek V3.2 | 纯AZ x1.5",
+      "price": "Input: 3$/1M Output: 4.5$/1M",
       "context_limit": 128000,
       "tool_mode": "native"
     }
