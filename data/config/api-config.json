@@ -1,6 +1,6 @@
 {
-  "base_url": "https://kg-api.cloud/v1",
-  "api_key": "sk-hDXygmAyi1oxiOn232D05cC0B17344238d463394Ba11Bf85",
+  "base_url": "https://yunwu.ai/v1",
+  "api_key": "sk-hwvRPhrBz0OEMa6u4wSzdAKs2yEYsvHzA3FvFmCeT25HdI8B",
   "task_models": {
     "summary": "deepseek-v3.2"
   },
