@@ -12,13 +12,13 @@ class PermissionUI:
 
     @staticmethod
     def show_permission_menu(
-        tool_name: str,
-        operation_desc: str,
-        details: str = "",
-        is_read_only: bool = False,
-        force_limited: bool = False,
-        path_warning: str = ""
-    ) -> Optional[str]:
+            tool_name: str,
+            operation_desc: str,
+            details: str = "",
+            is_read_only: bool = False,
+            path_warning: str = ""
+        ) -> Optional[str]:
+
         """
         显示权限确认菜单
 
@@ -27,7 +27,6 @@ class PermissionUI:
             operation_desc: 操作描述
             details: 详细信息
             is_read_only: 是否为只读操作
-            force_limited: 强制只显示三个选项（敏感操作，不含 Yes (all))
             path_warning: 路径范围警告信息
 
         Returns:
@@ -73,11 +72,6 @@ class PermissionUI:
                     line = line[:57] + "..."
                 console.print(f"  [dim {COLORS['border_subtle']}]│[/]   [dim]{line}[/]")
 
-        # 敏感操作警告
-        if force_limited:
-            console.print(f"  [dim {COLORS['border_subtle']}]│[/]")
-            console.print(f"  [dim {COLORS['border_subtle']}]│[/] [{COLORS['error']}]⚠️ 敏感操作 - 每次都需要确认[/]")
-
         # 底部边框
         console.print(f"  [dim {COLORS['border_subtle']}]│[/]")
         console.print(f"  [dim {COLORS['border_subtle']}]╰{'─' * 50}[/]")
@@ -85,38 +79,19 @@ class PermissionUI:
         # 快捷键提示
         console.print(f"  [dim]↑↓ 选择 │ Enter 确认 │ Esc/q 取消[/]\n")
 
-        # 构建菜单选项
-        if force_limited:
-            options = [
-                {
-                    "name": "Yes (once)",
-                    "value": "once",
-                    "desc": "仅本次允许"
-                },
-                {
-                    "name": "No (once)",
-                    "value": "no_once",
-                    "desc": "仅本次拒绝"
-                },
-            ]
-        else:
-            options = [
-                {
-                    "name": "Yes (once)",
-                    "value": "once",
-                    "desc": "仅本次允许"
-                },
-                {
-                    "name": "Yes (all)",
-                    "value": "all",
-                    "desc": "授予所有工具权限"
-                },
-                {
-                    "name": "No (once)",
-                    "value": "no_once",
-                    "desc": "仅本次拒绝"
-                },
-            ]
+        # 构建菜单选项（仅 once 级别，无全局授权）
+        options = [
+            {
+                "name": "Yes (once)",
+                "value": "once",
+                "desc": "仅本次允许"
+            },
+            {
+                "name": "No (once)",
+                "value": "no_once",
+                "desc": "仅本次拒绝"
+            },
+        ]
 
         return interactive_menu("权限选择", options)
 
@@ -136,21 +111,10 @@ class PermissionUI:
 
     @staticmethod
     def show_result(allowed: bool, level: PermissionLevel) -> None:
-        """
-        显示权限决定结果
-
-        Args:
-            allowed: 是否允许
-            level: 权限级别
-        """
         if allowed:
-            icon = ICONS['success']
             color = COLORS['success']
             msg = "✓ 允许执行"
-            if level == PermissionLevel.ALL:
-                msg += "（全局授权已开启）"
         else:
-            icon = ICONS['error']
             color = COLORS['error']
             msg = "✗ 拒绝执行"
 
@@ -158,20 +122,9 @@ class PermissionUI:
 
     @staticmethod
     def show_cached_decision(tool_name: str, level: PermissionLevel, operation: str) -> None:
-        """
-        显示缓存的权限决定
-
-        Args:
-            tool_name: 工具名称
-            level: 权限级别
-            operation: 操作描述
-        """
-        if level == PermissionLevel.ALL:
+        if level == PermissionLevel.ONCE:
             color = COLORS['success']
-            msg = "✓ 全局授权：自动通过"
-        elif level == PermissionLevel.ONCE:
-            color = COLORS['success']
-            msg = "✓ 使用缓存：允许"
+            msg = "✓ 已授权：自动通过"
         else:
             color = COLORS['warning']
             msg = "✗ 使用缓存：拒绝"

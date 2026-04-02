@@ -28,9 +28,6 @@ class PermissionManager:
         # 会话级权限规则: {规则key: PermissionLevel}
         self.session_rules: Dict[str, PermissionLevel] = {}
 
-        # 全局授权开关（Yes (all）后为 True）
-        self.global_allowed: bool = False
-
         # 项目目录（用于路径范围检查）
         self.project_dir = Path(project_dir) if project_dir else Path.cwd()
         if not self.project_dir.is_absolute():
@@ -80,7 +77,6 @@ class PermissionManager:
     def clear_session(self) -> None:
         """清除会话所有权限规则"""
         self.session_rules.clear()
-        self.global_allowed = False
 
     def get_rule_summary(self) -> str:
         """
@@ -118,17 +114,8 @@ class PermissionManager:
         # 获取标识符（对于文件操作，使用文件路径）
         identifier = tool_call.parameters.get("file_path", "")
 
-        # 检查是否为敏感操作（敏感操作不使用全局授权）
+        # 检查是否为敏感操作
         is_sensitive = self._is_sensitive_operation(tool_call, tool)
-
-        # 检查全局授权（非敏感操作直接通过）
-        if self.global_allowed and not is_sensitive:
-            PermissionUI.show_cached_decision(tool.name, PermissionLevel.ALL, str(tool_call))
-            return PermissionDecision(
-                allowed=True,
-                level=PermissionLevel.ALL,
-                cached=True
-            )
 
         # 检查路径范围（Bash 工具）
         path_check = self._check_path_scope(tool_call, tool)
@@ -137,7 +124,7 @@ class PermissionManager:
         # 检查缓存权限（敏感操作和项目外操作跳过缓存）
         if not is_sensitive and not is_outside_scope:
             cached_level = self.get_cached_permission(tool.name, identifier)
-            if cached_level and cached_level in [PermissionLevel.ONCE, PermissionLevel.ALL]:
+            if cached_level == PermissionLevel.ONCE:
                 PermissionUI.show_cached_decision(tool.name, cached_level, str(tool_call))
                 return PermissionDecision(
                     allowed=True,
@@ -150,8 +137,6 @@ class PermissionManager:
 
         # 构建路径警告
         path_warning = ""
-        # 敏感操作强制只显示三个选项（不含 Yes (all)）
-        force_limited = is_sensitive
 
         if is_outside_scope:
             outside_paths = path_check.get("outside_paths", [])
@@ -171,7 +156,6 @@ class PermissionManager:
             operation_desc=str(tool_call),
             details=details,
             is_read_only=tool.is_read_only(),
-            force_limited=force_limited,
             path_warning=path_warning
         )
 
@@ -181,16 +165,12 @@ class PermissionManager:
         # 转换为 PermissionLevel
         level = PermissionLevel(choice)
 
-        # 设置全局授权（Yes (all)）
-        if level == PermissionLevel.ALL:
-            self.global_allowed = True
-
         # 记录权限决定（敏感操作不缓存）
         if level == PermissionLevel.ONCE and not is_sensitive and not is_outside_scope:
             self.set_permission(tool.name, level, identifier)
 
         # 显示决定结果
-        allowed = level in [PermissionLevel.ONCE, PermissionLevel.ALL]
+        allowed = level == PermissionLevel.ONCE
         PermissionUI.show_result(allowed, level)
 
         return PermissionDecision(allowed=allowed, level=level, cached=False)

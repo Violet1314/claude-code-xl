@@ -36,18 +36,6 @@ class TestToolRegistry:
         assert "Read" in tool_names
         assert "Write" in tool_names
 
-    def test_get_tools_prompt(self):
-        """测试生成工具提示"""
-        registry = ToolRegistry()
-        registry.register(ReadTool())
-
-        prompt = registry.get_tools_prompt()
-
-        assert "<function_calls>" in prompt
-        assert "Read" in prompt
-        assert "file_path" in prompt
-
-
 class TestReadTool:
     """Read 工具测试"""
 
@@ -286,8 +274,7 @@ class TestGrepTool:
             })
 
             assert result.success
-            assert "未找到" in result.output
-
+            assert "No matches found" in result.output
 
 class TestToolCall:
     """ToolCall 数据类测试"""

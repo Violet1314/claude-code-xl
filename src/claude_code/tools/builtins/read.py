@@ -6,12 +6,11 @@ from typing import Any, Dict, List, Optional
 
 from ..base import Tool, ToolResult
 from ..file_cache import file_cache
-from claude_code.utils.paths import resolve_workplace_path
+from claude_code.utils.paths import resolve_path, get_file_icon
 from claude_code.ui import console
 from claude_code.ui.theme import COLORS, ICONS
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
 from rich.markup import escape
-
 
 class ReadTool(Tool):
     """读取文件工具（带缓存）"""
@@ -26,17 +25,15 @@ class ReadTool(Tool):
 
     # 文件大小限制 (1MB)
     MAX_FILE_SIZE = 1 * 1024 * 1024
-    # 默认读取行数限制（提高到1500，小文件一次读完）
+    # 默认读取行数限制
     DEFAULT_LIMIT = 1500
-    # 摘要模式阈值（行数）- 超过 1500 行才显示摘要
+    # 摘要模式阈值（行数）
     SUMMARY_THRESHOLD = 1500
     # 摘要预览行数
     PREVIEW_LINES = 50
-    # 终端显示阈值 - 超过此行数时，终端只显示首尾
+    # 终端显示阈值
     TERMINAL_DISPLAY_THRESHOLD = 80
-    # 终端显示头部行数
     TERMINAL_HEAD_LINES = 30
-    # 终端显示尾部行数
     TERMINAL_TAIL_LINES = 20
 
     def get_parameters_schema(self) -> Dict[str, Any]:
@@ -71,7 +68,6 @@ class ReadTool(Tool):
         """执行读取操作"""
         file_path = parameters.get("file_path", "")
 
-        # 参数类型转换
         try:
             offset = int(parameters.get("offset", 1))
         except (ValueError, TypeError):
@@ -82,19 +78,16 @@ class ReadTool(Tool):
         except (ValueError, TypeError):
             limit = self.DEFAULT_LIMIT
 
-        # summary 参数（默认 True）
         summary = parameters.get("summary", True)
         if isinstance(summary, str):
             summary = summary.lower() not in ("false", "0", "no")
 
-        # 判断是否指定了具体的读取范围
         has_specific_range = offset > 1 or limit < self.DEFAULT_LIMIT
 
         if not file_path:
             return ToolResult(success=False, output="", error="缺少 file_path 参数")
 
-        # Workplace 隔离：相对路径重定向到 workplace 目录
-        file_path = resolve_workplace_path(file_path)
+        file_path = resolve_path(file_path)
 
         try:
             path = Path(file_path)
@@ -108,16 +101,14 @@ class ReadTool(Tool):
             file_size = path.stat().st_size
             if file_size > self.MAX_FILE_SIZE:
                 return ToolResult(
-                    success=False,
-                    output="",
+                    success=False, output="",
                     error=f"文件过大 ({file_size / 1024:.1f}KB)，超过 1MB 限制"
                 )
 
-            # 显示读取进度（对于大文件 > 50KB）
+            # 大文件显示进度
             show_progress = file_size > 50 * 1024
 
             if show_progress:
-                # 截断文件名显示
                 display_name = path.name
                 if len(display_name) > 35:
                     display_name = display_name[:32] + "..."
@@ -132,17 +123,12 @@ class ReadTool(Tool):
                     transient=True,
                 ) as progress_bar:
                     task = progress_bar.add_task("", total=100)
-
-                    # 读取文件
                     content = self._read_file_with_progress(path, progress_bar, task)
 
-                # 显示完成
                 console.print(
-                    f"  [{COLORS['success']}]{ICONS['success']}[/] "
-                    f"[dim]读取完成[/]"
+                    f"  [{COLORS['success']}]{ICONS['success']}[/] [dim]读取完成[/]"
                 )
             else:
-                # 小文件直接读取
                 content = self._read_file(path)
 
             lines = content.split('\n')
@@ -161,151 +147,28 @@ class ReadTool(Tool):
                 and total_lines >= self.SUMMARY_THRESHOLD
             )
 
-            # 获取文件图标
-            file_icon = self._get_file_icon(path.suffix.lower())
-
-            # 卡片头部
             size_kb = file_size / 1024
-            cache_status = "✓ 已缓存" if was_cached else "+ 新缓存"
-            escaped_reference = escape(reference)
 
             # ========================================
-            # 1. 构建给模型的完整输出（不省略）
+            # 给模型的纯文本输出（无 Rich markup）
             # ========================================
-            output_parts = []
-            output_parts.append(f"[dim {COLORS['border_subtle']}]╭─[/] {file_icon} [bold]{path.name}[/]")
-            output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
-            output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]  {total_lines} 行  [dim]│[/]  {size_kb:.1f} KB  [dim]│[/]  {cache_status}")
-            output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]  📌 [cyan]{escaped_reference}[/]")
-
-            if use_summary:
-                # 摘要模式：给模型也显示结构 + 预览（大文件合理行为）
-                structure = self._analyze_structure(lines, path.suffix.lower())
-                if structure:
-                    output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
-                    output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]结构概览:[/]")
-                    for item in structure[:15]:
-                        output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]   {escape(item)}")
-                    if len(structure) > 15:
-                        output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]   [dim]... (更多结构省略)[/]")
-
-                output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
-                output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]预览 (前 {self.PREVIEW_LINES} 行):[/]")
-                for i, line in enumerate(lines[:self.PREVIEW_LINES], 1):
-                    line_content = line.rstrip('\n\r')
-                    output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]{i:5d}[/]  {escape(line_content)}")
-
-                output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
-                output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] 💡 [dim]大文件已缓存结构，使用 offset/limit 读取具体部分[/]")
-                output_parts.append(f"[dim {COLORS['border_subtle']}]╰{'─' * 50}[/]")
-            else:
-                # 完整模式：给模型返回完整内容
-                start_line = max(1, offset)
-                end_line = min(total_lines, start_line + limit - 1)
-
-                output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
-                output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]显示 {start_line}-{end_line} 行:[/]")
-
-                # 完整内容，不省略
-                for i in range(start_line - 1, end_line):
-                    line = lines[i]
-                    output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]{i+1:5d}[/]  {escape(line.rstrip(chr(10)))}")
-
-                if end_line < total_lines:
-                    output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]  ... 还有 {total_lines - end_line} 行（使用 offset 继续读取）[/]")
-
-                output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
-                output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] 💡 [dim]文件已完整缓存，无需再次读取。直接执行任务即可。[/]")
-                output_parts.append(f"[dim {COLORS['border_subtle']}]╰{'─' * 50}[/]")
-
-            output = '\n'.join(output_parts)
+            output = self._build_model_output(
+                path, lines, total_lines, size_kb, reference,
+                was_cached, use_summary, offset, limit
+            )
 
             # ========================================
-            # 2. 构建给终端的显示输出（可省略）
+            # 给终端的简洁显示（Rich markup）
             # ========================================
-            display_parts = []
-            display_parts.append(f"[dim {COLORS['border_subtle']}]╭─[/] {file_icon} [bold]{path.name}[/]")
-            display_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
-            display_parts.append(f"[dim {COLORS['border_subtle']}]│[/]  {total_lines} 行  [dim]│[/]  {size_kb:.1f} KB  [dim]│[/]  {cache_status}")
-            display_parts.append(f"[dim {COLORS['border_subtle']}]│[/]  📌 [cyan]{escaped_reference}[/]")
-
-            if use_summary:
-                # 摘要模式：终端也显示摘要
-                structure = self._analyze_structure(lines, path.suffix.lower())
-                if structure:
-                    display_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
-                    display_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]结构概览:[/]")
-                    for item in structure[:15]:
-                        display_parts.append(f"[dim {COLORS['border_subtle']}]│[/]   {escape(item)}")
-                    if len(structure) > 15:
-                        display_parts.append(f"[dim {COLORS['border_subtle']}]│[/]   [dim]... (更多结构省略)[/]")
-
-                display_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
-                display_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]预览 (前 {self.PREVIEW_LINES} 行):[/]")
-                for i, line in enumerate(lines[:self.PREVIEW_LINES], 1):
-                    line_content = line.rstrip('\n\r')
-                    if len(line_content) > 80:
-                        line_content = line_content[:77] + "..."
-                    display_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]{i:5d}[/]  {escape(line_content)}")
-
-                if total_lines > self.PREVIEW_LINES:
-                    display_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]  ... 省略 {total_lines - self.PREVIEW_LINES} 行[/]")
-
-                display_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
-                display_parts.append(f"[dim {COLORS['border_subtle']}]│[/] 💡 [dim]大文件已缓存结构，使用 offset/limit 读取具体部分[/]")
-                display_parts.append(f"[dim {COLORS['border_subtle']}]╰{'─' * 50}[/]")
-            else:
-                # 完整模式：终端可以省略显示
-                start_line = max(1, offset)
-                end_line = min(total_lines, start_line + limit - 1)
-                display_lines = end_line - start_line + 1
-
-                display_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
-                display_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]显示 {start_line}-{end_line} 行:[/]")
-
-                # 终端显示优化：超过阈值时省略中间
-                if display_lines > self.TERMINAL_DISPLAY_THRESHOLD:
-                    # 显示头部
-                    head_end = min(start_line + self.TERMINAL_HEAD_LINES - 1, end_line)
-                    for i in range(start_line - 1, head_end):
-                        line = lines[i]
-                        if len(line) > 100:
-                            line = line[:97] + "..."
-                        display_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]{i+1:5d}[/]  {escape(line.rstrip(chr(10)))}")
-
-                    # 省略中间
-                    tail_start = max(head_end + 1, end_line - self.TERMINAL_TAIL_LINES + 1)
-                    omitted = tail_start - head_end - 1
-                    if omitted > 0:
-                        display_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]  ... 省略 {omitted} 行 ...[/]")
-
-                    # 显示尾部
-                    for i in range(tail_start - 1, end_line):
-                        line = lines[i]
-                        if len(line) > 100:
-                            line = line[:97] + "..."
-                        display_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]{i+1:5d}[/]  {escape(line.rstrip(chr(10)))}")
-                else:
-                    # 行数较少，完整显示
-                    for i in range(start_line - 1, end_line):
-                        line = lines[i]
-                        if len(line) > 100:
-                            line = line[:97] + "..."
-                        display_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]{i+1:5d}[/]  {escape(line.rstrip(chr(10)))}")
-
-                if end_line < total_lines:
-                    display_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]  ... 还有 {total_lines - end_line} 行[/]")
-
-                display_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
-                display_parts.append(f"[dim {COLORS['border_subtle']}]│[/] 💡 [dim]文件已完整缓存，无需再次读取。直接执行任务即可。[/]")
-                display_parts.append(f"[dim {COLORS['border_subtle']}]╰{'─' * 50}[/]")
-
-            display_output = '\n'.join(display_parts)
+            display_output = self._build_terminal_display(
+                path, total_lines, size_kb, reference,
+                was_cached, use_summary, offset, limit
+            )
 
             return ToolResult(
                 success=True,
-                output=output,  # 给模型的完整内容
-                display_output=display_output,  # 给终端的省略版本
+                output=output,
+                display_output=display_output,
                 metadata={
                     "file_path": str(path.absolute()),
                     "total_lines": total_lines,
@@ -323,8 +186,89 @@ class ReadTool(Tool):
         except Exception as e:
             return ToolResult(success=False, output="", error=f"读取失败: {str(e)}")
 
+    # ============================================================
+    # 模型输出（纯文本，无 Rich markup）
+    # ============================================================
+
+    def _build_model_output(
+        self, path, lines, total_lines, size_kb,
+        reference, was_cached, use_summary, offset, limit
+    ) -> str:
+        """构建给模型的纯文本输出"""
+        parts = []
+
+        # 文件元信息
+        parts.append(f"File: {path.name} ({total_lines} lines, {size_kb:.1f}KB)")
+        parts.append(f"Path: {path}")
+        parts.append(f"Cache: {reference}")
+        parts.append("")
+
+        if use_summary:
+            # 摘要模式
+            structure = self._analyze_structure(lines, path.suffix.lower())
+            if structure:
+                parts.append("Structure:")
+                for item in structure[:15]:
+                    parts.append(f"  {item}")
+                parts.append("")
+
+            parts.append(f"Preview (first {self.PREVIEW_LINES} lines):")
+            for i, line in enumerate(lines[:self.PREVIEW_LINES], 1):
+                parts.append(f"{i:5d} | {line.rstrip()}")
+
+            if total_lines > self.PREVIEW_LINES:
+                parts.append(f"  ... ({total_lines - self.PREVIEW_LINES} more lines)")
+            parts.append("")
+            parts.append("Use offset/limit to read specific sections.")
+        else:
+            # 完整模式
+            start_line = max(1, offset)
+            end_line = min(total_lines, start_line + limit - 1)
+
+            parts.append(f"Content (lines {start_line}-{end_line}):")
+            for i in range(start_line - 1, end_line):
+                parts.append(f"{i+1:5d} | {lines[i].rstrip()}")
+
+            if end_line < total_lines:
+                parts.append(f"  ... ({total_lines - end_line} more lines, use offset to continue)")
+
+        return '\n'.join(parts)
+
+    # ============================================================
+    # 终端显示（Rich markup，简洁摘要）
+    # ============================================================
+
+    def _build_terminal_display(
+        self, path, total_lines, size_kb, reference,
+        was_cached, use_summary, offset, limit
+    ) -> str:
+        """构建给终端的简洁显示"""
+        file_icon = get_file_icon(path.suffix.lower())
+        cache_status = "✓ cached" if was_cached else "+ new"
+        escaped_ref = escape(reference)
+
+        parts = []
+        parts.append(f"[dim {COLORS['border_subtle']}]╭─[/] {file_icon} [bold]{escape(path.name)}[/]")
+        parts.append(f"[dim {COLORS['border_subtle']}]│[/]  {total_lines} 行  [dim]│[/]  {size_kb:.1f} KB  [dim]│[/]  {cache_status}")
+        parts.append(f"[dim {COLORS['border_subtle']}]│[/]  📌 [cyan]{escaped_ref}[/]")
+
+        if use_summary:
+            parts.append(f"[dim {COLORS['border_subtle']}]│[/]  [dim]摘要模式 · 前 {self.PREVIEW_LINES} 行预览 + 结构概览[/]")
+        else:
+            start_line = max(1, offset)
+            end_line = min(total_lines, start_line + limit - 1)
+            parts.append(f"[dim {COLORS['border_subtle']}]│[/]  [dim]完整内容 · 行 {start_line}-{end_line}[/]")
+
+        parts.append(f"[dim {COLORS['border_subtle']}]╰{'─' * 40}[/]")
+
+        return '\n'.join(parts)
+
+    # ============================================================
+    # 文件读取
+    # ============================================================
+
     def _read_file(self, path: Path) -> str:
-        """读取文件内容（简单模式）"""
+        """读取文件内容"""
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 return f.read()
@@ -334,12 +278,10 @@ class ReadTool(Tool):
 
     def _read_file_with_progress(self, path: Path, progress_bar, task) -> str:
         """读取文件内容（带进度显示）"""
-        import time
-
         content_chunks = []
         file_size = path.stat().st_size
         read_bytes = 0
-        chunk_size = 8192  # 8KB chunks
+        chunk_size = 8192
 
         try:
             with open(path, 'r', encoding='utf-8') as f:
@@ -347,45 +289,29 @@ class ReadTool(Tool):
                     chunk = f.read(chunk_size)
                     if not chunk:
                         break
-
                     content_chunks.append(chunk)
                     read_bytes += len(chunk.encode('utf-8'))
-
-                    # 更新进度
                     progress = min(100, int(read_bytes / file_size * 100))
                     progress_bar.update(task, completed=progress)
 
             return ''.join(content_chunks)
 
         except UnicodeDecodeError:
-            # 重试 GBK 编码
             with open(path, 'r', encoding='gbk') as f:
                 return f.read()
 
+    # ============================================================
+    # 结构分析
+    # ============================================================
+
     def _analyze_structure(self, lines: List[str], file_ext: str) -> List[str]:
-        """
-        分析文件结构
-
-        Args:
-            lines: 文件行列表
-            file_ext: 文件扩展名
-
-        Returns:
-            结构描述列表
-        """
-        structure = []
-
-        # Python 文件
+        """分析文件结构"""
         if file_ext == '.py':
-            structure = self._analyze_python(lines)
-        # JavaScript/TypeScript
+            return self._analyze_python(lines)
         elif file_ext in ('.js', '.ts', '.jsx', '.tsx'):
-            structure = self._analyze_javascript(lines)
-        # 通用：识别缩进块
+            return self._analyze_javascript(lines)
         else:
-            structure = self._analyze_generic(lines)
-
-        return structure
+            return self._analyze_generic(lines)
 
     def _analyze_python(self, lines: List[str]) -> List[str]:
         """分析 Python 文件结构"""
@@ -395,11 +321,9 @@ class ReadTool(Tool):
         for i, line in enumerate(lines, start=1):
             stripped = line.strip()
 
-            # 跳过空行和注释
             if not stripped or stripped.startswith('#'):
                 continue
 
-            # class 定义
             if stripped.startswith('class ') and ':' in stripped:
                 match = re.match(r'class\s+(\w+)', stripped)
                 if match:
@@ -407,12 +331,10 @@ class ReadTool(Tool):
                     structure.append(f"L{i:4d}  class {class_name}")
                     current_class = class_name
 
-            # def 定义（顶级方法或类方法）
             elif stripped.startswith('def ') and ':' in stripped:
                 match = re.match(r'def\s+(\w+)', stripped)
                 if match:
                     func_name = match.group(1)
-                    # 判断缩进级别
                     indent = len(line) - len(line.lstrip())
                     if indent == 0:
                         structure.append(f"L{i:4d}  def {func_name}()")
@@ -420,10 +342,9 @@ class ReadTool(Tool):
                     elif current_class and indent == 4:
                         structure.append(f"L{i:4d}    def {func_name}()  # in {current_class}")
 
-        # 限制输出数量
         if len(structure) > 20:
             structure = structure[:20]
-            structure.append("  ... (更多结构省略)")
+            structure.append("  ... (more)")
 
         return structure
 
@@ -437,19 +358,16 @@ class ReadTool(Tool):
             if not stripped or stripped.startswith('//'):
                 continue
 
-            # function 定义
             if re.match(r'(export\s+)?(async\s+)?function\s+\w+', stripped):
                 match = re.search(r'function\s+(\w+)', stripped)
                 if match:
                     structure.append(f"L{i:4d}  function {match.group(1)}()")
 
-            # const/let function = () =>
             elif re.match(r'(export\s+)?(const|let)\s+\w+\s*=\s*(async\s*)?\([^)]*\)\s*=>', stripped):
                 match = re.match(r'(export\s+)?(const|let)\s+(\w+)', stripped)
                 if match:
                     structure.append(f"L{i:4d}  const {match.group(3)}()")
 
-            # class 定义
             elif stripped.startswith('class ') and '{' in stripped:
                 match = re.match(r'class\s+(\w+)', stripped)
                 if match:
@@ -457,34 +375,40 @@ class ReadTool(Tool):
 
         if len(structure) > 20:
             structure = structure[:20]
-            structure.append("  ... (更多结构省略)")
+            structure.append("  ... (more)")
 
         return structure
 
     def _analyze_generic(self, lines: List[str]) -> List[str]:
-        """通用结构分析（基于缩进）"""
+        """通用结构分析"""
         structure = []
-        prev_indent = -1
+        prev_empty = True  # 上一行是否为空行
 
         for i, line in enumerate(lines, start=1):
-            if not line.strip():
+            stripped = line.strip()
+
+            if not stripped:
+                prev_empty = True
                 continue
 
             indent = len(line) - len(line.lstrip())
 
-            # 检测缩进变化（新块开始）
-            if indent > prev_indent and indent == 0:
-                content = line.strip()[:60]
-                if content:
-                    structure.append(f"L{i:4d}  {content}")
+            # 采集条件：顶层行（缩进为0）且前面有空行分隔（段落开头）
+            if indent == 0 and prev_empty:
+                content = stripped[:60]
+                structure.append(f"L{i:4d}  {content}")
 
-            prev_indent = indent
+            prev_empty = False
 
         if len(structure) > 15:
             structure = structure[:15]
-            structure.append("  ... (更多结构省略)")
+            structure.append("  ... (more)")
 
         return structure
+
+    # ============================================================
+    # 工具属性
+    # ============================================================
 
     def validate_parameters(self, parameters: Dict[str, Any]) -> Optional[str]:
         """验证参数"""
@@ -505,22 +429,3 @@ class ReadTool(Tool):
     def is_read_only(self) -> bool:
         """只读操作"""
         return True
-
-    def _get_file_icon(self, file_ext: str) -> str:
-        """根据文件扩展名获取图标"""
-        icons = {
-            '.py': ICONS.get('file_py', '📄'),
-            '.js': ICONS.get('file_js', '📄'),
-            '.ts': ICONS.get('file_ts', '📄'),
-            '.jsx': ICONS.get('file_js', '📄'),
-            '.tsx': ICONS.get('file_ts', '📄'),
-            '.json': ICONS.get('file_json', '📄'),
-            '.md': ICONS.get('file_md', '📄'),
-            '.txt': ICONS.get('file_txt', '📄'),
-            '.yaml': ICONS.get('file_yaml', '📄'),
-            '.yml': ICONS.get('file_yaml', '📄'),
-            '.html': ICONS.get('file_html', '📄'),
-            '.css': ICONS.get('file_css', '📄'),
-            '.scss': ICONS.get('file_css', '📄'),
-        }
-        return icons.get(file_ext, ICONS.get('file_default', '📄'))

@@ -169,3 +169,24 @@ def get_relative_display(path: str, base: str = None) -> str:
     except ValueError:
         # Windows 跨盘符时无法计算相对路径
         return path
+    
+def get_file_icon(file_ext: str) -> str:
+    """根据文件扩展名获取图标"""
+    from claude_code.ui.theme import ICONS
+
+    icons = {
+        '.py': ICONS.get('file_py', '📄'),
+        '.js': ICONS.get('file_js', '📄'),
+        '.ts': ICONS.get('file_ts', '📄'),
+        '.jsx': ICONS.get('file_js', '📄'),
+        '.tsx': ICONS.get('file_ts', '📄'),
+        '.json': ICONS.get('file_json', '📄'),
+        '.md': ICONS.get('file_md', '📄'),
+        '.txt': ICONS.get('file_txt', '📄'),
+        '.yaml': ICONS.get('file_yaml', '📄'),
+        '.yml': ICONS.get('file_yaml', '📄'),
+        '.html': ICONS.get('file_html', '📄'),
+        '.css': ICONS.get('file_css', '📄'),
+        '.scss': ICONS.get('file_css', '📄'),
+    }
+    return icons.get(file_ext, ICONS.get('file_default', '📄'))
