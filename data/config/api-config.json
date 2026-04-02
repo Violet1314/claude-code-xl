@@ -1,45 +1,66 @@
 {
-  "base_url": "https://new-api.aiplan.mthreads.com/v1",
-  "api_key": "sk-mtcode-Cm1aUWR8u-shKYIEcH6h6xDDzzKsLJS4Cj-pHAbnGxI",
+  "base_url": "https://yunwu.ai/v1",
+  "api_key": "sk-hwvRPhrBz0OEMa6u4wSzdAKs2yEYsvHzA3FvFmCeT25HdI8B",
   "task_models": {
     "summary": "deepseek-v3.2"
   },
   "models": [
     {
-      "id": "glm-5",
-      "name": "GLM 5",
-      "price": "Input: 6$/1M Output: 27$/1M",
-      "context_limit": 128000,
+      "id": "claude-sonnet-4-6",
+      "name": "Claude Sonnet 4.6 | 官转 x4",
+      "price": "Input: 12$/1M Output: 60$/1M",
+      "context_limit": 1000000,
       "tool_mode": "native"
     },
     {
-      "id": "kimi-k2.5",
-      "name": "Kimi 2.5",
-      "price": "Input: 6$/1M Output: 31.5$/1M",
-      "context_limit": 128000,
+      "id": "claude-opus-4-6-thinking",
+      "name": "Claude Opus 4.6 | 官转 x4",
+      "price": "Input: 20$/1M Output: 100$/1M",
+      "context_limit": 1000000,
+      "tool_mode": "native"
+    },
+    {
+      "id": "gemini-3.1-pro-preview",
+      "name": "Gemini 3.1 Pro | 官转 x3",
+      "price": "Input: 6$/1M Output: 36$/1M",
+      "context_limit": 2000000,
+      "tool_mode": "native"
+    },
+    {
+      "id": "gpt-5.4",
+      "name": "GPT 5.4 | 官转 x3",
+      "price": "Input: 7.5$/1M Output: 45$/1M",
+      "context_limit": 1000000,
+      "tool_mode": "native"
+    },
+    {
+      "id": "grok-4.2",
+      "name": "Grok 4.2 | default x1",
+      "price": "Input: 3$/1M Output: 15$/1M",
+      "context_limit": 256000,
       "tool_mode": "native"
     },
     {
       "id": "MiniMax-M2.7",
-      "name": "MiniMax 2.7",
+      "name": "MiniMax M2.7 | 纯AZ x1.5",
       "price": "Input: 3.15$/1M Output: 12.6$/1M",
       "context_limit": 128000,
       "tool_mode": "native"
     },
     {
       "id": "qwen3.5-plus",
-      "name": "Qwen 3.5 Plus",
+      "name": "Qwen 3.5 Plus | 纯AZ x1.5",
       "price": "Input: 1.2$/1M Output: 7.2$/1M",
       "context_limit": 1000000,
       "tool_mode": "native"
     },
     {
       "id": "deepseek-v3.2",
-      "name": "DeepSeek V3.2",
+      "name": "DeepSeek V3.2 | 纯AZ x1.5",
       "price": "Input: 3$/1M Output: 4.5$/1M",
       "context_limit": 128000,
       "tool_mode": "native"
     }
   ],
-  "default_model": "glm-5"
+  "default_model": "gpt-5.4"
 }
