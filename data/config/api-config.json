@@ -35,8 +35,8 @@
     },
     {
       "id": "gpt-5.4",
-      "name": "GPT 5.4 | 纯AZ x1.5",
-      "price": "Input: 3.75$/1M Output: 22.5$/1M",
+      "name": "GPT 5.4 | 官转 x3",
+      "price": "Input: 7.5$/1M Output: 45$/1M",
       "context_limit": 1000000,
       "tool_mode": "native"
     },
@@ -69,5 +69,5 @@
       "tool_mode": "native"
     }
   ],
-  "default_model": "gpt-5.4"
+  "default_model": "gemini-3-flash-preview"
 }

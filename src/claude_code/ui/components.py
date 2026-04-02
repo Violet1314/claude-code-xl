@@ -41,7 +41,8 @@ def show_logo() -> None:
     """显示 Claude 官方土橙色 Logo"""
     con = console.get_console()
     # Claude 官方标志性的土橙色 (Terracotta/Earthy Orange)
-    CLAUDE_COLOR = "#D97757"
+    #CLAUDE_COLOR = "#D97757"
+    CLAUDE_COLOR = "#EC6C99"
     # 渲染 CLAUDE
     for line in CLAUDE_LOGO:
         con.print(f"[bold {CLAUDE_COLOR}]{line}[/]")

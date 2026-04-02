@@ -4,6 +4,8 @@ import glob as glob_module
 from pathlib import Path
 from typing import List, Set
 
+from claude_code.config.defaults import WORKPLACE_DIR
+
 # 支持的代码文件扩展名
 SUPPORTED_EXTENSIONS: Set[str] = {
     # 编程语言
@@ -24,22 +26,52 @@ SUPPORTED_EXTENSIONS: Set[str] = {
 def resolve_path(path: str) -> str:
     """
     解析路径：相对路径转绝对路径，规范化
-    
+
     Args:
         path: 输入路径（可能带引号）
-        
+
     Returns:
         规范化的绝对路径
     """
     if not path:
         return ""
-    
+
     # 去除首尾空格和引号
     cleaned = path.strip().strip('"').strip("'")
-    
+
     # 转为绝对路径并规范化
     absolute = os.path.abspath(cleaned)
     return os.path.normpath(absolute)
+
+
+def resolve_workplace_path(path: str) -> str:
+    """
+    解析 Workplace 隔离路径
+
+    规则：
+    - 绝对路径：保持原样（用户明确指定）
+    - 相对路径：重定向到 workplace 目录（隔离保护）
+
+    Args:
+        path: 输入路径
+
+    Returns:
+        处理后的路径
+    """
+    if not path:
+        return ""
+
+    # 去除首尾空格和引号
+    cleaned = path.strip().strip('"').strip("'")
+
+    # 判断是否为绝对路径
+    if os.path.isabs(cleaned):
+        # 绝对路径保持原样（用户明确指定）
+        return os.path.normpath(cleaned)
+    else:
+        # 相对路径重定向到 workplace
+        workplace_path = os.path.join(WORKPLACE_DIR, cleaned)
+        return os.path.normpath(workplace_path)
 
 def is_hidden(path: str) -> bool:
     """

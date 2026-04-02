@@ -12,7 +12,7 @@ from datetime import datetime
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 
 from claude_code.config.settings import Settings, load_settings
-from claude_code.config.defaults import VERSION, APP_NAME
+from claude_code.config.defaults import VERSION, APP_NAME, WORKPLACE_DIR
 from claude_code.core.client import APIClient
 from claude_code.core.conversation import Conversation
 from claude_code.core.files import FileManager
@@ -95,6 +95,9 @@ class Application:
         # 历史目录
         self.history_dir = "data/history"
         os.makedirs(self.history_dir, exist_ok=True)
+
+        # Workplace 隔离目录（启动时自动创建）
+        os.makedirs(WORKPLACE_DIR, exist_ok=True)
 
         # 注册退出处理
         atexit.register(self._on_exit)

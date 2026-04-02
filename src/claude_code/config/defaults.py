@@ -38,6 +38,9 @@ API = APIDefaults()
 CONVERSATION = ConversationDefaults()
 UI = UIDefaults()
 
+# Workplace 隔离目录
+WORKPLACE_DIR = "workplace"
+
 # 版本信息
-VERSION = "2.7.10"
+VERSION = "2.7.11"
 APP_NAME = "Claude Code Terminal"

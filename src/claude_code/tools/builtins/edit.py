@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 
 from ..base import Tool, ToolResult
 from ..file_cache import file_cache
+from claude_code.utils.paths import resolve_workplace_path
 
 
 class EditTool(Tool):
@@ -42,6 +43,9 @@ class EditTool(Tool):
         # 参数验证
         if not file_path:
             return ToolResult(success=False, output="", error="缺少 file_path 参数")
+
+        # Workplace 隔离：相对路径重定向到 workplace 目录
+        file_path = resolve_workplace_path(file_path)
 
         if not old_string:
             return ToolResult(success=False, output="", error="缺少 old_string 参数")

@@ -2,7 +2,7 @@
 
 仿照官方 Claude Code 风格构建的 CLI AI 编程助手，支持 AI 驱动的文件操作和命令执行。
 
-**版本**：v2.7.10
+**版本**：v2.7.11
 
 ---
 
@@ -20,6 +20,7 @@
 - **文件图标** - 根据文件类型显示不同图标（.py 🐍、.js 📜 等）
 - **执行进度** - Bash 流式输出 + Read 进度显示
 - **费用统计** - 实时显示会话累计费用，与中转平台一致
+- **Workplace 隔离** - 默认隔离目录，避免误操作项目文件
 
 ---
 
@@ -115,7 +116,7 @@ python -m claude_code
     ██╔════╝ ██║      ██╔══██╗ ██║   ██║ ██╔══██╗ ██╔════╝
     ...
 
-  Claude Code Terminal v2.7.10 │ GPT 5.4
+  Claude Code Terminal v2.7.11 │ GPT 5.4
   ────────────────────────────────────────────────────────
   "Code is poetry." — WordPress
 
@@ -188,9 +189,11 @@ claude-code/
 │   │   ├── file_cache.py       # 文件缓存
 │   │   └── builtins/           # 内置工具
 │   │
-│   └── utils/                  # 工具函数
+│   └── utils/                  # 工具函数（含路径隔离）
 │
 ├── tests/                      # 测试文件
+│
+├── workplace/                  # v2.7.11 隔离目录（启动时自动创建）
 │
 └── data/
     ├── config/                 # 配置文件
@@ -227,6 +230,11 @@ python -m pytest tests/ -q --ignore=tests/test_api_stability.py
 ---
 
 ## 更新日志
+
+### v2.7.11 (2026-04-02)
+- **Workplace 隔离目录**：启动时自动创建，保护项目文件
+- **路径重定向**：相对路径 → workplace，绝对路径 → 保持原样
+- **隔离范围**：Write/Edit 需隔离，Read/Glob/Grep/Bash 不隔离
 
 ### v2.7.10 (2026-03-31)
 - **菜单中文对齐**：修复中文字符显示宽度，分隔符正确对齐
