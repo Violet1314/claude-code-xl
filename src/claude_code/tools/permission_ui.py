@@ -203,15 +203,13 @@ class PermissionUI:
             output: 输出内容（可能包含 Rich 标记）
         """
         if success:
-            # 检查输出是否包含 Rich markup（卡片式输出或 diff 输出）
-            # Read/Grep/Glob 工具使用卡片式输出，Edit 使用 diff 输出
+            # 根据工具名称判断输出类型
+            # Read/Grep/Glob 使用卡片式输出（包含 ╭─ 边框）
+            # Edit 使用 diff 输出（包含 [bold green]Update 或 ✅ 编辑成功）
+            # Bash/Write/AskUserQuestion 使用普通文本输出
             is_rich_output = (
-                "[dim" in output or
-                "[bold" in output or
-                "[cyan]" in output or
-                "╭─" in output or
-                "[bold green]Update" in output or
-                "[white on" in output
+                tool_name in ("Read", "Grep", "Glob") and "╭─" in output or
+                tool_name == "Edit" and ("[bold green]Update" in output or "✅ 编辑成功" in output)
             )
             if is_rich_output:
                 # Rich markup 输出：使用 console.print 渲染

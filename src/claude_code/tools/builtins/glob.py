@@ -6,6 +6,7 @@ from collections import Counter
 from ..base import Tool, ToolResult
 from claude_code.utils.paths import resolve_workplace_path
 from claude_code.ui.theme import COLORS, ICONS
+from rich.markup import escape
 
 
 class GlobTool(Tool):
@@ -89,7 +90,7 @@ class GlobTool(Tool):
         # 卡片头部
         lines.append(f"[dim {COLORS['border_subtle']}]╭─[/] {ICONS.get('glob', '📁')} [bold]Glob 结果[/]")
         lines.append(f"[dim {COLORS['border_subtle']}]│[/]")
-        lines.append(f"[dim {COLORS['border_subtle']}]│[/] 模式 [cyan]\"{pattern}\"[/] 找到 [bold]{total}[/] 个结果")
+        lines.append(f"[dim {COLORS['border_subtle']}]│[/] 模式 [cyan]\"{escape(pattern)}\"[/] 找到 [bold]{total}[/] 个结果")
 
         # 统计文件类型
         ext_count = Counter()
@@ -111,7 +112,8 @@ class GlobTool(Tool):
             if ext_count:
                 top_exts = ext_count.most_common(5)
                 for ext, count in top_exts:
-                    stats_parts.append(f"{ext}: {count}")
+                    # 转义扩展名
+                    stats_parts.append(f"{escape(ext)}: {count}")
             lines.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]类型: {' | '.join(stats_parts)}[/]")
 
         # 按目录分组
@@ -127,11 +129,11 @@ class GlobTool(Tool):
             if parent != current_dir:
                 if current_dir is not None:
                     lines.append(f"[dim {COLORS['border_subtle']}]│[/]")  # 目录间分隔
-                lines.append(f"[dim {COLORS['border_subtle']}]│[/] {ICONS.get('folder', '📂')} [dim]{parent}/[/]")
+                lines.append(f"[dim {COLORS['border_subtle']}]│[/] {ICONS.get('folder', '📂')} [dim]{escape(parent)}/[/]")
                 current_dir = parent
 
             if match.is_dir():
-                lines.append(f"[dim {COLORS['border_subtle']}]│[/]     {ICONS.get('folder', '📁')} {match.name}/")
+                lines.append(f"[dim {COLORS['border_subtle']}]│[/]     {ICONS.get('folder', '📁')} {escape(match.name)}/")
             else:
                 # 获取文件图标
                 file_icon = self._get_file_icon(match.suffix.lower())
@@ -139,9 +141,9 @@ class GlobTool(Tool):
                 try:
                     size = match.stat().st_size
                     size_str = self._format_size(size)
-                    lines.append(f"[dim {COLORS['border_subtle']}]│[/]     {file_icon} {match.name} [dim]({size_str})[/]")
+                    lines.append(f"[dim {COLORS['border_subtle']}]│[/]     {file_icon} {escape(match.name)} [dim]({size_str})[/]")
                 except:
-                    lines.append(f"[dim {COLORS['border_subtle']}]│[/]     {file_icon} {match.name}")
+                    lines.append(f"[dim {COLORS['border_subtle']}]│[/]     {file_icon} {escape(match.name)}")
 
             display_count += 1
 

@@ -10,6 +10,7 @@ from claude_code.utils.paths import resolve_workplace_path
 from claude_code.ui import console
 from claude_code.ui.theme import COLORS, ICONS
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+from rich.markup import escape
 
 
 class ReadTool(Tool):
@@ -160,31 +161,31 @@ class ReadTool(Tool):
                 and total_lines >= self.SUMMARY_THRESHOLD
             )
 
-            # 构建输出（美化卡片式）
-            output_parts = []
-
             # 获取文件图标
             file_icon = self._get_file_icon(path.suffix.lower())
 
             # 卡片头部
             size_kb = file_size / 1024
             cache_status = "✓ 已缓存" if was_cached else "+ 新缓存"
+            escaped_reference = escape(reference)
 
+            # ========================================
+            # 1. 构建给模型的完整输出（不省略）
+            # ========================================
+            output_parts = []
             output_parts.append(f"[dim {COLORS['border_subtle']}]╭─[/] {file_icon} [bold]{path.name}[/]")
             output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
             output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]  {total_lines} 行  [dim]│[/]  {size_kb:.1f} KB  [dim]│[/]  {cache_status}")
-            # 转义左方括号，避免被 Rich markup 解析（右方括号不需要转义）
-            escaped_reference = reference.replace("[", "\\[")
             output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]  📌 [cyan]{escaped_reference}[/]")
 
             if use_summary:
-                # 摘要模式
+                # 摘要模式：给模型也显示结构 + 预览（大文件合理行为）
                 structure = self._analyze_structure(lines, path.suffix.lower())
                 if structure:
                     output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
                     output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]结构概览:[/]")
                     for item in structure[:15]:
-                        output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]   {item}")
+                        output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]   {escape(item)}")
                     if len(structure) > 15:
                         output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]   [dim]... (更多结构省略)[/]")
 
@@ -192,27 +193,77 @@ class ReadTool(Tool):
                 output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]预览 (前 {self.PREVIEW_LINES} 行):[/]")
                 for i, line in enumerate(lines[:self.PREVIEW_LINES], 1):
                     line_content = line.rstrip('\n\r')
-                    if len(line_content) > 80:
-                        line_content = line_content[:77] + "..."
-                    output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]{i:5d}[/]  {line_content}")
+                    output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]{i:5d}[/]  {escape(line_content)}")
 
-                if total_lines > self.PREVIEW_LINES:
-                    output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]  ... 省略 {total_lines - self.PREVIEW_LINES} 行[/]")
-
-                # 提示
                 output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
-                output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] 💡 [dim]文件已完整缓存，可使用 Edit 工具直接编辑[/]")
+                output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] 💡 [dim]大文件已缓存结构，使用 offset/limit 读取具体部分[/]")
                 output_parts.append(f"[dim {COLORS['border_subtle']}]╰{'─' * 50}[/]")
             else:
-                # 完整/分段模式
+                # 完整模式：给模型返回完整内容
                 start_line = max(1, offset)
                 end_line = min(total_lines, start_line + limit - 1)
-                display_lines = end_line - start_line + 1
 
                 output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
                 output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]显示 {start_line}-{end_line} 行:[/]")
 
-                # 终端显示优化：超过阈值时只显示首尾
+                # 完整内容，不省略
+                for i in range(start_line - 1, end_line):
+                    line = lines[i]
+                    output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]{i+1:5d}[/]  {escape(line.rstrip(chr(10)))}")
+
+                if end_line < total_lines:
+                    output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]  ... 还有 {total_lines - end_line} 行（使用 offset 继续读取）[/]")
+
+                output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
+                output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] 💡 [dim]文件已完整缓存，无需再次读取。直接执行任务即可。[/]")
+                output_parts.append(f"[dim {COLORS['border_subtle']}]╰{'─' * 50}[/]")
+
+            output = '\n'.join(output_parts)
+
+            # ========================================
+            # 2. 构建给终端的显示输出（可省略）
+            # ========================================
+            display_parts = []
+            display_parts.append(f"[dim {COLORS['border_subtle']}]╭─[/] {file_icon} [bold]{path.name}[/]")
+            display_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
+            display_parts.append(f"[dim {COLORS['border_subtle']}]│[/]  {total_lines} 行  [dim]│[/]  {size_kb:.1f} KB  [dim]│[/]  {cache_status}")
+            display_parts.append(f"[dim {COLORS['border_subtle']}]│[/]  📌 [cyan]{escaped_reference}[/]")
+
+            if use_summary:
+                # 摘要模式：终端也显示摘要
+                structure = self._analyze_structure(lines, path.suffix.lower())
+                if structure:
+                    display_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
+                    display_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]结构概览:[/]")
+                    for item in structure[:15]:
+                        display_parts.append(f"[dim {COLORS['border_subtle']}]│[/]   {escape(item)}")
+                    if len(structure) > 15:
+                        display_parts.append(f"[dim {COLORS['border_subtle']}]│[/]   [dim]... (更多结构省略)[/]")
+
+                display_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
+                display_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]预览 (前 {self.PREVIEW_LINES} 行):[/]")
+                for i, line in enumerate(lines[:self.PREVIEW_LINES], 1):
+                    line_content = line.rstrip('\n\r')
+                    if len(line_content) > 80:
+                        line_content = line_content[:77] + "..."
+                    display_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]{i:5d}[/]  {escape(line_content)}")
+
+                if total_lines > self.PREVIEW_LINES:
+                    display_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]  ... 省略 {total_lines - self.PREVIEW_LINES} 行[/]")
+
+                display_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
+                display_parts.append(f"[dim {COLORS['border_subtle']}]│[/] 💡 [dim]大文件已缓存结构，使用 offset/limit 读取具体部分[/]")
+                display_parts.append(f"[dim {COLORS['border_subtle']}]╰{'─' * 50}[/]")
+            else:
+                # 完整模式：终端可以省略显示
+                start_line = max(1, offset)
+                end_line = min(total_lines, start_line + limit - 1)
+                display_lines = end_line - start_line + 1
+
+                display_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
+                display_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]显示 {start_line}-{end_line} 行:[/]")
+
+                # 终端显示优化：超过阈值时省略中间
                 if display_lines > self.TERMINAL_DISPLAY_THRESHOLD:
                     # 显示头部
                     head_end = min(start_line + self.TERMINAL_HEAD_LINES - 1, end_line)
@@ -220,41 +271,41 @@ class ReadTool(Tool):
                         line = lines[i]
                         if len(line) > 100:
                             line = line[:97] + "..."
-                        output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]{i+1:5d}[/]  {line.rstrip(chr(10))}")
+                        display_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]{i+1:5d}[/]  {escape(line.rstrip(chr(10)))}")
 
                     # 省略中间
                     tail_start = max(head_end + 1, end_line - self.TERMINAL_TAIL_LINES + 1)
                     omitted = tail_start - head_end - 1
                     if omitted > 0:
-                        output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]  ... 省略 {omitted} 行 ...[/]")
+                        display_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]  ... 省略 {omitted} 行 ...[/]")
 
                     # 显示尾部
                     for i in range(tail_start - 1, end_line):
                         line = lines[i]
                         if len(line) > 100:
                             line = line[:97] + "..."
-                        output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]{i+1:5d}[/]  {line.rstrip(chr(10))}")
+                        display_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]{i+1:5d}[/]  {escape(line.rstrip(chr(10)))}")
                 else:
                     # 行数较少，完整显示
                     for i in range(start_line - 1, end_line):
                         line = lines[i]
                         if len(line) > 100:
                             line = line[:97] + "..."
-                        output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]{i+1:5d}[/]  {line.rstrip(chr(10))}")
+                        display_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]{i+1:5d}[/]  {escape(line.rstrip(chr(10)))}")
 
                 if end_line < total_lines:
-                    output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]  ... 还有 {total_lines - end_line} 行[/]")
+                    display_parts.append(f"[dim {COLORS['border_subtle']}]│[/] [dim]  ... 还有 {total_lines - end_line} 行[/]")
 
-                # 添加明确提示，防止模型重复读取
-                output_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
-                output_parts.append(f"[dim {COLORS['border_subtle']}]│[/] 💡 [dim]文件已完整缓存，无需再次读取。直接执行任务即可。[/]")
-                output_parts.append(f"[dim {COLORS['border_subtle']}]╰{'─' * 50}[/]")
+                display_parts.append(f"[dim {COLORS['border_subtle']}]│[/]")
+                display_parts.append(f"[dim {COLORS['border_subtle']}]│[/] 💡 [dim]文件已完整缓存，无需再次读取。直接执行任务即可。[/]")
+                display_parts.append(f"[dim {COLORS['border_subtle']}]╰{'─' * 50}[/]")
 
-            output = '\n'.join(output_parts)
+            display_output = '\n'.join(display_parts)
 
             return ToolResult(
                 success=True,
-                output=output,
+                output=output,  # 给模型的完整内容
+                display_output=display_output,  # 给终端的省略版本
                 metadata={
                     "file_path": str(path.absolute()),
                     "total_lines": total_lines,

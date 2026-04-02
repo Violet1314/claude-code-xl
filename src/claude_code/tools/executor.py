@@ -243,8 +243,11 @@ class ToolExecutor:
 
             # 显示结果（Bash 工具已实时输出，跳过成功和失败的情况）
             if tool.name != "Bash":
-                # 失败时显示 error，成功时显示 output
-                display_content = result.output if result.success else (result.error or "执行失败")
+                # 优先使用 display_output（终端省略版本），否则用 output
+                if result.success and result.display_output:
+                    display_content = result.display_output
+                else:
+                    display_content = result.output if result.success else (result.error or "执行失败")
                 PermissionUI.show_tool_result(tool.name, result.success, display_content)
             # Bash 工具已实时输出，不再重复显示
 

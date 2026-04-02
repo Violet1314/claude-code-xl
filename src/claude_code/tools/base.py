@@ -16,9 +16,10 @@ class PermissionLevel(Enum):
 class ToolResult:
     """工具执行结果"""
     success: bool
-    output: str
+    output: str  # 返回给模型的完整内容
     error: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    display_output: Optional[str] = None  # 终端显示用的省略版本（可选）
 
     def __str__(self) -> str:
         if self.success:

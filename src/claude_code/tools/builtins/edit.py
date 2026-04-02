@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 from ..base import Tool, ToolResult
 from ..file_cache import file_cache
 from claude_code.utils.paths import resolve_workplace_path
+from rich.markup import escape
 
 
 class EditTool(Tool):
@@ -96,8 +97,8 @@ class EditTool(Tool):
             # 构建输出
             result = []
             result.append(f"✅ 编辑成功: {path.name}")
-            # 转义方括号，避免被 Rich markup 解析
-            escaped_reference = reference.replace("[", "\\[") if reference else ""
+            # 转义引用中的特殊字符，避免被 Rich markup 解析
+            escaped_reference = escape(reference) if reference else ""
             result.append(f"📌 新引用: {escaped_reference} (v{version})")
             result.append("")  # 空行
             result.append(diff_output)  # diff 显示
@@ -183,17 +184,17 @@ class EditTool(Tool):
         for i in range(max(0, start_line - context_lines - 1), start_line - 1):
             if i < len(original_lines):
                 content = self._truncate_line(original_lines[i])
-                result.append(f"     [dim]{i + 1:4d}[/]  [dim]{content}[/]")
+                result.append(f"     [dim]{i + 1:4d}[/]  [dim]{escape(content)}[/]")
 
         # 显示删除的行（红色背景）
         for i, line in enumerate(old_lines):
             content = self._truncate_line(line)
-            result.append(f"     [dim]{start_line + i:4d}[/]  [white on #b85450]- {content}[/]")
+            result.append(f"     [dim]{start_line + i:4d}[/]  [white on #b85450]- {escape(content)}[/]")
 
         # 显示新增的行（绿色背景）
         for i, line in enumerate(new_lines):
             content = self._truncate_line(line)
-            result.append(f"     [dim]{start_line + i:4d}[/]  [white on #3d8c40]+ {content}[/]")
+            result.append(f"     [dim]{start_line + i:4d}[/]  [white on #3d8c40]+ {escape(content)}[/]")
 
         # 显示下文（变化之后的行）
         # 删除/替换后的行号从 start_line + added_count 开始
@@ -205,7 +206,7 @@ class EditTool(Tool):
             line_num_new = after_start_new + i
             if line_num_new < len(new_file_lines):
                 content = self._truncate_line(new_file_lines[line_num_new])
-                result.append(f"     [dim]{line_num_new + 1:4d}[/]  [dim]{content}[/]")
+                result.append(f"     [dim]{line_num_new + 1:4d}[/]  [dim]{escape(content)}[/]")
 
         return "\n".join(result)
 

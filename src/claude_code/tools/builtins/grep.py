@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 from ..base import Tool, ToolResult
 from claude_code.utils.paths import resolve_workplace_path
 from claude_code.ui.theme import COLORS, ICONS
+from rich.markup import escape
 
 
 class GrepTool(Tool):
@@ -196,7 +197,7 @@ class GrepTool(Tool):
         # 卡片头部
         lines.append(f"[dim {COLORS['border_subtle']}]╭─[/] {ICONS.get('grep', '🔍')} [bold]Grep 结果[/]")
         lines.append(f"[dim {COLORS['border_subtle']}]│[/]")
-        lines.append(f"[dim {COLORS['border_subtle']}]│[/] 搜索 [cyan]\"{pattern}\"[/] 找到 [bold]{len(matched_files)}[/] 个文件")
+        lines.append(f"[dim {COLORS['border_subtle']}]│[/] 搜索 [cyan]\"{escape(pattern)}\"[/] 找到 [bold]{len(matched_files)}[/] 个文件")
 
         if matched_files:
             lines.append(f"[dim {COLORS['border_subtle']}]│[/]")
@@ -219,7 +220,7 @@ class GrepTool(Tool):
         # 卡片头部
         lines.append(f"[dim {COLORS['border_subtle']}]╭─[/] {ICONS.get('grep', '🔍')} [bold]Grep 结果[/]")
         lines.append(f"[dim {COLORS['border_subtle']}]│[/]")
-        lines.append(f"[dim {COLORS['border_subtle']}]│[/] 搜索 [cyan]\"{pattern}\"[/] 找到 [bold]{total}[/] 处匹配")
+        lines.append(f"[dim {COLORS['border_subtle']}]│[/] 搜索 [cyan]\"{escape(pattern)}\"[/] 找到 [bold]{total}[/] 处匹配")
 
         # 按文件分组
         current_file = None
@@ -240,7 +241,8 @@ class GrepTool(Tool):
             if len(line_content) > self.PREVIEW_WIDTH:
                 line_content = line_content[:self.PREVIEW_WIDTH - 3] + "..."
 
-            lines.append(f"[dim {COLORS['border_subtle']}]│[/]   [dim]{line_num:5d}[/]  {line_content}")
+            # 转义文件内容中的 Rich markup 特殊字符
+            lines.append(f"[dim {COLORS['border_subtle']}]│[/]   [dim]{line_num:5d}[/]  {escape(line_content)}")
 
         if total > self.MAX_MATCHES:
             lines.append(f"[dim {COLORS['border_subtle']}]│[/]")
