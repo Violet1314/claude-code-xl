@@ -51,6 +51,7 @@ def resolve_workplace_path(path: str) -> str:
     规则：
     - 绝对路径：保持原样（用户明确指定）
     - 相对路径：重定向到 workplace 目录（隔离保护）
+    - 已包含 workplace 前缀的路径：不再重复添加
 
     Args:
         path: 输入路径
@@ -68,10 +69,17 @@ def resolve_workplace_path(path: str) -> str:
     if os.path.isabs(cleaned):
         # 绝对路径保持原样（用户明确指定）
         return os.path.normpath(cleaned)
-    else:
-        # 相对路径重定向到 workplace
-        workplace_path = os.path.join(WORKPLACE_DIR, cleaned)
-        return os.path.normpath(workplace_path)
+
+    # 检查是否已经以 workplace 开头（避免重复添加）
+    normalized = os.path.normpath(cleaned)
+    parts = normalized.split(os.sep)
+    if parts and parts[0] == "workplace":
+        # 已经包含 workplace 前缀，直接返回
+        return normalized
+
+    # 相对路径重定向到 workplace
+    workplace_path = os.path.join(WORKPLACE_DIR, cleaned)
+    return os.path.normpath(workplace_path)
 
 def is_hidden(path: str) -> bool:
     """

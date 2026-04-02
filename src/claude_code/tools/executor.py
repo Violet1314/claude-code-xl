@@ -25,6 +25,8 @@ class ReadCache:
     """已读文件缓存"""
     # 文件路径 -> (总行数, 已读取的行范围列表)
     files: Dict[str, Tuple[int, List[Tuple[int, int]]]] = field(default_factory=dict)
+    # 最近读取记录（用于检测重复调用）
+    recent_reads: List[str] = field(default_factory=list)
 
     def record(self, file_path: str, total_lines: int, start_line: int, end_line: int) -> None:
         """记录读取范围"""
@@ -32,6 +34,11 @@ class ReadCache:
             self.files[file_path] = (total_lines, [])
         _, ranges = self.files[file_path]
         ranges.append((start_line, end_line))
+        # 记录最近读取
+        self.recent_reads.append(file_path)
+        # 只保留最近 10 条
+        if len(self.recent_reads) > 10:
+            self.recent_reads.pop(0)
 
     def get_read_files(self) -> Dict[str, Tuple[int, List[Tuple[int, int]]]]:
         """获取已读文件列表"""
@@ -41,15 +48,35 @@ class ReadCache:
         """检查是否已读取过该文件"""
         return file_path in self.files
 
+    def get_read_count(self, file_path: str) -> int:
+        """获取该文件的已读取次数"""
+        return sum(1 for path in self.recent_reads if path == file_path)
+
     def get_read_ranges(self, file_path: str) -> Optional[List[Tuple[int, int]]]:
         """获取文件的已读取范围"""
         if file_path in self.files:
             return self.files[file_path][1]
         return None
 
+    def check_duplicate_read(self, file_path: str, max_reads: int = 5) -> bool:
+        """
+        检查是否为重复读取（防止模型无限循环调用）
+
+        Args:
+            file_path: 文件路径
+            max_reads: 同一文件最大读取次数（设为 5，允许调试时多次查看）
+
+        Returns:
+            True 表示已超过限制，应跳过
+        """
+        # 统计该文件在最近读取中出现的次数
+        read_count = sum(1 for path in self.recent_reads if path == file_path)
+        return read_count >= max_reads
+
     def clear(self) -> None:
         """清空缓存"""
         self.files.clear()
+        self.recent_reads.clear()
 
 
 @dataclass
@@ -144,6 +171,38 @@ class ToolExecutor:
                 error=f"参数错误: {validation_error}"
             )
 
+        # 检测重复读取（防止模型循环调用 Read）
+        if tool_call.name == "Read":
+            file_path = tool_call.parameters.get("file_path", "")
+            if file_path:
+                read_count = self.read_cache.get_read_count(file_path)
+
+                # 第 5 次及以后：阻止执行，返回缓存信息
+                if read_count >= 5:
+                    if self.read_cache.has_read(file_path):
+                        total_lines, ranges = self.read_cache.files.get(file_path, (0, []))
+                        return ExecutionResult(
+                            tool_call=tool_call,
+                            success=True,
+                            output=f"⚠️ 文件已读取 {read_count} 次，已达上限。\n📌 缓存引用: {file_path}\n总行数: {total_lines}，已读取范围: {ranges}\n请直接执行任务或使用 Edit 工具编辑。",
+                            skipped=True  # 标记为跳过，避免继续循环
+                        )
+
+                # 第 2-4 次读取：显示警告但允许执行（调试场景）
+                # 警告会在执行结果中显示
+
+        # 检查 Bash 危险命令（在权限确认之前拦截）
+        if tool_call.name == "Bash" and hasattr(tool, '_check_dangerous'):
+            command = tool_call.parameters.get("command", "")
+            is_dangerous, danger_reason = tool._check_dangerous(command)
+            if is_dangerous:
+                return ExecutionResult(
+                    tool_call=tool_call,
+                    success=False,
+                    output="",
+                    error=f"🚫 危险命令已拦截: {danger_reason}"
+                )
+
         # 请求权限
         decision = self.permission_manager.request_permission(tool_call, tool)
 
@@ -175,8 +234,19 @@ class ToolExecutor:
             result = tool.execute(tool_call.parameters)
             duration_ms = int((time.time() - start_time) * 1000)
 
-            # 显示结果
-            PermissionUI.show_tool_result(tool.name, result.success, result.output)
+            # Read 工具重复读取警告（第 2-4 次时显示）
+            if tool_call.name == "Read" and file_path:
+                new_read_count = self.read_cache.get_read_count(file_path) + 1  # 执行后会+1
+                if 2 <= new_read_count <= 4:
+                    warning = f"\n\n⚠️ 提示: 该文件已读取 {new_read_count} 次。建议直接使用缓存内容执行任务。"
+                    result.output = result.output + warning
+
+            # 显示结果（Bash 工具已实时输出，跳过成功和失败的情况）
+            if tool.name != "Bash":
+                # 失败时显示 error，成功时显示 output
+                display_content = result.output if result.success else (result.error or "执行失败")
+                PermissionUI.show_tool_result(tool.name, result.success, display_content)
+            # Bash 工具已实时输出，不再重复显示
 
             # 记录历史
             self._record_execution(tool_call, result, duration_ms)

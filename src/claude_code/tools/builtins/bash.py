@@ -23,6 +23,7 @@ class BashTool(Tool):
         "注意：必须使用 PowerShell 语法，不支持 Unix 参数如 -p、-r。"
         "正确示例：mkdir data, output（逗号分隔）| Get-ChildItem（或简写 ls）| Remove-Item -Recurse -Force | Copy-Item -Recurse"
         "错误示例：mkdir -p data output | ls -la | rm -rf | cp -r"
+        "⚠️ 不支持交互式命令：不要执行需要用户输入的命令（如 python script.py 等待 input()），这类命令会卡住直到超时。"
         "所有命令都需要用户确认。"
     )
 
@@ -59,13 +60,21 @@ class BashTool(Tool):
         r'^rm\s',                              # 删除文件
         r'^mv\s',                              # 移动文件
         r'^cp\s',                              # 复制文件（可能覆盖）
-        # Windows 删除/移动/复制
+        # Windows CMD 删除/移动/复制
         r'^del\s',                             # Windows 删除
         r'^erase\s',                           # Windows 删除
         r'^move\s',                            # Windows 移动
         r'^copy\s',                            # Windows 复制
         r'^rd\s',                              # Windows 删除目录
         r'^rmdir\s',                           # Windows 删除目录
+        # PowerShell 删除/移动/复制（危险！）
+        r'^Remove-Item',                       # PowerShell 删除
+        r'^ri\s',                              # PowerShell 删除别名
+        r'^Move-Item',                         # PowerShell 移动
+        r'^mi\s',                              # PowerShell 移动别名
+        r'^Copy-Item',                         # PowerShell 复制
+        r'^ci\s',                              # PowerShell 复制别名
+        r'^Clear-Content',                     # PowerShell 清空内容
         # 提权
         r'^sudo\s',                            # Unix 提权
         r'^runas\s',                           # Windows 提权
@@ -78,6 +87,7 @@ class BashTool(Tool):
         r'^pkill\s',                           # 批量杀进程
         r'^killall\s',                         # 批量杀进程
         r'^taskkill\s',                        # Windows 杀进程
+        r'^Stop-Process',                      # PowerShell 杀进程
         # 包管理器
         r'^apt\s+',                            # Debian/Ubuntu
         r'^yum\s+',                            # RHEL/CentOS
@@ -103,11 +113,14 @@ class BashTool(Tool):
         r'^erase\s',
         r'^rd\s',
         r'^rmdir\s',
+        r'^Remove-Item',
         # 移动/复制操作
         r'^mv\s',
         r'^cp\s',
         r'^move\s',
         r'^copy\s',
+        r'^Move-Item',
+        r'^Copy-Item',
         # Git 危险操作
         r'^git\s+checkout\s+--',
         r'^git\s+reset\s+--',
@@ -279,16 +292,30 @@ class BashTool(Tool):
             success = return_code == 0
             progress.stop(success, return_code)
 
-            return ToolResult(
-                success=success,
-                output=output if output else "(命令执行完成，无输出)",
-                metadata={
-                    "command": command,
-                    "return_code": return_code,
-                    "cwd": str(work_dir),
-                    "timeout": timeout
-                }
-            )
+            # 非零返回码时，输出作为错误信息
+            if success:
+                return ToolResult(
+                    success=True,
+                    output=output if output else "(命令执行完成，无输出)",
+                    metadata={
+                        "command": command,
+                        "return_code": return_code,
+                        "cwd": str(work_dir),
+                        "timeout": timeout
+                    }
+                )
+            else:
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error=output if output else f"命令返回非零退出码: {return_code}",
+                    metadata={
+                        "command": command,
+                        "return_code": return_code,
+                        "cwd": str(work_dir),
+                        "timeout": timeout
+                    }
+                )
 
         except subprocess.TimeoutExpired:
             return ToolResult(

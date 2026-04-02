@@ -96,7 +96,9 @@ class EditTool(Tool):
             # 构建输出
             result = []
             result.append(f"✅ 编辑成功: {path.name}")
-            result.append(f"📌 新引用: {reference} (v{version})")
+            # 转义方括号，避免被 Rich markup 解析
+            escaped_reference = reference.replace("[", "\\[") if reference else ""
+            result.append(f"📌 新引用: {escaped_reference} (v{version})")
             result.append("")  # 空行
             result.append(diff_output)  # diff 显示
 

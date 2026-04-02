@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 from collections import Counter
 
 from ..base import Tool, ToolResult
+from claude_code.utils.paths import resolve_workplace_path
 from claude_code.ui.theme import COLORS, ICONS
 
 
@@ -41,6 +42,9 @@ class GlobTool(Tool):
 
         if not pattern:
             return ToolResult(success=False, output="", error="缺少 pattern 参数")
+
+        # Workplace 隔离：相对路径重定向到 workplace 目录
+        search_path = resolve_workplace_path(search_path)
 
         try:
             base_path = Path(search_path)
