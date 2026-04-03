@@ -7,29 +7,36 @@
   "models": [
     {
       "id": "claude-sonnet-4-6",
-      "name": "Claude Sonnet 4.6 | 官转 x4",
-      "price": "Input: 12$/1M Output: 60$/1M",
+      "name": "Claude Sonnet 4.6 | default x1",
+      "price": "Input: 3$/1M Output: 15$/1M",
       "context_limit": 1000000,
       "tool_mode": "native"
     },
     {
-      "id": "claude-opus-4-6-thinking",
-      "name": "Claude Opus 4.6 | 官转 x4",
-      "price": "Input: 20$/1M Output: 100$/1M",
+      "id": "claude-opus-4-6",
+      "name": "Claude Opus 4.6 | default x1",
+      "price": "Input: 5$/1M Output: 25$/1M",
       "context_limit": 1000000,
       "tool_mode": "native"
     },
     {
       "id": "gemini-3.1-pro-preview",
-      "name": "Gemini 3.1 Pro | 官转 x3",
-      "price": "Input: 6$/1M Output: 36$/1M",
+      "name": "Gemini 3.1 Pro | 优质gemini x1.5",
+      "price": "Input: 3$/1M Output: 18$/1M",
+      "context_limit": 2000000,
+      "tool_mode": "native"
+    },
+    {
+      "id": "gemini-3.1-flash-lite-preview",
+      "name": "Gemini 3.1 Flash Lite| 优质gemini x1.5",
+      "price": "Input: 0.375$/1M Output: 2.25$/1M",
       "context_limit": 2000000,
       "tool_mode": "native"
     },
     {
       "id": "gpt-5.4",
-      "name": "GPT 5.4 | 官转 x3",
-      "price": "Input: 7.5$/1M Output: 45$/1M",
+      "name": "GPT 5.4 | default x1",
+      "price": "Input: 2.5$/1M Output: 15$/1M",
       "context_limit": 1000000,
       "tool_mode": "native"
     },
@@ -42,22 +49,22 @@
     },
     {
       "id": "MiniMax-M2.7",
-      "name": "MiniMax M2.7 | 纯AZ x1.5",
-      "price": "Input: 3.15$/1M Output: 12.6$/1M",
-      "context_limit": 128000,
+      "name": "MiniMax M2.7 | default x1",
+      "price": "Input: 2.1$/1M Output: 8.4$/1M",
+      "context_limit": 200000,
       "tool_mode": "native"
     },
     {
       "id": "qwen3.5-plus",
-      "name": "Qwen 3.5 Plus | 纯AZ x1.5",
-      "price": "Input: 1.2$/1M Output: 7.2$/1M",
+      "name": "Qwen 3.5 Plus | default x1",
+      "price": "Input: 0.8$/1M Output: 4.8$/1M",
       "context_limit": 1000000,
       "tool_mode": "native"
     },
     {
       "id": "deepseek-v3.2",
-      "name": "DeepSeek V3.2 | 纯AZ x1.5",
-      "price": "Input: 3$/1M Output: 4.5$/1M",
+      "name": "DeepSeek V3.2 | default x1",
+      "price": "Input: 2$/1M Output: 3$/1M",
       "context_limit": 128000,
       "tool_mode": "native"
     }
