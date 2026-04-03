@@ -3,7 +3,6 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 from dataclasses import dataclass
-
 from .base import ToolCall, Tool, ToolResult, PermissionLevel
 
 
@@ -137,7 +136,6 @@ class PermissionManager:
 
         # 构建路径警告
         path_warning = ""
-
         if is_outside_scope:
             outside_paths = path_check.get("outside_paths", [])
             path_warning = f"操作路径在项目目录外\n    项目目录: {path_check['project_dir']}"

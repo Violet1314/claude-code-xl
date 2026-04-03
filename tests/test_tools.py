@@ -7,14 +7,12 @@ from pathlib import Path
 
 # 添加 src 到路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-
 from claude_code.tools.base import Tool, ToolResult, ToolCall, ToolRegistry
 from claude_code.tools.builtins import ReadTool, GlobTool, GrepTool, WriteTool, EditTool
 
 
 class TestToolRegistry:
     """工具注册表测试"""
-
     def test_register_tool(self):
         """测试注册工具"""
         registry = ToolRegistry()
@@ -36,9 +34,9 @@ class TestToolRegistry:
         assert "Read" in tool_names
         assert "Write" in tool_names
 
+
 class TestReadTool:
     """Read 工具测试"""
-
     def test_read_existing_file(self):
         """测试读取存在的文件"""
         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
@@ -90,7 +88,6 @@ class TestReadTool:
 
 class TestWriteTool:
     """Write 工具测试"""
-
     def test_write_new_file(self):
         """测试写入新文件"""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -152,7 +149,6 @@ class TestWriteTool:
 
 class TestEditTool:
     """Edit 工具测试"""
-
     def test_edit_exact_match(self):
         """测试精确替换"""
         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
@@ -211,7 +207,6 @@ class TestEditTool:
 
 class TestGlobTool:
     """Glob 工具测试"""
-
     def test_glob_find_files(self):
         """测试查找文件"""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -245,7 +240,6 @@ class TestGlobTool:
 
 class TestGrepTool:
     """Grep 工具测试"""
-
     def test_grep_find_pattern(self):
         """测试搜索模式"""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -254,7 +248,7 @@ class TestGrepTool:
 
             tool = GrepTool()
             result = tool.execute({
-                "pattern": "def\\s+\\w+",
+                "pattern": r"def\s+\w+",
                 "path": str(tmpdir)
             })
 
@@ -269,16 +263,16 @@ class TestGrepTool:
 
             tool = GrepTool()
             result = tool.execute({
-                "pattern": "import\\s+os",
+                "pattern": r"import\s+os",
                 "path": str(tmpdir)
             })
 
             assert result.success
             assert "No matches found" in result.output
 
+
 class TestToolCall:
     """ToolCall 数据类测试"""
-
     def test_create_tool_call(self):
         """测试创建工具调用"""
         call = ToolCall(

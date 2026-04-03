@@ -41,7 +41,7 @@ class WriteTool(Tool):
         if not file_path.endswith('.py'):
             return True, None
 
-        # 尝试编译检查语法
+        # 尝试编译检查语
         try:
             compile(content, file_path, 'exec')
             return True, None

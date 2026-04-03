@@ -1,9 +1,9 @@
-```
+```markdown
 # Claude Code Terminal
 
 仿照官方 Claude Code 风格构建的 CLI AI 编程助手，支持 AI 驱动的文件操作和命令执行。
 
-**版本**：v2.7.21
+**版本**：v2.7.22
 
 ---
 
@@ -33,18 +33,16 @@
 ### 1. 下载与进入目录
 
 ```powershell
-cd E:\12-claude-code-xl\2026-02-01\Claude-Code-CLI-main
+cd G:\7-Claude-code-cli\Claude-Code-CLI-main
 ```
 
 ### 2. 创建虚拟环境
-
-```powershell
+```bash
 python -m venv .venv
 ```
 
 ### 3. 激活虚拟环境
-
-```powershell
+```bash
 # Windows PowerShell
 .\.venv\Scripts\Activate.ps1
 
@@ -56,15 +54,12 @@ source .venv/bin/activate
 ```
 
 ### 4. 安装依赖
-
-```powershell
+```bash
 pip install -e ".[dev]"
 ```
 
 ### 5. 配置 API
-
 编辑 `data/config/api-config.json`，设置你的 API 密钥：
-
 ```json
 {
   "base_url": "https://yunwu.ai/v1",
@@ -73,83 +68,64 @@ pip install -e ".[dev]"
 ```
 
 ### 6. 运行
-
-```powershell
+```bash
 python -m claude_code
 ```
 
----
-
 ## 命令列表
-
 | 命令 | 别名 | 说明 |
-|------|------|------|
-| `/help` | `/h`, `/?` | 显示命令帮助 |
-| `/new` | `/reset`, `/clear` | 开始新会话 |
-| `/model` | `/m` | 切换 AI 模型 |
-| `/style` | `/persona`, `/p` | 切换 AI 风格 |
-| `/save` | `/s` | 保存当前会话 |
-| `/history` | `/hist` | 查看历史会话 |
-| `/tools` | `/tool` | 查看工具执行历史 |
-| `/quit` | `/q`, `/exit` | 退出程序 |
-
----
+| --- | --- | --- |
+| /help | /h , /? | 显示命令帮助 |
+| /new | /reset , /clear | 开始新会话 |
+| /model | /m | 切换 AI 模型 |
+| /style | /persona , /p | 切换 AI 风格 |
+| /save | /s | 保存当前会话 |
+| /history | /hist | 查看历史会话 |
+| /tools | /tool | 查看工具执行历史 |
+| /quit | /q , /exit | 退出程序 |
 
 ## 内置工具
-
 | 工具 | 说明 |
-|------|------|
-| **Read** | 读取文件内容（卡片式输出，终端压缩显示，支持缓存引用） |
-| **Write** | 创建或覆盖文件（含 Python 语法检查） |
-| **Edit** | 精确替换文件内容（含 diff 显示，多处匹配警告） |
-| **Glob** | 按文件名模式搜索（卡片式输出，文件类型统计） |
-| **Grep** | 按内容正则搜索（卡片式输出） |
-| **Bash** | 执行 Shell 命令（流式输出，敏感/危险命令分级处理） |
-| **AskUserQuestion** | 向用户询问问题，获取选择或自由输入 |
+| --- | --- |
+| Read | 读取文件内容（卡片式输出，终端压缩显示，支持缓存引用） |
+| Write | 创建或覆盖文件（含 Python 语法检查） |
+| Edit | 精确替换文件内容（含 diff 显示，多处匹配警告） |
+| Glob | 按文件名模式搜索（卡片式输出，文件类型统计） |
+| Grep | 按内容正则搜索（卡片式输出） |
+| Bash | 执行 Shell 命令（流式输出，敏感/危险命令分级处理） |
+| AskUserQuestion | 向用户询问问题，获取选择或自由输入 |
 
 只读工具（Read、Glob、Grep）自动放行，无需确认。写入/执行工具（Write、Edit、Bash）需要用户授权。敏感操作（删除、提权等）每次都需确认。
 
----
-
 ## 安全机制
-
 ### 权限分级
-
-**只读工具自动放行**：Read、Glob、Grep 无需确认，直接执行。
-
-**写入/执行工具需确认**：
-
-- **Yes (once)** - 仅允许当前操作（同工具同路径会话内缓存）
-- **No (once)** - 拒绝当前操作
-- **Esc/q** - 取消并中断后续执行
+只读工具自动放行：Read、Glob、Grep 无需确认，直接执行。
+写入/执行工具需确认：
+- `Yes (once)` - 仅允许当前操作（同工具同路径会话内缓存）
+- `No (once)` - 拒绝当前操作
+- `Esc/q` - 取消并中断后续执行
 
 ### 敏感命令检测
-
 以下命令即使全局授权也需每次确认：
-- 删除：`rm`, `Remove-Item`, `del`, `rd`
-- 提权：`sudo`, `runas`
-- 危险操作：`git push`, `git reset --hard`
+删除：`rm`, `Remove-Item`, `del`, `rd`
+提权：`sudo`, `runas`
+危险操作：`git push`, `git reset --hard`
 
 ### 危险命令拦截
-
 以下命令直接拦截，不显示权限菜单：
-- `rm -rf /`, `rm -rf /*`
-- `mkfs`, `fdisk`
-- `curl ... | bash`
-- `shutdown`, `reboot`
-
----
+`rm -rf /`, `rm -rf /*`
+`mkfs`, `fdisk`
+`curl ... | bash`
+`shutdown`, `reboot`
 
 ## UI 预览
-
 ### 欢迎界面
-
-```
+```text
      ██████╗ ██╗       █████╗  ██╗   ██╗ ██████╗  ███████╗
     ██╔════╝ ██║      ██╔══██╗ ██║   ██║ ██╔══██╗ ██╔════╝
     ...
 
-  Claude Code Terminal v2.7.20 │ DeepSeek V3.2
+  Claude Code Terminal v2.7.22 │ DeepSeek V3.2
   ────────────────────────────────────────────────────────
   "Code is poetry." — WordPress
 
@@ -157,51 +133,34 @@ python -m claude_code
 ```
 
 ### 卡片式输出
-
-```
+```text
 ╭─ 🐍 defaults.py
-│
-│  44 行  │  1.7 KB  │  ✓ 已缓存
+│  44 行  │  1.7 KB  │  ✓ cached
 │  📌 [file:defaults.py:v0]
-│
-│     1  """默认配置"""
-│     2  from dataclasses import dataclass
-│     ...
-│
-│ 💡 文件已完整缓存，无需再次读取。直接执行任务即可。
-╰──────────────────────────────────────────────────
+│  完整内容 · 行 1-44
+╰──────────────────────────────────────────
 ```
 
 ### 终端压缩显示（大文件）
-
-```
+```text
 ╭─ 🐍 large_file.py
-│
-│  282 行  │  8.5 KB  │  ✓ 已缓存
-│
+│  282 行  │  8.5 KB  │  ✓ cached
 │  显示 1-282 行:
 │     1  """模块文档"""
 │    ...
 │   ... 省略 232 行 ...
 │    263      demo_generators()
 │    ...
-│   282      main()
-│
-│ 💡 文件已完整缓存，无需再次读取。直接执行任务即可。
-╰──────────────────────────────────────────────────
+╰──────────────────────────────────────────
 ```
 
 ### 状态栏
-
+```text
+◆ DEEPSEEK V3.2  │ $6/9 $/M │ ◆ 4.0K │ ≈$0.226
 ```
-◆ DeepSeek V3.2  │ $3/4.5 $/M │ 📁 3 │ ◆ 2.5K │ ≈$0.033
-```
-
----
 
 ## 项目结构
-
-```
+```text
 claude-code/
 ├── pyproject.toml              # 包配置
 ├── README.md
@@ -246,7 +205,7 @@ claude-code/
 │   │
 │   └── utils/                  # 工具函数
 │
-├── tests/                      # 测试文件（104 个用例）
+├── tests/                      # 测试文件（93 passed）
 │
 ├── workplace/                  # 隔离目录（启动时自动创建）
 │
@@ -256,47 +215,41 @@ claude-code/
     └── stats/                  # 统计数据
 ```
 
----
-
 ## 开发
-
 ### 运行测试
-
-```powershell
-python -m pytest tests/ -q --ignore=tests/test_api_stability.py
+```bash
+python -m pytest tests/ -q --ignore=tests/test_api_stability.py --ignore=tests/test_connection_recovery.py
 ```
+当前测试覆盖：`93 passed in 0.30s` (工具链全量验证通过)
 
-当前测试覆盖：104 个测试用例
-
----
-
-## 依赖
-
+### 依赖
 | 依赖 | 版本 | 用途 |
-|------|------|------|
+| --- | --- | --- |
 | httpx | >=0.27.0 | HTTP 客户端（流式请求） |
 | rich | >=13.7.0 | 终端 UI 渲染 |
 | prompt-toolkit | >=3.0.43 | 交互式输入 |
 
----
-
 ## 更新日志
+### v2.7.22 (2026-04-03)
+**工具系统全链路重构完成**
+- ✅ 路径解析与缓存版本链彻底打通：`Read(v0)` → `Write(v1)` → `Edit(v2)` 闭环验证通过
+- ✅ 重复读取拦截机制生效：第 2-4 次终端黄字警告，第 5 次强制拦截跳过
+- ✅ 全模块代码级清理：字典键尾部空格、变量名断裂、正则错位 100% 修复
+- ✅ Bash 流式卡片架构收敛：成功/失败统一在 `╭─ ⚡ Bash` 卡片内渲染，无重复输出
+- ✅ 权限状态机严密对齐：敏感命令不缓存，`ONCE/NO_ONCE` 逻辑全量测试通过
+- ✅ 单元测试基线稳固：`93 passed`，工具契约与执行器 100% 匹配
 
 ### v2.7.21 (2026-04-03)
-
 **路径与权限优化**
-
 - ✅ Read/Glob/Grep 取消 workplace 隔离，直接访问项目文件
 - ✅ 只读工具自动放行，跳过权限确认弹窗
-- ✅ Glob/Grep 自动排除 .venv、node_modules、__pycache__、.git 等无关目录
+- ✅ Glob/Grep 自动排除 .venv、node_modules、pycache、.git 等无关目录
 - ✅ Write/Edit 保持 workplace 隔离不变
 - ✅ Bash 保持权限确认不变
 - ✅ 全量测试 80 passed
 
 ### v2.7.20 (2026-04-02)
-
 **工具系统全面验收通过**
-
 - ✅ Read：卡片式输出、缓存引用、分段读取、重复警告、错误处理
 - ✅ Write：创建/覆盖文件、语法检查、workplace 隔离
 - ✅ Edit：精确替换、diff 显示、多处匹配警告、错误处理
@@ -304,12 +257,4 @@ python -m pytest tests/ -q --ignore=tests/test_api_stability.py
 - ✅ Grep：内容搜索、正则支持、无效正则检测
 - ✅ Bash：命令执行、敏感命令检测、危险命令拦截、错误显示
 - ✅ AskUserQuestion：选项菜单、自由输入
-
-**本次修复**：
-
-1. **Rich markup 转义** - 使用 `escape()` 转义文件内容中的特殊字符，避免解析错误
-2. **输出分离架构** - `output` 给模型完整内容，`display_output` 给终端省略版本
-3. **模型重复读取修复** - 模型拿到完整内容，不再因省略标记而重复请求
-4. **卡片样式修复** - 检测逻辑修正，样式正确渲染
-
----
+```

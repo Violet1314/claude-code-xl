@@ -18,7 +18,6 @@ __all__ = [
     "AskUserQuestionTool",
 ]
 
-
 def register_all_tools(registry):
     """注册所有内置工具"""
     registry.register(ReadTool())

@@ -115,9 +115,11 @@ class ToolExecutor:
         if tool_call.name == "Read":
             file_path = tool_call.parameters.get("file_path", "")
             if file_path:
+                # ✅ 关键修复：统一解析路径，确保与 file_cache 的 key 完全一致
+                resolved_read_path = resolve_path(file_path)
                 read_count = file_cache.get_read_count(resolved_read_path)
 
-                # 第 5 次及以后：阻止执行（count>=4 表示已读4次，本次是第5次）
+                # 第 5 次及以后：阻止执行（count >=4 表示已读4次，本次是第5次）
                 if read_count >= 4:
                     ranges = file_cache.get_read_ranges(resolved_read_path)
                     return ExecutionResult(
@@ -126,8 +128,7 @@ class ToolExecutor:
                         output=f"⚠️ 文件已读取 {read_count} 次，已达上限。\n📌 缓存引用: {resolved_read_path}\n已读取范围: {ranges}\n请直接执行任务或使用 Edit 工具编辑。",
                         skipped=True
                     )
-
-                # 第 2-4 次读取：显示警告但允许执行（调试场景）
+                # 第 2-4 次读取：显示警告但允许执行（由后续逻辑处理）
 
         # 检查 Bash 危险命令（在权限确认之前拦截）
         if tool_call.name == "Bash" and hasattr(tool, '_check_dangerous'):
@@ -183,7 +184,7 @@ class ToolExecutor:
                     result.output = result.output + warning
                     # 终端也显示警告
                     from claude_code.ui import console as ui_console
-                    ui_console.print(f"  [yellow]⚠️ 该文件已读取 {current_count} 次，建议使用缓存内容[/]")      
+                    ui_console.print(f"  [yellow]⚠️ 该文件已读取 {current_count} 次，建议使用缓存内容[/]")
 
             # 显示结果（Bash 已有流式卡片输出，跳过重复显示）
             if tool.name != "Bash":

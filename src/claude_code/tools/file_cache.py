@@ -1,12 +1,10 @@
 """
 文件缓存管理器 - 减少重复读取，节省 Token
-
 核心设计：
-1. 文件内容只完整存储一次
-2. 后续修改直接更新基础内容
-3. 通过引用标识追踪文件版本
+文件内容只完整存储一次
+后续修改直接更新基础内容
+通过引用标识追踪文件版本
 """
-
 import hashlib
 import time
 from pathlib import Path
@@ -29,24 +27,10 @@ class CachedFile:
         """获取当前内容的 hash"""
         return hashlib.md5(self.base_content.encode()).hexdigest()[:16]
 
-@dataclass
-class CachedFile:
-    """缓存的文件"""
-    base_content: str
-    base_hash: str
-    version: int = 0
-    last_read: float = field(default_factory=time.time)
-    read_count: int = 0
-    read_ranges: List[Tuple[int, int]] = field(default_factory=list)
-
-    def get_content_hash(self) -> str:
-        """获取当前内容的 hash"""
-        return hashlib.md5(self.base_content.encode()).hexdigest()[:16]
 
 class FileCacheManager:
     """
     文件缓存管理器
-
     功能：
     - 文件只读取一次，后续从缓存获取
     - 写入/编辑后自动更新缓存版本
@@ -179,7 +163,7 @@ class FileCacheManager:
             content: 新内容
 
         Returns:
-            {"success": bool, "reference": str, "version": int}
+            { "success": bool,  "reference": str,  "version": int}
         """
         key = self._get_file_key(file_path)
 
@@ -255,6 +239,7 @@ class FileCacheManager:
         """清空缓存"""
         with self._lock:
             self._cache.clear()
+
 
 # 全局缓存管理器
 file_cache = FileCacheManager()

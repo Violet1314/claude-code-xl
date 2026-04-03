@@ -2,15 +2,14 @@
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-
 from ..base import Tool, ToolResult
 from claude_code.utils.paths import resolve_path, get_file_icon
 from claude_code.ui.theme import COLORS, ICONS
 from rich.markup import escape
 
+
 class GrepTool(Tool):
     """文件内容搜索工具"""
-
     name = "Grep"
     description = "在文件中搜索匹配正则表达式的内容。返回匹配的行及其上下文。建议使用精确模式减少匹配数量。"
 

@@ -88,7 +88,7 @@ class EditTool(Tool):
             # 给终端的 Rich 显示
             display_output = self._build_terminal_display(
                 path, old_string, new_string,
-                original_content, new_content,
+                original_content,  new_content,
                 reference, version, match_count
             )
 

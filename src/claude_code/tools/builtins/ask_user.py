@@ -1,18 +1,15 @@
 """AskUserQuestion 工具 - 向用户询问问题"""
 from typing import Any, Dict, List, Optional
-
 from ..base import Tool, ToolResult
 from claude_code.ui.input import interactive_menu
 from claude_code.ui import console
 from claude_code.ui.theme import COLORS, ICONS
-
 from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
 
 
 class AskUserQuestionTool(Tool):
     """向用户询问问题工具"""
-
     name = "AskUserQuestion"
     description = (
         "向用户询问问题，获取用户的选择或输入。"
@@ -75,10 +72,8 @@ class AskUserQuestionTool(Tool):
 
         try:
             if options:
-                # 有选项：显示选择菜单
                 result = self._show_options_menu(question, options, header)
             else:
-                # 无选项：显示输入框
                 result = self._show_input_prompt(question, default)
 
             if result is None:
@@ -94,39 +89,20 @@ class AskUserQuestionTool(Tool):
                 output=result,
                 metadata={"user_response": result}
             )
-
         except Exception as e:
             return ToolResult(success=False, output="", error=f"询问失败: {str(e)}")
 
-    def _show_options_menu(
-        self,
-        question: str,
-        options: List[Dict],
-        header: str
-    ) -> Optional[str]:
-        """
-        显示选项菜单
-
-        Args:
-            question: 问题文本
-            options: 选项列表
-            header: 标题
-
-        Returns:
-            用户选择的值或 None
-        """
-        # 显示问题
+    def _show_options_menu(self, question: str, options: List[Dict], header: str) -> Optional[str]:
+        """显示选项菜单"""
         console.blank()
         console.print(f"[bold {COLORS['primary']}]{ICONS['claude']} 需要你的决策[/]")
         console.rule()
 
-        # 问题文本
         for line in question.split('\n'):
             console.print(f"  {line}")
 
         console.blank()
 
-        # 转换选项格式
         menu_options = []
         for opt in options:
             menu_options.append({
@@ -135,39 +111,26 @@ class AskUserQuestionTool(Tool):
                 "desc": opt.get("desc", ""),
             })
 
-        # 添加"其他"选项（允许自由输入）
         menu_options.append({
             "name": "其他（自由输入）",
             "value": "__free_input__",
             "desc": "输入自定义内容",
         })
 
-        # 显示菜单
         title = header if header else "选择"
         choice = interactive_menu(title, menu_options)
 
         if choice is None:
-            # 用户取消
             console.print(f"[dim]已取消[/]")
             return None
 
         if choice == "__free_input__":
-            # 自由输入
             return self._show_input_prompt("请输入你的选择", "")
 
         return choice
 
     def _show_input_prompt(self, question: str, default: str) -> Optional[str]:
-        """
-        显示输入框
-
-        Args:
-            question: 问题文本
-            default: 默认值
-
-        Returns:
-            用户输入或 None
-        """
+        """显示输入框"""
         console.blank()
         console.print(f"[bold {COLORS['primary']}]{ICONS['claude']} 问题[/]")
         console.rule()
@@ -183,18 +146,14 @@ class AskUserQuestionTool(Tool):
                 event.app.exit(result=None)
 
             session = PromptSession(key_bindings=kb)
-
-            prompt_text = "> "
+            prompt_text = " > "
             if default:
-                prompt_text = f"> [{default}]: "
+                prompt_text = f" > [{default}]: "
 
             result = session.prompt(prompt_text)
-
             if not result.strip() and default:
                 return default
-
             return result.strip() if result.strip() else None
-
         except (EOFError, KeyboardInterrupt):
             console.print(f"[dim]已取消[/]")
             return None
@@ -214,5 +173,4 @@ class AskUserQuestionTool(Tool):
             for i, opt in enumerate(options):
                 if not opt.get("label") and not opt.get("value"):
                     return f"选项 {i+1} 缺少 label 或 value"
-
         return None

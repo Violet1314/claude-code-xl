@@ -2,7 +2,6 @@
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from collections import Counter
-
 from ..base import Tool, ToolResult
 from claude_code.utils.paths import resolve_path
 from claude_code.ui.theme import COLORS, ICONS
@@ -10,7 +9,6 @@ from rich.markup import escape
 
 class GlobTool(Tool):
     """文件名模式搜索工具"""
-
     name = "Glob"
     description = "按文件名模式搜索文件。支持通配符：* 匹配任意字符，** 递归匹配目录。"
 
@@ -172,7 +170,7 @@ class GlobTool(Tool):
 
         if ext_count:
             top_exts = ext_count.most_common(5)
-            stats = " | ".join(f"{escape(ext)}: {count}" for ext, count in top_exts)
+            stats = " |  ".join(f"{escape(ext)}: {count}" for ext, count in top_exts)
             parts.append(f"[dim {COLORS['border_subtle']}]│[/]  [dim]{stats}[/]")
 
         parts.append(f"[dim {COLORS['border_subtle']}]╰{'─' * 40}[/]")
