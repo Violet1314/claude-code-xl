@@ -1,4 +1,4 @@
-"""主应用类 - 整合所有模块"""
+"""主应用类 - 整合所有模块 (Refactored for Elegance)"""
 import re
 import os
 import sys
@@ -8,9 +8,7 @@ import signal
 import atexit
 from typing import Optional, List
 from datetime import datetime
-
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
-
 from claude_code.config.settings import Settings, load_settings
 from claude_code.config.defaults import VERSION, APP_NAME, WORKPLACE_DIR
 from claude_code.core.client import APIClient
@@ -26,7 +24,6 @@ from claude_code.ui.components import (
     show_model_list,
     show_style_list,
     show_history_list,
-    get_input_border,
 )
 from claude_code.ui.input import InputHandler, interactive_menu
 from claude_code.ui.renderer import render_response
@@ -42,12 +39,10 @@ from claude_code.tools import (
     tool_calling_manager,
 )
 
-
 class Application:
     """Claude Code Terminal 主应用"""
-
     # 工具执行限制
-    MAX_TOOL_ROUNDS = 5        # 最大循环轮次
+    MAX_TOOL_ROUNDS = 10        # 最大循环轮次
     MAX_TOOLS_PER_ROUND = 10   # 每轮最大工具数
 
     def __init__(self, config_dir: str = "data/config"):
@@ -59,8 +54,6 @@ class Application:
         """
         # 加载配置
         self.settings: Settings = load_settings(config_dir)
-
-        # 初始化核心组件
         self.client: APIClient = APIClient(
             base_url=self.settings.base_url,
             api_key=self.settings.api_key,
@@ -68,40 +61,23 @@ class Application:
         self.conversation: Conversation = Conversation()
         self.files: FileManager = FileManager()
         self.stats: StatsManager = StatsManager()
-
-        # 当前状态
         self.current_model = self.settings.get_model()
         self.current_style_id = self.settings.style_ids[0] if self.settings.style_ids else "expert"
-
-        # 初始化工具系统
-        register_builtin_tools()  # 注册内置工具
+        register_builtin_tools()
         self.permission_manager = PermissionManager(project_dir=os.getcwd())
         self.tool_executor = ToolExecutor(registry, self.permission_manager)
-
-        # 设置系统提示词（包含工具说明）
         self._setup_system_prompt()
-
-        # 命令系统
         self.commands = CommandRegistry()
         for cmd_class in BUILTIN_COMMANDS:
             self.commands.register(cmd_class, app=self)
-
-        # 输入处理
-        self.input_handler = InputHandler(
-            commands=self.commands.list_commands()
-        )
+        self.input_handler = InputHandler(commands=self.commands.list_commands())
         self._update_input_state()
-
-        # 历史目录
         self.history_dir = "data/history"
         os.makedirs(self.history_dir, exist_ok=True)
-
-        # Workplace 隔离目录（启动时自动创建）
         os.makedirs(WORKPLACE_DIR, exist_ok=True)
-
-        # 注册退出处理
         atexit.register(self._on_exit)
         signal.signal(signal.SIGINT, self._signal_handler)
+
 
     def _setup_system_prompt(self) -> None:
         """设置系统提示词"""
@@ -179,44 +155,75 @@ class Application:
     # ============================================================
     # 对话功能
     # ============================================================
-
     def chat(self, user_input: str) -> None:
         """
-        处理用户对话
-
-        Args:
-            user_input: 用户输入
+        处理用户对话 (新增连续错误熔断逻辑)
         """
-        # 添加用户消息
         self.conversation.add_user_message(user_input)
-
-        # 多轮对话循环
         round_count = 0
+        
+        # 【修改点 2】：连续错误追踪状态
+        consecutive_failures = 0
+        last_error_signature = ""
 
         while round_count < self.MAX_TOOL_ROUNDS:
             round_count += 1
 
-            # 获取优化后的消息
             context_limit = self.current_model.context_limit if self.current_model else 100000
             messages = self.conversation.get_optimized_messages(max_tokens=context_limit)
 
-            # 注入文件上下文
             file_context = self.files.build_context()
             if file_context:
                 insert_idx = 1 if messages and messages[0].get("role") == "system" else 0
                 messages.insert(insert_idx, {"role": "user", "content": file_context})
 
-            # 更新统计
             self.stats.update_input(messages)
-
-            # 发送请求并处理响应
             response, has_tools = self._handle_response(messages)
 
             if not has_tools:
-                # 没有工具调用，结束循环
                 break
 
-            # 有工具调用，继续下一轮
+            # 【修改点 3】：检查本轮是否有工具执行失败
+            # 注意：_handle_response 内部已经执行了工具并构建了 feedback
+            # 我们需要从 conversation 的最新消息中提取错误特征，或者更简单地：
+            # 在 _execute_tools 或 _build_tool_feedback 中记录状态。
+            # 为了简化，我们在 _handle_response 返回后，检查最后一条用户消息（即 feedback）
+            
+            last_msg = self.conversation.get_messages()[-1]
+            is_error_round = False
+            current_error_sig = ""
+
+            if last_msg["role"] == "user" and "<tool_results>" in last_msg["content"]:
+                # 简单解析：如果反馈中包含多个 error 且没有 success，视为失败轮次
+                if '<status="error">' in last_msg["content"] and '<status="success">' not in last_msg["content"]:
+                    is_error_round = True
+                    # 提取第一个错误工具名作为签名
+                    import re
+                    match = re.search(r'tool="(.*?)"', last_msg["content"])
+                    if match:
+                        current_error_sig = match.group(1)
+
+            if is_error_round:
+                if current_error_sig == last_error_signature:
+                    consecutive_failures += 1
+                else:
+                    consecutive_failures = 1
+                    last_error_signature = current_error_sig
+                
+                # 【熔断逻辑】：连续 3 次相同错误
+                if consecutive_failures >= 3:
+                    stop_msg = (
+                        f"⚠️ 检测到连续 {consecutive_failures} 次相同的工具执行错误 ({current_error_sig})。\n"
+                        f"请停止重复尝试相同的命令。重新审视你的逻辑，或者向用户报告无法完成此步骤。"
+                    )
+                    self.conversation.add_user_message(stop_msg)
+                    console.warning(f"\n{ICONS['warning']} 触发连续错误熔断，已通知模型停止重试。\n")
+                    break # 强制退出循环
+            else:
+                # 如果本轮有成功，重置计数器
+                consecutive_failures = 0
+                last_error_signature = ""
+
             console.print(f"\n[{COLORS['info']}]{ICONS['info']} 继续处理...[/]")
 
         # 保存统计
@@ -331,9 +338,6 @@ class Application:
 
         duration = time.time() - start_time
         return full_response, native_tool_calls, real_usage, duration
-        console.print(f"  [dim]🕒 耗时: {duration:.2f}s[/]\n")
-
-        return full_response, native_tool_calls, real_usage, duration
 
     def _accumulate_native_tool_calls(self, chunk: dict, native_tool_calls: list) -> None:
         """
@@ -440,8 +444,8 @@ class Application:
         # 执行工具
         report = self.tool_executor.execute_batch(tool_calls)
 
-        # 显示执行摘要
-        console.print(report.get_summary())
+        # 显示执行摘要 (可选，如果 progress_display 已经展示了详细卡片，这里可以简化)
+        # console.print(report.get_summary()) 
 
         return report
 
@@ -562,7 +566,7 @@ class Application:
             console.print(f"[{COLORS['system']}]{timestamp}[/] {status} {tool_name}")
 
             if entry.get('error'):
-                console.print(f"  ", end="")
+                console.print(f"   ", end="")
                 console.print(entry['error'], markup=False, highlight=False, style=COLORS['error'])
 
         console.print()
@@ -762,11 +766,10 @@ class Application:
         console.clear()
         show_welcome(self.current_model.name if self.current_model else "Claude")
 
-        top_border, bottom_border = get_input_border()
-
         try:
             while True:
                 try:
+                    # 在每次对话开始前，显示紧凑的状态头
                     show_status_bar(
                         model_name=self.current_model.name if self.current_model else "Claude",
                         total_tokens=self.stats.session.total_tokens,
@@ -775,9 +778,7 @@ class Application:
                         total_cost=self.stats.session.cost,
                     )
 
-                    console.print(f"[{COLORS['primary']}]{top_border}[/]")
                     user_input = self.input_handler.prompt()
-                    console.print(f"[{COLORS['primary']}]{bottom_border}[/]")
 
                     if not user_input:
                         continue

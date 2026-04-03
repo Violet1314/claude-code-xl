@@ -1,85 +1,82 @@
-"""权限确认 UI 组件"""
+"""权限确认 UI 组件 - 优雅卡片风格"""
 from typing import Optional
-
+from rich.panel import Panel
+from rich.text import Text
+from rich.box import ROUNDED
 from claude_code.ui.theme import COLORS, ICONS
 from claude_code.ui.input import interactive_menu
 from claude_code.ui import console
 from .base import PermissionLevel
-
 
 class PermissionUI:
     """权限确认 UI"""
 
     @staticmethod
     def show_permission_menu(
-            tool_name: str,
-            operation_desc: str,
-            details: str = "",
-            is_read_only: bool = False,
-            path_warning: str = ""
-        ) -> Optional[str]:
-
+        tool_name: str,
+        operation_desc: str,
+        details: str = " ",
+        is_read_only: bool = False,
+        path_warning: str = " "
+    ) -> Optional[str]:
         """
-        显示权限确认菜单
-
-        Args:
-            tool_name: 工具名称
-            operation_desc: 操作描述
-            details: 详细信息
-            is_read_only: 是否为只读操作
-            path_warning: 路径范围警告信息
-
-        Returns:
-            "once" | "all" | "no_once" | None（取消）
+        显示权限确认菜单 (Panel 风格 - 极简版)
         """
         con = console.get_console()
-
-        # 顶部标题框
-        console.print(f"  [dim {COLORS['border_subtle']}]╭─[/] [{COLORS['warning']}]{ICONS['warning']}[/] [bold {COLORS['warning']}]权限确认[/]")
-
-        # 工具信息
+        
+        # 1. 构建标题
         type_hint = "[只读]" if is_read_only else "[写入]"
         type_color = COLORS['info'] if is_read_only else COLORS['warning']
-
-        # 工具图标
         tool_icon = PermissionUI._get_tool_icon(tool_name)
+        
+        title_text = Text.assemble(
+            (f"{ICONS['warning']} 权限确认 ", f"bold {COLORS['warning']} "),
+            ("  ", "default "),
+            (f"{tool_icon} {tool_name} ", "bold white "),
+            ("  ", "default "),
+            (type_hint, f"dim {type_color} ")
+        )
 
-        console.print(f"  [dim {COLORS['border_subtle']}]│[/]")
-        console.print(f"  [dim {COLORS['border_subtle']}]│[/] [{COLORS['text_primary']}]{tool_icon} {tool_name}[/] [dim {type_color}]{type_hint}[/]")
-
-        # 操作描述
-        console.print(f"  [dim {COLORS['border_subtle']}]│[/] [dim]操作:[/]")
-        # 截断长操作描述
-        desc_lines = operation_desc.split('\n') if '\n' in operation_desc else [operation_desc]
-        for line in desc_lines[:3]:
-            if len(line) > 60:
-                line = line[:57] + "..."
-            console.print(f"  [dim {COLORS['border_subtle']}]│[/]   {line}")
-
-        # 路径范围警告
+        # 2. 构建内容 (只保留核心操作)
+        content_lines = []
+        
+        # 操作描述 (最简洁形式)
+        content_lines.append(f"[bold]操作:[/]")
+        desc_preview = operation_desc.split('\n')[0]
+        if len(desc_preview) > 80:
+            desc_preview = desc_preview[:77] + "..."
+        content_lines.append(f"  {desc_preview}")
+        
+        content_lines.append(" ") 
+        
+        # 路径警告 (如果有)
         if path_warning:
-            console.print(f"  [dim {COLORS['border_subtle']}]│[/]")
-            console.print(f"  [dim {COLORS['border_subtle']}]│[/] [{COLORS['warning']}]⚠️ 路径范围警告[/]")
+            content_lines.append(f"[{COLORS['warning']}]⚠️ 路径范围警告:[/]")
             for line in path_warning.split('\n')[:2]:
-                console.print(f"  [dim {COLORS['border_subtle']}]│[/]   [dim]{line}[/]")
+                content_lines.append(f"  [dim]{line}[/]")
+            content_lines.append(" ")
 
-        # 详细信息
-        if details:
-            console.print(f"  [dim {COLORS['border_subtle']}]│[/]")
-            console.print(f"  [dim {COLORS['border_subtle']}]│[/] [dim]详情:[/]")
-            for line in details.split('\n')[:4]:
-                if len(line) > 60:
-                    line = line[:57] + "..."
-                console.print(f"  [dim {COLORS['border_subtle']}]│[/]   [dim]{line}[/]")
+        # 【优化】：移除 details 部分
 
-        # 底部边框
-        console.print(f"  [dim {COLORS['border_subtle']}]│[/]")
-        console.print(f"  [dim {COLORS['border_subtle']}]╰{'─' * 50}[/]")
+        content_text = "\n".join(content_lines)
 
-        # 快捷键提示
-        console.print(f"  [dim]↑↓ 选择 │ Enter 确认 │ Esc/q 取消[/]\n")
+        # 3. 渲染 Panel
+        panel = Panel(
+            content_text,
+            title=title_text,
+            title_align="left",
+            border_style=COLORS['border_default'],
+            box=ROUNDED,
+            padding=(1, 2),
+        )
+        
+        con.print()
+        con.print(panel)
+        
+        # 4. 交互提示
+        con.print(f"  [dim]↑↓ 选择 │ Enter 确认 │ Esc/q 取消[/]\n")
 
-        # 构建菜单选项（仅 once 级别，无全局授权）
+        # 5. 构建菜单选项
         options = [
             {
                 "name": "Yes (once)",
@@ -100,17 +97,18 @@ class PermissionUI:
         """获取工具图标"""
         icons = {
             "Read": ICONS.get('read', '📄'),
-            "Write": ICONS.get('write', '📝'),
-            "Edit": ICONS.get('edit', '✏️'),
+            "Write": ICONS.get('write', '✎'),
+            "Edit": ICONS.get('edit', '✐'),
             "Bash": ICONS.get('bash', '⚡'),
             "Grep": ICONS.get('grep', '🔍'),
-            "Glob": ICONS.get('glob', '📁'),
-            "AskUserQuestion": ICONS.get('ask', '❓'),
+            "Glob": ICONS.get('glob', '📂'),
+            "AskUserQuestion": ICONS.get('ask', '💬'),
         }
-        return icons.get(tool_name, ICONS.get('file', '📎'))
+        return icons.get(tool_name, ICONS.get('file', '📄'))
 
     @staticmethod
     def show_result(allowed: bool, level: PermissionLevel) -> None:
+        """显示权限结果"""
         if allowed:
             color = COLORS['success']
             msg = "✓ 允许执行"
@@ -122,6 +120,7 @@ class PermissionUI:
 
     @staticmethod
     def show_cached_decision(tool_name: str, level: PermissionLevel, operation: str) -> None:
+        """显示缓存决策"""
         if level == PermissionLevel.ONCE:
             color = COLORS['success']
             msg = "✓ 已授权：自动通过"
@@ -129,19 +128,13 @@ class PermissionUI:
             color = COLORS['warning']
             msg = "✗ 使用缓存：拒绝"
 
-        console.print(f"  [{color}]{msg}[/] ", end="")
+        console.print(f"  [{color}]{msg}[/]  ", end="")
         console.print_raw(tool_name)
 
     @staticmethod
     def show_progress(tool_name: str, status: str = "执行中") -> None:
-        """
-        显示工具执行进度
-
-        Args:
-            tool_name: 工具名称
-            status: 状态文本
-        """
-        console.print(f"  [{COLORS['info']}]{ICONS['info']}[/] ", end="")
+        """显示工具执行进度"""
+        console.print(f"  [{COLORS['info']}]{ICONS['info']}[/]  ", end="")
         console.print_raw(tool_name)
         console.print(f": {status}")
 
@@ -149,44 +142,38 @@ class PermissionUI:
     def show_tool_result(tool_name: str, success: bool, output: str) -> None:
         """
         显示工具执行结果
-
-        Args:
-            tool_name: 工具名称
-            success: 是否成功
-            output: 输出内容（可能包含 Rich 标记）
+        注意：Bash/Read/Glob 等工具现在由 progress_display.py 统一渲染卡片，
+        此处主要处理 Write/Edit 等简单工具或 fallback 情况。
         """
         if success:
-            # 根据工具名称判断输出类型
-            # Read/Grep/Glob 使用卡片式输出（包含 ╭─ 边框）
-            # Edit 使用 diff 输出（包含 [bold green]Update 或 ✅ 编辑成功）
-            # Bash/Write/AskUserQuestion 使用普通文本输出
+            # 关键修复：更 robust 地检测 Rich Markup
+            # 只要输出中包含 '[' 且不是纯文本，就尝试渲染
             is_rich_output = (
-                tool_name in ("Read", "Grep", "Glob") and "╭─" in output or
-                tool_name == "Edit" and ("[bold green]Update" in output or "✅ 编辑成功" in output)
+                tool_name in ("Read", "Grep", "Glob", "Edit") or 
+                ("[" in output and "]" in output)
             )
+            
             if is_rich_output:
-                # Rich markup 输出：使用 console.print 渲染
+                # 对于 Edit 工具，我们希望能看到漂亮的 Diff
+                # 如果 output 已经是 Panel 格式（如 Read），直接打印
+                # 如果 output 是 Diff 文本，我们也直接打印，让 Rich 解析颜色
                 console.print(output)
             else:
-                # 普通输出：直接打印，不解析 markup
-                console.print_raw(output)
+                # 普通成功消息
+                console.print(f"  [{COLORS['success']}]{ICONS['success']}[/] [dim]{tool_name}[/] 执行成功")
+                if output.strip():
+                    console.print_raw(output)
         else:
             icon = ICONS['error']
             color = COLORS['error']
-            console.print(f"  [{color}]{icon} {tool_name} 失败:[/] ", end="")
+            console.print(f"  [{color}]{icon} {tool_name} 失败:[/]  ", end="")
             console.print_raw(output)
 
     @staticmethod
     def show_tool_start(tool_name: str, operation: str) -> None:
-        """
-        显示工具开始执行
-
-        Args:
-            tool_name: 工具名称
-            operation: 操作描述
-        """
+        """显示工具开始执行"""
         tool_icon = PermissionUI._get_tool_icon(tool_name)
-        console.print(f"\n  [{COLORS['primary']}]{tool_icon} 执行工具:[/] ", end="")
+        console.print(f"\n  [{COLORS['primary']}]{tool_icon} 执行工具:[/]  ", end="")
         console.print_raw(tool_name)
-        console.print(f"  ", end="")
+        console.print(f"   ", end="")
         console.print_raw(operation)

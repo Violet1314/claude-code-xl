@@ -42,5 +42,5 @@ UI = UIDefaults()
 WORKPLACE_DIR = "workplace"
 
 # 版本信息
-VERSION = "2.7.20"
+VERSION = "2.7.24 | Author: XieLong"
 APP_NAME = "Claude Code Terminal"

@@ -1,28 +1,6 @@
 """输入处理 - prompt-toolkit 交互"""
 from typing import List, Optional, Callable
-
 from prompt_toolkit import PromptSession
-
-
-def display_width(s: str) -> int:
-    """计算字符串的终端显示宽度（中文=2，英文=1）"""
-    width = 0
-    for ch in s:
-        # CJK 字符范围：U+4E00-U+9FFF（常用汉字）
-        # 扩展：U+3400-U+4DBF, U+20000-U+2A6DF 等
-        if '\u4e00' <= ch <= '\u9fff':
-            width += 2
-        else:
-            width += 1
-    return width
-
-
-def pad_to_width(s: str, width: int) -> str:
-    """将字符串 pad 到指定显示宽度"""
-    current = display_width(s)
-    if current >= width:
-        return s
-    return s + ' ' * (width - current)
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.layout import Layout
@@ -30,29 +8,40 @@ from prompt_toolkit.layout.containers import Window
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.widgets import Frame
 from prompt_toolkit.application import Application
-
 from claude_code.ui.theme import COLORS, ICONS, PROMPT_STYLE
+
+# ============================================================
+# 工具函数：中文宽度处理
+# ============================================================
+def display_width(s: str) -> int:
+    """计算字符串的终端显示宽度（中文=2，英文=1）"""
+    width = 0
+    for ch in s:
+        # CJK 字符范围：U+4E00-U+9FFF（常用汉字）
+        if '\u4e00' <= ch <= '\u9fff':
+            width += 2
+        else:
+            width += 1
+    return width
+
+def pad_to_width(s: str, width: int) -> str:
+    """将字符串 pad 到指定显示宽度"""
+    current = display_width(s)
+    if current >= width:
+        return s
+    return s + ' ' * (width - current)
 
 # ============================================================
 # 命令补全器
 # ============================================================
-
 class CommandCompleter(Completer):
     """命令自动补全"""
-    
     def __init__(self, commands: List[dict] = None):
-        """
-        初始化补全器
-        
-        Args:
-            commands: 命令列表 [{"name": ..., "description": ...}]
-        """
         self.commands = commands or []
-    
+
     def set_commands(self, commands: List[dict]) -> None:
-        """更新命令列表"""
         self.commands = commands
-    
+
     def get_completions(self, document, complete_event):
         text = document.text_before_cursor.lstrip()
         
@@ -75,32 +64,22 @@ class CommandCompleter(Completer):
 # ============================================================
 # 输入会话
 # ============================================================
-
 class InputHandler:
     """输入处理器"""
-    
     def __init__(self, commands: List[dict] = None):
-        """
-        初始化输入处理器
-        
-        Args:
-            commands: 命令列表
-        """
         self.completer = CommandCompleter(commands)
-        self._session: Optional[PromptSession] = None  # 延迟初始化
+        self._session: Optional[PromptSession] = None
         # 状态
         self.model_name: str = "Claude"
         self.file_count: int = 0
-    
+
     @property
     def session(self) -> PromptSession:
-        """延迟创建 PromptSession"""
         if self._session is None:
             self._session = self._create_session()
         return self._session
-    
+
     def _create_session(self) -> PromptSession:
-        """创建 PromptSession"""
         kb = KeyBindings()
         
         @kb.add('escape', 'enter')
@@ -126,66 +105,40 @@ class InputHandler:
             completer=self.completer,
             complete_while_typing=True,
             complete_in_thread=True,
-            style=PROMPT_STYLE,
+            style=PROMPT_STYLE,  # 确保样式被应用
         )
-    
+
     def _get_prompt(self):
         """获取主提示符"""
-        parts = [
-            ('class:input-lead', '│'),
-            ('class:input-lead', f' {ICONS["user"]} '),
+        # 使用简单的文本和样式类
+        # 注意：这里不使用 Rich Markup，而是 Prompt Toolkit 的样式类
+        return [
+            ('class:input-lead', f'{ICONS["user"]} '),
         ]
-        
-        return parts
-    
+
     def _get_continuation(self, width, line_number, is_soft_wrap):
         """获取续行提示符"""
-        return [('class:input-lead', '│   ')]
+        return [('class:input-lead', '  ')]
 
     def update_state(self, model_name: str = None, file_count: int = None) -> None:
-        """
-        更新状态
-        
-        Args:
-            model_name: 模型名称
-            file_count: 文件数量
-        """
         if model_name is not None:
             self.model_name = model_name
         if file_count is not None:
             self.file_count = file_count
-    
+
     def update_commands(self, commands: List[dict]) -> None:
-        """更新命令列表"""
         self.completer.set_commands(commands)
-    
+
     def prompt(self) -> str:
-        """
-        获取用户输入
-        
-        Returns:
-            用户输入的文本
-        """
         return self.session.prompt(self._get_prompt()).strip()
 
 # ============================================================
 # 交互式菜单
 # ============================================================
-
 def interactive_menu(
     title: str,
     options: List[dict],
 ) -> Optional[any]:
-    """
-    显示交互式选择菜单
-    
-    Args:
-        title: 菜单标题
-        options: 选项列表 [{"name": ..., "value": ..., "desc": ...}]
-        
-    Returns:
-        选中的 value 或 None（取消）
-    """
     if not options:
         return None
 
@@ -213,46 +166,46 @@ def interactive_menu(
             result.append(('', '\n'))
         
         return result
-    
+
     @kb.add('up')
     @kb.add('k')
     def _(event):
         nonlocal selected_idx
         selected_idx = (selected_idx - 1) % len(options)
-    
+
     @kb.add('down')
     @kb.add('j')
     def _(event):
         nonlocal selected_idx
         selected_idx = (selected_idx + 1) % len(options)
-    
+
     @kb.add('enter')
     def _(event):
         event.app.exit(result=options[selected_idx]['value'])
-    
+
     @kb.add('escape')
     @kb.add('q')
     def _(event):
         event.app.exit(result=None)
-    
+
     # 数字快捷键
     for i in range(min(9, len(options))):
         @kb.add(str(i + 1))
         def _(event, idx=i):
             event.app.exit(result=options[idx]['value'])
-    
+
     window = Window(
         content=FormattedTextControl(get_formatted_text),
         height=len(options),
     )
-    
+
     app = Application(
         layout=Layout(Frame(body=window, title=f" {title} ", style='class:menu-border')),
         key_bindings=kb,
         style=PROMPT_STYLE,
         full_screen=False,
     )
-    
+
     return app.run()
 
 def input_number(
@@ -260,19 +213,8 @@ def input_number(
     min_val: int = 1,
     max_val: int = 10,
 ) -> Optional[int]:
-    """
-    获取数字输入
-    
-    Args:
-        prompt: 提示文本
-        min_val: 最小值
-        max_val: 最大值
-        
-    Returns:
-        输入的数字或 None
-    """
     from claude_code.ui import console
-    
+
     try:
         session = PromptSession()
         result = session.prompt(f"{prompt} [{min_val}-{max_val}]: ").strip()

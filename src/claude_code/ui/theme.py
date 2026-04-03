@@ -4,12 +4,11 @@ from prompt_toolkit.styles import Style
 # ============================================================
 # 颜色配置
 # ============================================================
-
 COLORS = {
     # 品牌色
     "primary": "#D97757",           # Claude 官方橙色
     "primary_dim": "#B45309",       # 深橙色
-
+    
     # 状态色
     "success": "#4ADE80",           # 薄荷绿
     "warning": "#FBBF24",           # 琥珀黄
@@ -45,14 +44,13 @@ COLORS = {
 }
 
 # ============================================================
-# 图标配置（使用通用 Unicode，兼容性更好）
+# 图标配置
 # ============================================================
-
 ICONS = {
     # 品牌与用户
     'claude': '◆',
     "user": "❯",
-
+    
     # 状态
     "success": "✓",
     "error": "✗",
@@ -63,59 +61,57 @@ ICONS = {
     # 文件系统
     "file": "📎",
 
-    # 工具专属图标（使用通用符号）
-    "read": "📖",           # 书本
-    "write": "✏️",          # 铅笔
-    "edit": "✎",           # 编辑
-    "bash": "⚡",           # 闪电
-    "grep": "🔍",           # 放大镜
-    "glob": "📁",           # 文件夹
-    "ask": "❓",            # 问号
+    # 工具专属图标
+    "read": "📖",           
+    "write": "✏️",          
+    "edit": "✎",           
+    "bash": "⚡",           
+    "grep": "🔍",           
+    "glob": "📁",           
+    "ask": "❓",            
 
-    # 文件类型图标（使用通用符号）
-    "file_py": "🐍",        # Python 蛇
-    "file_js": "📜",        # JavaScript 卷轴
-    "file_ts": "📘",        # TypeScript 蓝书
-    "file_json": "📋",      # JSON 剪贴板
-    "file_md": "📝",        # Markdown 备忘录
-    "file_txt": "📄",       # 文本
-    "file_yaml": "⚙",       # YAML 齿轮
-    "file_html": "🌐",      # HTML 地球
-    "file_css": "🎨",       # CSS 调色板
-    "file_default": "📄",   # 默认文件
+    # 文件类型图标
+    "file_py": "🐍",        
+    "file_js": "📜",        
+    "file_ts": "📘",        
+    "file_json": "📋",      
+    "file_md": "📝",        
+    "file_txt": "📄",       
+    "file_yaml": "⚙",       
+    "file_html": "🌐",      
+    "file_css": "🎨",       
+    "file_default": "📄",   
 
     # 其他
-    "folder": "📁",         # 文件夹
-    "link": "🔗",           # 链接
-    "lock": "🔒",           # 锁
-    "star": "⭐",           # 星星
-    "clock": "⏱",          # 时钟
-    "token": "◆",           # Token 图标
-    "price": "$",           # 价格图标
+    "folder": "📁",         
+    "link": "🔗",           
+    "lock": "🔒",           
+    "star": "⭐",           
+    "clock": "⏱",          
+    "token": "◆",           
+    "price": "$",           
 }
 
 # ============================================================
-# Powerline 符号（使用简单箭头，兼容性更好）
+# Powerline 符号
 # ============================================================
-
 POWERLINE = {
-    "right_hard": "▶",       # 简单三角箭头
-    "right_soft": "›",       # 小箭头
-    "left_hard": "◀",        # 左箭头
-    "left_soft": "‹",        # 小左箭头
-    "separator": "│",        # 竖线分隔符
+    "right_hard": "▶",       
+    "right_soft": "›",       
+    "left_hard": "◀",        
+    "left_soft": "‹",        
+    "separator": "│",        
 }
 
 # ============================================================
 # Prompt Toolkit 样式
 # ============================================================
-
 PROMPT_STYLE = Style.from_dict({
     # 补全菜单
-    'completion-menu': 'bg:#1A1A1A #D1D5DB',
+    'completion-menu': f'bg:{COLORS["bg_elevated"]} {COLORS["text_secondary"]}',
     'completion-menu.completion.current': f'bg:{COLORS["primary"]} #000000 bold',
-    'completion-menu.meta.completion': 'bg:#121212 #888888',
-
+    'completion-menu.meta.completion': f'bg:{COLORS["bg_dark"]} {COLORS["text_muted"]}',
+    
     # 命令与标签
     'command': f'{COLORS["success"]} bold',
     'model-tag': f'bg:{COLORS["primary"]} #000000 bold',
@@ -124,7 +120,8 @@ PROMPT_STYLE = Style.from_dict({
 
     # 输入区域
     'input-area': f'bg:{COLORS["input_bg"]} {COLORS["input_text"]}',
-    'input-lead': f'bg:{COLORS["input_bg"]} {COLORS["primary"]} bold',
+    # 关键修复：确保 input-lead 使用正确的 fg 颜色
+    'input-lead': f'fg:{COLORS["primary"]} bold bg:{COLORS["input_bg"]}',
     'cursor': f'{COLORS["primary"]} bold',
 
     # 菜单样式
@@ -135,9 +132,8 @@ PROMPT_STYLE = Style.from_dict({
 })
 
 # ============================================================
-# Logo 渐变色（从深到浅）
+# Logo 渐变色
 # ============================================================
-
 LOGO_GRADIENT = [
     "#C1502E",  # 深橙红
     "#D97757",  # 标准橙（主品牌色）
@@ -148,9 +144,8 @@ LOGO_GRADIENT = [
 ]
 
 # ============================================================
-# 编程名言（欢迎界面随机显示）
+# 编程名言
 # ============================================================
-
 PROGRAMMING_QUOTES = [
     '"Code is poetry." — WordPress',
     '"Talk is cheap. Show me the code." — Linus Torvalds',

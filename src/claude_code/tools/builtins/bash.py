@@ -136,34 +136,58 @@ class BashTool(Tool):
             "required": ["command"]
         }
 
+
+    def _check_dangerous(self, command: str) -> Tuple[bool, str]:
+        """检查命令是否危险"""
+        cmd = command.strip().lower()
+        for pattern in self.DANGEROUS_PATTERNS:
+            if re.search(pattern, cmd, re.IGNORECASE):
+                return True, "此命令可能导致系统损坏或数据丢失"
+        return False, ""
+
     def execute(self, parameters: Dict[str, Any]) -> ToolResult:
         """执行命令"""
+        from claude_code.config.defaults import WORKPLACE_DIR
+        from pathlib import Path
+
         command = parameters.get("command", "").strip()
         try:
             timeout = int(parameters.get("timeout", 120))
         except (ValueError, TypeError):
             timeout = 120
         timeout = min(timeout, self.MAX_EXECUTION_TIME)
-        cwd = parameters.get("cwd", ".")
+        
+        # 【关键修改 1】：路径隔离逻辑
+        user_cwd = parameters.get("cwd", ".")
+        work_dir = Path(user_cwd).resolve()
+        
+        # 如果用户未指定绝对路径，强制使用 workplace 目录
+        if not Path(user_cwd).is_absolute():
+            work_dir = Path(WORKPLACE_DIR).resolve()
+            work_dir.mkdir(parents=True, exist_ok=True)
 
         if not command:
             return ToolResult(success=False, output="", error="缺少 command 参数")
+
+        # 【关键修改 2】：Unix 命令自动转换 (兜底策略)
+        if os.name == 'nt':
+            original_command = command
+            command = self._translate_unix_command(command)
 
         # 检查黑名单
         is_dangerous, danger_reason = self._check_dangerous(command)
         if is_dangerous:
             return ToolResult(success=False, output="", error=f"危险命令已拦截: {danger_reason}")
 
-        # Windows 环境下检查 Unix 不兼容语法
+        # Windows 环境下检查 Unix 不兼容语法 (作为第二道防线)
         if os.name == 'nt':
             unix_error = self._check_unix_syntax(command)
             if unix_error:
                 return ToolResult(success=False, output="", error=unix_error)
 
         # 检查工作目录
-        work_dir = Path(cwd).resolve()
         if not work_dir.exists():
-            return ToolResult(success=False, output="", error=f"工作目录不存在: {cwd}")
+            return ToolResult(success=False, output="", error=f"工作目录不存在: {work_dir}")
 
         try:
             is_windows = os.name == 'nt'
@@ -171,7 +195,7 @@ class BashTool(Tool):
             progress.start()
 
             if is_windows:
-                win_command = command.replace('&&', ';')
+                win_command = command.replace(' &&', ';')
                 ps_command = f"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; {win_command}"
                 process = subprocess.Popen(
                     ["powershell", "-NoProfile", "-Command", ps_command],
@@ -189,12 +213,14 @@ class BashTool(Tool):
                 )
 
             output_lines = []
-            output_bytes = b""
-
+            
             try:
                 while True:
-                    if progress.is_timeout():
+                    # 检查超时 (依赖 progress_display.py 中的 is_timeout 方法)
+                    if hasattr(progress, 'is_timeout') and progress.is_timeout():
                         process.kill()
+                        if hasattr(progress, 'set_error'):
+                            progress.set_error(f"命令执行超时（{timeout}秒）")
                         progress.stop(False, -1)
                         return ToolResult(success=False, output="", error=f"命令执行超时（{timeout}秒）")
 
@@ -203,8 +229,6 @@ class BashTool(Tool):
                         if process.poll() is not None:
                             break
                         continue
-
-                    output_bytes += line
 
                     try:
                         if is_windows:
@@ -218,18 +242,22 @@ class BashTool(Tool):
                             if decoded is None:
                                 decoded = line.decode('utf-8', errors='replace').rstrip('\r\n')
                         else:
-                            decoded = line.decode('utf-8', errors='replace').rstrip('\r\n')
+                            decoded = line.decode('utf-8', errors='replace').rstrip('\n')
 
                         if decoded:
                             output_lines.append(decoded)
-                            progress.feed_output(decoded)
+                            if hasattr(progress, 'feed_output'):
+                                progress.feed_output(decoded)
                     except Exception:
                         pass
 
             except Exception as e:
                 process.kill()
+                error_msg = f"读取输出失败: {str(e)}"
+                if hasattr(progress, 'set_error'):
+                    progress.set_error(error_msg)
                 progress.stop(False, -1)
-                return ToolResult(success=False, output="", error=f"读取输出失败: {str(e)}")
+                return ToolResult(success=False, output="", error=error_msg)
             
             return_code = process.wait()
             output = '\n'.join(output_lines)
@@ -237,7 +265,9 @@ class BashTool(Tool):
                 output = output[:self.MAX_OUTPUT_LENGTH] + f"\n... (输出过长，已截断，共 {len(output)} 字符)"
 
             success = return_code == 0
-            progress.stop(success, return_code)
+            
+            if hasattr(progress, 'stop'):
+                progress.stop(success, return_code)
 
             if success:
                 return ToolResult(
@@ -267,13 +297,39 @@ class BashTool(Tool):
         except Exception as e:
             return ToolResult(success=False, output="", error=f"执行失败: {str(e)}")
 
-    def _check_dangerous(self, command: str) -> Tuple[bool, str]:
-        """检查命令是否危险"""
-        cmd = command.strip().lower()
-        for pattern in self.DANGEROUS_PATTERNS:
-            if re.search(pattern, cmd, re.IGNORECASE):
-                return True, "此命令可能导致系统损坏或数据丢失"
-        return False, ""
+    def _translate_unix_command(self, command: str) -> str:
+        """
+        将常见的 Unix 命令转换为 PowerShell 等效命令 (兜底策略)
+        """
+        import re
+        cmd_lower = command.lower().strip()
+        
+        # 1. ls -la / ll -> Get-ChildItem -Force
+        if re.match(r'^ls\s+(-[la]+|-\w*la\w*)\b', cmd_lower) or cmd_lower.startswith('ll'):
+            args = command.split()[1:] if ' ' in command else []
+            path_arg = " ".join([a for a in args if not a.startswith('-')])
+            return f"Get-ChildItem -Force {path_arg}".strip()
+        
+        # 2. cat file -> Get-Content file
+        if cmd_lower.startswith('cat '):
+            return command.replace('cat ', 'Get-Content ', 1)
+        
+        # 3. rm -rf dir -> Remove-Item -Recurse -Force dir
+        if re.match(r'^rm\s+(-[rf]+\s+)*', cmd_lower):
+            args = command.split()[1:]
+            clean_args = [a for a in args if not re.match(r'^-[rf]+$', a)]
+            return f"Remove-Item -Recurse -Force {' '.join(clean_args)}"
+        
+        # 4. mkdir -p a/b/c -> New-Item -ItemType Directory -Path a/b/c -Force
+        if re.match(r'^mkdir\s+-p\s+', cmd_lower):
+            path = command.split('-p ')[1].strip()
+            return f"New-Item -ItemType Directory -Path '{path}' -Force"
+        
+        # 5. grep "pattern" file -> Select-String -Pattern "pattern" -Path file
+        if cmd_lower.startswith('grep '):
+            return command.replace('grep ', 'Select-String -Pattern ', 1).replace(' -i', ' -CaseSensitive:$false')
+
+        return command
 
     def _check_unix_syntax(self, command: str) -> Optional[str]:
         """检查 Windows PowerShell 不兼容的 Unix 语法"""

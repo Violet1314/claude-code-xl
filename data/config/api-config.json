@@ -48,26 +48,33 @@
       "tool_mode": "native"
     },
     {
+      "id": "glm-5",
+      "name": "GLM 5",
+      "price": "Input: 4$/1M Output: 18$/1M",
+      "context_limit": 200000,
+      "tool_mode": "native"
+    },
+    {
       "id": "MiniMax-M2.7",
       "name": "MiniMax M2.7",
-      "price": "Input: 6.3$/1M Output: 25.2$/1M",
+      "price": "Input: 2.1$/1M Output: 8.4$/1M",
       "context_limit": 200000,
       "tool_mode": "native"
     },
     {
       "id": "qwen3.5-plus",
       "name": "Qwen 3.5 Plus",
-      "price": "Input:2.4$/1M Output: 14.4$/1M",
+      "price": "Input:0.8$/1M Output:4.8$/1M",
       "context_limit": 1000000,
       "tool_mode": "native"
     },
     {
       "id": "deepseek-v3.2",
       "name": "DeepSeek V3.2",
-      "price": "Input: 6$/1M Output: 9$/1M",
+      "price": "Input: 2$/1M Output: 3$/1M",
       "context_limit": 128000,
       "tool_mode": "native"
     }
   ],
-  "default_model": "deepseek-v3.2"
+  "default_model": "qwen3.5-plus"
 }

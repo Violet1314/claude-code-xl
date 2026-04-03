@@ -71,18 +71,7 @@ class APIClient:
         max_tokens: int = None,
     ) -> Generator[Dict[str, Any], None, None]:
         """
-        发送消息并流式返回响应
-
-        Args:
-            model_id: 模型 ID
-            messages: 消息列表
-            tools: 工具定义列表（原生 tool calling）
-            stream: 是否流式输出
-            temperature: 温度参数
-            max_tokens: 最大输出 token
-
-        Yields:
-            响应数据块
+        发送消息并流式返回响应 (静默重试版)
         """
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -97,7 +86,6 @@ class APIClient:
             "max_tokens": max_tokens or API.MAX_TOKENS,
         }
 
-        # 添加原生工具定义
         if tools:
             payload["tools"] = tools
 
@@ -113,35 +101,44 @@ class APIClient:
 
             except httpx.HTTPError as e:
                 last_error = f"{type(e).__name__}: {e}"
-                console.warning(f"第 {attempt + 1}/{self.max_retries} 次失败: {last_error}")
+                
+                # 【优化】：静默处理前 N-1 次重试
+                is_last_attempt = (attempt == self.max_retries - 1)
+                
+                if is_last_attempt:
+                    console.error(f"请求最终失败: {last_error}")
+                
                 self._reset_client()
 
                 if attempt < self.max_retries - 1:
-                    # 指数退避 + 随机 jitter（避免惊群效应）
                     wait = 2 ** attempt + random.uniform(0, 1)
-                    console.dim(f"   {wait:.1f}s 后重试...")
+                    # 【优化】：静默等待
                     time.sleep(wait)
 
             except httpx.HTTPStatusError as e:
-                # 429 限流：等待更长时间
                 if e.response.status_code == 429:
                     retry_after = e.response.headers.get("Retry-After")
                     wait = int(retry_after) if retry_after else 60
-                    console.warning(f"API 限流，等待 {wait}s 后重试...")
+                    
+                    is_last_attempt = (attempt == self.max_retries - 1)
+                    if is_last_attempt:
+                        console.warning(f"API 限流，等待 {wait}s...")
+                    
                     self._reset_client()
 
                     if attempt < self.max_retries - 1:
                         time.sleep(wait)
                     continue
 
-                # 其他 4xx 错误不重试
                 if 400 <= e.response.status_code < 500:
                     console.error(f"API 错误 [{e.response.status_code}]: {e.response.text}")
                     return
 
-                # 5xx 错误重试
                 last_error = f"HTTP {e.response.status_code}"
-                console.warning(f"服务器错误: {last_error}")
+                is_last_attempt = (attempt == self.max_retries - 1)
+                if is_last_attempt:
+                    console.error(f"服务器错误: {last_error}")
+                
                 self._reset_client()
 
                 if attempt < self.max_retries - 1:
