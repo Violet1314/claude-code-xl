@@ -76,5 +76,5 @@
       "tool_mode": "native"
     }
   ],
-  "default_model": "qwen3.5-plus"
+  "default_model": "MiniMax-M2.7"
 }

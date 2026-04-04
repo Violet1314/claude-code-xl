@@ -211,12 +211,29 @@ class ToolExecutor:
                     warning = f"\n\n⚠️ 提示: 该文件已读取 {current_count} 次。建议直接使用缓存内容执行任务。"
                     result.output = result.output + warning
                     from claude_code.ui import console as ui_console
-                    ui_console.print(f"  [yellow]⚠️ 该文件已读取 {current_count} 次，建议使用缓存内容[/] ")
+                    ui_console.print(f"  [yellow]⚠️ 该文件已读取 {current_count} 次，建议使用缓存内容[/]  ")
 
-        # B. 显示结果 (Bash 已有流式卡片，跳过重复显示)
+        # B. 显示结果
+        # Bash 已有流式卡片，跳过重复显示
         if tool.name != "Bash":
-            display_content = result.display_output if result.success and result.display_output else (result.output if result.success else (result.error or "执行失败"))
-            PermissionUI.show_tool_result(tool.name, result.success, display_content)
+            # 确定要显示的内容
+            display_content = ""
+            if result.success:
+                # 优先使用结构化 display_output (含 Rich Markup)
+                if result.display_output:
+                    display_content = result.display_output
+                else:
+                    display_content = result.output
+            else:
+                display_content = result.error or "执行失败"
+
+            # 关键修复：直接使用 app_console 打印，并开启 markup=True
+            # 这样 Glob/Grep/Read 的 [dim]...[/] 标签会被正确渲染
+            if display_content:
+                from claude_code.ui import console as app_console
+                # 使用 print 而不是 PermissionUI，确保 Markup 被解析
+                # end="" 避免多余换行，因为 display_content 通常已包含结尾格式
+                app_console.print(display_content, markup=True, highlight=False)
 
         # C. 记录历史
         self._record_execution(tool_call, result, duration_ms)
