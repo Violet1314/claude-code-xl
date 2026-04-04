@@ -6,6 +6,7 @@ import json
 import time
 import signal
 import atexit
+import threading
 from typing import Optional, List
 from datetime import datetime
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
@@ -300,41 +301,70 @@ class Application:
         Returns:
             (响应文本, 原生工具调用列表, 真实 token 使用量, 耗时)
         """
+        import threading
+        
         start_time = time.time()
         full_response = ""
         native_tool_calls = []
         real_usage = {"input": 0, "output": 0}
+        
+        # 【新增】用于控制后台线程停止的标志
+        stop_timer_event = threading.Event()
 
         # 思考状态：显示进度条
         with Progress(
             SpinnerColumn(spinner_name="dots", style=COLORS['primary']),
-            TextColumn(f"[bold {COLORS['primary']}]{model_name}[/] [dim]正在思考...[/]"),
+            TextColumn("{task.description}"),  # 【修改】使用占位符，动态更新描述
             BarColumn(bar_width=20, pulse_style=COLORS['primary']),
-            TextColumn("[cyan]已生成 {task.completed:,} 字符[/]"),
+            TextColumn("[cyan]{task.completed:,} tok[/]"), # 显示 Token/字符计数
             console=console.get_console(),
             transient=True,
         ) as progress:
-            task = progress.add_task("", total=None, completed=0)
+            
+            # 初始描述
+            initial_desc = f"[bold {COLORS['primary']}]{model_name}[/] [dim]正在思考...[/]"
+            task = progress.add_task(initial_desc, total=None, completed=0)
 
-            for chunk in self.client.send_message(
-                model_id=self.current_model.id if self.current_model else "",
-                messages=messages,
-                tools=tools_definition,
-                stream=True,
-            ):
-                # 提取文本内容
-                content = self.client.extract_content(chunk)
-                if content:
-                    full_response += content
-                    progress.update(task, completed=len(full_response))
+            # 【新增】后台定时刷新线程：确保时间实时跳动，不依赖 API Chunk
+            def _refresh_timer():
+                while not stop_timer_event.is_set():
+                    elapsed = time.time() - start_time
+                    # 排版：将时间紧贴在“正在思考...”后面，无括号
+                    new_desc = f"[bold {COLORS['primary']}]{model_name}[/] [dim]正在思考... {elapsed:.1f}s[/]"
+                    try:
+                        progress.update(task, description=new_desc)
+                    except Exception:
+                        pass # 忽略进度条已结束时的异常
+                    stop_timer_event.wait(0.1) # 每 0.1s 刷新一次
 
-                # 提取原生工具调用（流式）
-                self._accumulate_native_tool_calls(chunk, native_tool_calls)
+            timer_thread = threading.Thread(target=_refresh_timer, daemon=True)
+            timer_thread.start()
 
-                # 提取真实 token 使用量（最后一个 chunk 包含 usage）
-                usage = self.client.extract_usage(chunk)
-                if usage:
-                    real_usage = usage
+            try:
+                for chunk in self.client.send_message(
+                    model_id=self.current_model.id if self.current_model else "",
+                    messages=messages,
+                    tools=tools_definition,
+                    stream=True,
+                ):
+                    # 提取文本内容
+                    content = self.client.extract_content(chunk)
+                    if content:
+                        full_response += content
+                        # 更新 Token/字符计数
+                        progress.update(task, completed=len(full_response))
+
+                    # 提取原生工具调用（流式）
+                    self._accumulate_native_tool_calls(chunk, native_tool_calls)
+
+                    # 提取真实 token 使用量（最后一个 chunk 包含 usage）
+                    usage = self.client.extract_usage(chunk)
+                    if usage:
+                        real_usage = usage
+            finally:
+                # 【新增】确保退出循环时停止后台线程
+                stop_timer_event.set()
+                timer_thread.join(timeout=1.0)
 
         duration = time.time() - start_time
         return full_response, native_tool_calls, real_usage, duration

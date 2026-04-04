@@ -33,7 +33,7 @@ class HelpCommand(Command):
         console.print(f"[bold {COLORS['info']}]🔧 工具系统[/]")
         console.print("  • AI 可以读取、创建、编辑文件")
         console.print("  • 每次操作前会请求权限确认")
-        console.print("  • 支持 once/always 两种权限模式，或按Esc取消")
+        console.print("  • 支持 yes/no 两种权限模式，或按Esc取消")
         console.blank()
 
 class NewCommand(Command):

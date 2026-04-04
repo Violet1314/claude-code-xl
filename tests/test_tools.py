@@ -302,5 +302,90 @@ class TestToolCall:
         assert d["id"] == "call_123"
 
 
+class TestToolResultStructure:
+    """v2.8.0 新增：验证 ToolResult 结构化输出"""
+    
+    def test_read_tool_structured_output(self):
+        """测试 Read 工具返回结构化数据"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("def test():\n    pass\n")
+            f.flush()
+            temp_path = f.name
+        
+        try:
+            tool = ReadTool()
+            result = tool.execute({"file_path": temp_path})
+            
+            assert result.success
+            # 1. 验证 summary 字段存在且非空
+            assert result.summary is not None
+            # 修复：不要硬编码文件名，而是检查是否包含 .py 后缀
+            assert ".py" in result.summary
+            
+            # 2. 验证 metadata 包含关键信息
+            assert "file_path" in result.metadata
+            assert "total_lines" in result.metadata
+            assert result.metadata["total_lines"] == 3  # def test(): \n pass \n (empty line if any)
+            
+        finally:
+            os.unlink(temp_path)
+
+    def test_write_tool_security_context(self):
+        """测试 Write 工具的安全上下文"""
+        tool = WriteTool()
+        # 模拟设置参数（通常由 executor 传入，这里手动模拟以测试钩子）
+        tool.parameters = {"file_path": "test.py"}
+        
+        context = tool.get_security_context()
+        assert context["is_sensitive"] is True
+        assert "test.py" in context["paths"]
+
+    def test_read_tool_security_context(self):
+        """测试 Read 工具的安全上下文（只读应不敏感）"""
+        tool = ReadTool()
+        tool.parameters = {"file_path": "test.py"}
+        
+        context = tool.get_security_context()
+        assert context["is_sensitive"] is False
+
+
+class TestBashToolBasics:
+    """Bash 工具基础测试（v2.8.0 补充）"""
+    
+    def test_bash_simple_command(self):
+        """测试简单的 Bash 命令（Windows PowerShell 兼容）"""
+        from claude_code.tools.builtins import BashTool
+        tool = BashTool()
+        
+        # 使用 echo 命令，它在 PowerShell 中也通用
+        result = tool.execute({"command": "echo 'Hello World'"})
+        
+        assert result.success
+        assert "Hello World" in result.output
+    
+    def test_bash_dangerous_check_method(self):
+        """测试 Bash 工具的危险命令检测方法（单元测试）"""
+        from claude_code.tools.builtins import BashTool
+        tool = BashTool()
+        
+        # 1. 测试危险命令
+        is_dangerous, reason = tool._check_dangerous("rm -rf /")
+        assert is_dangerous is True
+        assert "危险" in reason or "损坏" in reason
+        
+        # 2. 测试安全命令
+        is_dangerous, reason = tool._check_dangerous("ls")
+        assert is_dangerous is False
+
+    def test_bash_security_context(self):
+        """测试 Bash 工具的安全上下文"""
+        from claude_code.tools.builtins import BashTool
+        tool = BashTool()
+        tool.parameters = {"command": "ls"}
+        
+        context = tool.get_security_context()
+        assert "command_preview" in context
+        assert context["command_preview"] == "ls"
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

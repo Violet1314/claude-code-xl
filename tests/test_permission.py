@@ -2,10 +2,9 @@
 import pytest
 import sys
 import os
-
+import tempfile  # <--- 新增这一行
 # 添加 src 到路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-
 from claude_code.tools.base import ToolCall, ToolResult, ToolRegistry, PermissionLevel
 from claude_code.tools.permission import PermissionManager, PermissionDecision
 from claude_code.tools.executor import ToolExecutor, ExecutionResult, ExecutionReport
@@ -190,6 +189,93 @@ class TestToolCall:
         assert "Read" in s
         assert "file_path" in s
 
+
+class TestExecutorMiddleware:
+    """v2.8.0 新增：验证执行器中间件逻辑（重复检测、危险拦截）"""
+    
+    def test_repeat_read_protection(self):
+        """测试重复读取熔断机制（第 5 次拦截）"""
+        from claude_code.tools.builtins import ReadTool
+        from claude_code.tools.file_cache import file_cache
+        from claude_code.utils.paths import resolve_path
+        
+        # 0. 清理全局缓存
+        file_cache.clear()
+
+        # 1. 准备环境
+        registry = ToolRegistry()
+        registry.register(ReadTool())
+        manager = PermissionManager()
+        executor = ToolExecutor(registry, manager)
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("print('test')\n")
+            f.flush()
+            temp_path = f.name
+        
+        try:
+            # 关键修复 1：统一路径
+            resolved_path = resolve_path(temp_path)
+            
+            # 关键修复 2：先让文件进入缓存（此时 count = 0）
+            file_cache.read_file(resolved_path, "print('test')\n")
+            
+            tool_call = ToolCall(name="Read", parameters={"file_path": temp_path})
+            
+            # 关键修复 3：手动增加 4 次计数（模拟之前又读了 4 次）
+            # 此时总计数 = 0 (初始) + 4 (手动) = 4
+            for i in range(4):
+                file_cache.record_read(resolved_path, 1, 1, 1)
+            
+            # 验证：此时计数应该是 4
+            current_count = file_cache.get_read_count(resolved_path)
+            assert current_count == 4, f"期望计数为 4，实际为 {current_count}"
+
+            # 4. 执行第 5 次读取（实际上是第 5 次尝试，但计数已达阈值 4）
+            # executor.py 逻辑：if read_count >= 4: 拦截
+            result = executor.execute_single(tool_call)
+            
+            # 断言拦截成功
+            assert result.skipped is True, f"期望被拦截，但实际执行了。Output: {result.output}"
+            assert "已达上限" in result.output or "建议直接使用缓存" in result.output
+            
+        finally:
+            os.unlink(temp_path)
+            file_cache.clear()
+
+    def test_dangerous_command_intercept(self):
+        """测试危险命令在执行前被拦截"""
+        from claude_code.tools.builtins import BashTool
+        
+        registry = ToolRegistry()
+        registry.register(BashTool())
+        manager = PermissionManager()
+        executor = ToolExecutor(registry, manager)
+        
+        # 尝试执行 rm -rf / (会被 _check_dangerous 拦截)
+        tool_call = ToolCall(name="Bash", parameters={"command": "rm -rf /"})
+        result = executor.execute_single(tool_call)
+        
+        assert result.success is False
+        assert "危险命令" in result.error or "拦截" in result.error
+
+
+class TestSecurityContextHook:
+    """v2.8.0 新增：验证工具的安全上下文钩子"""
+    
+    def test_read_tool_context(self):
+        """测试 Read 工具返回只读上下文"""
+        tool = ReadTool()
+        context = tool.get_security_context()
+        assert context["is_sensitive"] is False
+    
+    def test_write_tool_context(self):
+        """测试 Write 工具返回敏感上下文"""
+        tool = WriteTool()
+        tool.parameters = {"file_path": "test.py"}
+        context = tool.get_security_context()
+        assert context["is_sensitive"] is True
+        assert "test.py" in context["paths"]
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

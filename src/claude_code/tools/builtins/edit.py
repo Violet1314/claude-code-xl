@@ -43,15 +43,12 @@ class EditTool(Tool):
 
         if not file_path:
             return ToolResult(success=False, output="", error="缺少 file_path 参数")
-
         file_path = resolve_workplace_path(file_path)
-
         if not old_string:
             return ToolResult(success=False, output="", error="缺少 old_string 参数")
 
         try:
             path = Path(file_path)
-
             if not path.exists():
                 return ToolResult(success=False, output="", error=f"文件不存在: {file_path}")
 
@@ -65,10 +62,7 @@ class EditTool(Tool):
                 )
 
             match_count = original_content.count(old_string)
-            if match_count > 1:
-                new_content = original_content.replace(old_string, new_string, 1)
-            else:
-                new_content = original_content.replace(old_string, new_string)
+            new_content = original_content.replace(old_string, new_string, 1)
 
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(new_content)
@@ -78,17 +72,14 @@ class EditTool(Tool):
             reference = cache_result.get("reference", "")
             version = cache_result.get("version", 0)
 
-            # 给模型的纯文本输出
             output = self._build_model_output(
                 path, old_string, new_string,
                 original_content, new_content,
                 reference, version, match_count
             )
-
-            # 给终端的 Rich 显示
             display_output = self._build_terminal_display(
                 path, old_string, new_string,
-                original_content,  new_content,
+                original_content, new_content,
                 reference, version, match_count
             )
 
@@ -96,6 +87,7 @@ class EditTool(Tool):
                 success=True,
                 output=output,
                 display_output=display_output,
+                summary=f"Edit {path.name}",
                 metadata={
                     "file_path": str(path.absolute()),
                     "old_length": len(old_string),
@@ -110,6 +102,14 @@ class EditTool(Tool):
             return ToolResult(success=False, output="", error=f"权限不足: {file_path}")
         except Exception as e:
             return ToolResult(success=False, output="", error=f"编辑失败: {str(e)}")
+
+    def get_security_context(self) -> Dict[str, Any]:
+        """返回安全上下文"""
+        return {
+            "is_sensitive": True,
+            "paths": [self.parameters.get("file_path", "")] if hasattr(self, 'parameters') else [],
+            "command_preview": ""
+        }
 
     # ============================================================
     # 模型输出（纯文本）

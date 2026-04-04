@@ -208,3 +208,6 @@ class GlobTool(Tool):
         if not pattern:
             return "缺少 pattern 参数"
         return None
+    
+    def get_security_context(self) -> Dict[str, Any]:
+        return {"is_sensitive": False, "paths": [], "command_preview": ""}

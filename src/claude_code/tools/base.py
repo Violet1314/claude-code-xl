@@ -12,16 +12,20 @@ class PermissionLevel(Enum):
 
 @dataclass
 class ToolResult:
-    """工具执行结果"""
+    """工具执行结果（结构化）"""
     success: bool
-    output: str  # 返回给模型的完整内容
+    output: str  # 返回给模型的完整内容（保持向后兼容）
     error: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
-    display_output: Optional[str] = None  # 终端显示用的省略版本（可选）
+    
+    # --- 新增字段：用于 UI 渲染的结构化数据 ---
+    display_output: Optional[str] = None  # 终端显示的简化版（Rich Markup）
+    summary: Optional[str] = None         # 简短摘要（用于卡片标题或日志）
+    raw_data: Optional[Any] = None        # 原始数据（如文件列表、Diff 对象，供未来 Web UI 使用）
 
     def __str__(self) -> str:
         if self.success:
-            return f"✓ {self.output}"
+            return f"✓ {self.summary or self.output[:50]}"
         return f"✗ {self.error or self.output}"
 
 
@@ -61,54 +65,46 @@ class ToolCall:
 
 class Tool(ABC):
     """工具基类"""
-
     # 工具元信息
     name: str = ""
     description: str = ""
 
     @abstractmethod
     def get_parameters_schema(self) -> Dict[str, Any]:
-        """
-        获取参数的 JSON Schema
-
-        Returns:
-            参数定义字典
-        """
+        """获取参数的 JSON Schema"""
         pass
 
     @abstractmethod
     def execute(self, parameters: Dict[str, Any]) -> ToolResult:
-        """
-        执行工具
-
-        Args:
-            parameters: 工具参数
-
-        Returns:
-            执行结果
-        """
+        """执行工具"""
         pass
 
     def validate_parameters(self, parameters: Dict[str, Any]) -> Optional[str]:
-        """
-        验证参数
-
-        Args:
-            parameters: 待验证的参数
-
-        Returns:
-            错误信息，None 表示验证通过
-        """
+        """验证参数"""
         return None
 
     def is_read_only(self) -> bool:
-        """
-        是否为只读操作
-
-        Returns:
-            True 表示只读，False 表示会修改文件系统
-        """
+        """是否为只读操作"""
         return False
+
+    # --- 新增钩子：用于权限系统通用化 ---
+    def get_security_context(self) -> Dict[str, Any]:
+        """
+        返回工具的安全上下文信息。
+        权限管理器将基于此信息进行判断，而非硬编码工具名。
+        
+        Returns:
+            {
+                "is_sensitive": bool,      # 是否敏感操作
+                "paths": List[str],        # 涉及的文件路径
+                "command_preview": str     # 命令预览（针对 Bash）
+            }
+        """
+        return {
+            "is_sensitive": not self.is_read_only(),
+            "paths": [],
+            "command_preview": ""
+        }
 
 
 class ToolRegistry:

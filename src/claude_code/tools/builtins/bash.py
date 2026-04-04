@@ -427,3 +427,16 @@ class BashTool(Tool):
         if timeout < 1 or timeout > 600:
             return "timeout 必须在 1-600 秒之间"
         return None
+    
+    def get_security_context(self) -> Dict[str, Any]:
+        """返回 Bash 工具的安全上下文"""
+        command = self.parameters.get("command", "") if hasattr(self, 'parameters') else ""
+        return {
+            "is_sensitive": self.is_sensitive(command),
+            "paths": [], # Bash 路径检查由 permission.py 单独处理
+            "command_preview": command[:50] + "..." if len(command) > 50 else command
+        }
+
+    def is_read_only(self) -> bool:
+        """Bash 不是只读操作"""
+        return False

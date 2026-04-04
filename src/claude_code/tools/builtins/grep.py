@@ -285,3 +285,6 @@ class GrepTool(Tool):
         except re.error as e:
             return f"无效的正则表达式: {str(e)}"
         return None
+    
+    def get_security_context(self) -> Dict[str, Any]:
+        return {"is_sensitive": False, "paths": [], "command_preview": ""}

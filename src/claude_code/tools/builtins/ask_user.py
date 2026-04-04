@@ -174,3 +174,11 @@ class AskUserQuestionTool(Tool):
                 if not opt.get("label") and not opt.get("value"):
                     return f"选项 {i+1} 缺少 label 或 value"
         return None
+    
+    def get_security_context(self) -> Dict[str, Any]:
+        """询问用户通常不敏感，但属于交互操作"""
+        return {
+            "is_sensitive": False,
+            "paths": [],
+            "command_preview": self.parameters.get("question", "")[:30] if hasattr(self, 'parameters') else ""
+        }

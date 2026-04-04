@@ -142,31 +142,21 @@ class PermissionUI:
     def show_tool_result(tool_name: str, success: bool, output: str) -> None:
         """
         显示工具执行结果
-        注意：Bash/Read/Glob 等工具现在由 progress_display.py 统一渲染卡片，
-        此处主要处理 Write/Edit 等简单工具或 fallback 情况。
+        优先使用 output 中的 Rich Markup，如果 output 为空则显示状态。
         """
         if success:
-            # 关键修复：更 robust 地检测 Rich Markup
-            # 只要输出中包含 '[' 且不是纯文本，就尝试渲染
-            is_rich_output = (
-                tool_name in ("Read", "Grep", "Glob", "Edit") or 
-                ("[" in output and "]" in output)
-            )
-            
-            if is_rich_output:
-                # 对于 Edit 工具，我们希望能看到漂亮的 Diff
-                # 如果 output 已经是 Panel 格式（如 Read），直接打印
-                # 如果 output 是 Diff 文本，我们也直接打印，让 Rich 解析颜色
+            # 如果 output 包含 Rich Markup (如 [bold]), 直接渲染
+            if "[ " in output and "] " in output:
                 console.print(output)
             else:
-                # 普通成功消息
-                console.print(f"  [{COLORS['success']}]{ICONS['success']}[/] [dim]{tool_name}[/] 执行成功")
+                # 纯文本成功消息
+                console.print(f"  [{COLORS['success']}]{ICONS['success']}[/] [dim]{tool_name}[/] 执行成功 ")
                 if output.strip():
                     console.print_raw(output)
         else:
             icon = ICONS['error']
             color = COLORS['error']
-            console.print(f"  [{color}]{icon} {tool_name} 失败:[/]  ", end="")
+            console.print(f"  [{color}]{icon} {tool_name} 失败:[/]   ", end= " ")
             console.print_raw(output)
 
     @staticmethod

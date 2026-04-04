@@ -56,35 +56,32 @@ class WriteTool(Tool):
         if not file_path:
             return ToolResult(success=False, output="", error="缺少 file_path 参数")
 
-        # Workplace 隔离：相对路径重定向到 workplace 目录
         file_path = resolve_workplace_path(file_path)
 
         try:
             path = Path(file_path)
-
-            # 创建父目录
             path.parent.mkdir(parents=True, exist_ok=True)
 
-            # 写入文件
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(content)
 
-            # ✅ 新增：更新文件缓存
+            # 更新文件缓存
             cache_result = file_cache.apply_write(file_path, content)
-
-            # 写入后验证 Python 文件语法（警告而非阻止）
+            
             output_msg = f"写入成功: {file_path} ({len(content)} 字符)"
             if file_path.endswith('.py'):
                 is_valid, error_msg = self._validate_content(content, file_path)
                 if not is_valid:
-                    output_msg += f"\n\n⚠️ 语法警告: {error_msg}\n提示：这可能是模型输出格式问题，建议使用 native tool calling 模式或更强的模型。"
+                    output_msg += f"\n\n⚠️ 语法警告: {error_msg}"
 
             return ToolResult(
                 success=True,
                 output=output_msg,
+                summary=f"Write {path.name}",
                 metadata={
                     "file_path": str(path.absolute()),
-                    "content_length": len(content)
+                    "content_length": len(content),
+                    "cache_version": cache_result.get("version", 0)
                 }
             )
 
@@ -92,6 +89,14 @@ class WriteTool(Tool):
             return ToolResult(success=False, output="", error=f"权限不足: {file_path}")
         except Exception as e:
             return ToolResult(success=False, output="", error=f"写入失败: {str(e)}")
+
+    def get_security_context(self) -> Dict[str, Any]:
+        """返回安全上下文"""
+        return {
+            "is_sensitive": True,
+            "paths": [self.parameters.get("file_path", "")] if hasattr(self, 'parameters') else [],
+            "command_preview": ""
+        }
 
     def is_read_only(self) -> bool:
         """非只读操作"""

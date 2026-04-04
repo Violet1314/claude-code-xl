@@ -67,12 +67,10 @@ class ReadTool(Tool):
     def execute(self, parameters: Dict[str, Any]) -> ToolResult:
         """执行读取操作"""
         file_path = parameters.get("file_path", "")
-
         try:
             offset = int(parameters.get("offset", 1))
         except (ValueError, TypeError):
             offset = 1
-
         try:
             limit = int(parameters.get("limit", self.DEFAULT_LIMIT))
         except (ValueError, TypeError):
@@ -91,10 +89,8 @@ class ReadTool(Tool):
 
         try:
             path = Path(file_path)
-
             if not path.exists():
                 return ToolResult(success=False, output="", error=f"文件不存在: {file_path}")
-
             if not path.is_file():
                 return ToolResult(success=False, output="", error=f"不是文件: {file_path}")
 
@@ -107,59 +103,44 @@ class ReadTool(Tool):
 
             # 大文件显示进度
             show_progress = file_size > 50 * 1024
-
             if show_progress:
                 display_name = path.name
                 if len(display_name) > 35:
                     display_name = display_name[:32] + "..."
-
                 with Progress(
                     SpinnerColumn(spinner_name="dots", style=COLORS['primary']),
-                    TextColumn(f"[bold]{ICONS.get('file', '📄')} Read[/] [cyan]{display_name}[/]"),
+                    TextColumn(f"[bold]{ICONS.get('file', '📄')} Read[/] [cyan]{display_name}[/] "),
                     BarColumn(bar_width=20, complete_style=COLORS['success']),
-                    TextColumn("[dim]读取中[/]"),
+                    TextColumn("[dim]读取中[/] "),
                     TimeElapsedColumn(),
                     console=console.get_console(),
                     transient=True,
                 ) as progress_bar:
                     task = progress_bar.add_task("", total=100)
                     content = self._read_file_with_progress(path, progress_bar, task)
-
-                console.print(
-                    f"  [{COLORS['success']}]{ICONS['success']}[/] [dim]读取完成[/]"
-                )
+                console.print(f"  [{COLORS['success']}]{ICONS['success']}[/] [dim]读取完成[/] ")
             else:
                 content = self._read_file(path)
 
             lines = content.split('\n')
             total_lines = len(lines)
-
-            # 存入缓存
             cache_result = file_cache.read_file(file_path, content)
             reference = cache_result["reference"]
             version = cache_result["version"]
             was_cached = cache_result["cached"]
 
-            # 决定输出模式
             use_summary = (
                 summary
                 and not has_specific_range
                 and total_lines >= self.SUMMARY_THRESHOLD
             )
-
             size_kb = file_size / 1024
 
-            # ========================================
-            # 给模型的纯文本输出（无 Rich markup）
-            # ========================================
+            # 构建输出
             output = self._build_model_output(
                 path, lines, total_lines, size_kb, reference,
                 was_cached, use_summary, offset, limit
             )
-
-            # ========================================
-            # 给终端的简洁显示（Rich markup）
-            # ========================================
             display_output = self._build_terminal_display(
                 path, total_lines, size_kb, reference,
                 was_cached, use_summary, offset, limit
@@ -169,6 +150,7 @@ class ReadTool(Tool):
                 success=True,
                 output=output,
                 display_output=display_output,
+                summary=f"Read {path.name} ({total_lines} lines)",
                 metadata={
                     "file_path": str(path.absolute()),
                     "total_lines": total_lines,
@@ -185,6 +167,14 @@ class ReadTool(Tool):
             return ToolResult(success=False, output="", error=f"权限不足，无法读取: {file_path}")
         except Exception as e:
             return ToolResult(success=False, output="", error=f"读取失败: {str(e)}")
+
+    def get_security_context(self) -> Dict[str, Any]:
+        """返回安全上下文（只读工具通常不敏感）"""
+        return {
+            "is_sensitive": False,
+            "paths": [self.parameters.get("file_path", "")] if hasattr(self, 'parameters') else [],
+            "command_preview": ""
+        }
 
     # ============================================================
     # 模型输出（纯文本，无 Rich markup）
