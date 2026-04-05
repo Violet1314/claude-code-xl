@@ -53,7 +53,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1  # Windows
 
 # 安装依赖
-pip install -e .
+pip install -e .[dev]
 ```
 
 ### 配置
