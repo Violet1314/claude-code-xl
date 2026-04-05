@@ -278,17 +278,7 @@ class ToolExecutor:
             "error": result.error,
             "duration_ms": duration_ms,
         })
-
-        # 记录 Read 操作到缓存
-        if tool_call.name == "Read" and result.success:
-            metadata = result.metadata or {}
-            file_path = metadata.get("file_path") or tool_call.parameters.get("file_path")
-            total_lines = metadata.get("total_lines", 0)
-            start_line = metadata.get("start_line", 1)
-            end_line = metadata.get("end_line", total_lines)
-
-            if file_path:
-                file_cache.record_read(file_path, total_lines, start_line, end_line)
+        # 注意：Read 操作的缓存记录已移至 ReadTool.execute() 内部
 
     def get_history(self, limit: int = 10) -> List[dict]:
         """获取执行历史"""

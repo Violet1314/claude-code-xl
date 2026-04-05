@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from collections import Counter
 from ..base import Tool, ToolResult
-from claude_code.utils.paths import resolve_path
+from claude_code.utils.paths import resolve_path, EXCLUDED_DIRS
 from claude_code.ui.theme import COLORS, ICONS
 from rich.markup import escape
 
@@ -13,24 +13,6 @@ class GlobTool(Tool):
     description = "按文件名模式搜索文件。支持通配符：* 匹配任意字符，** 递归匹配目录。"
 
     MAX_RESULTS = 100
-
-    # 自动排除的目录（通用工程无关目录）
-    EXCLUDED_DIRS = {
-        # Python
-        '.venv', 'venv', 'env', '__pycache__', '.pytest_cache',
-        '.mypy_cache', '.ruff_cache', '.tox', '.nox',
-        # Node.js
-        'node_modules', '.next', '.nuxt', 'bower_components',
-        # 版本控制
-        '.git', '.svn', '.hg',
-        # 构建产物
-        'dist', 'build', '.build', 'out', 'target',
-        # IDE
-        '.idea', '.vscode',
-        # 其他语言
-        'vendor',  # Go/PHP
-        '.gradle', '.cargo',
-    }
 
     def get_parameters_schema(self) -> Dict[str, Any]:
         """参数定义"""
@@ -187,7 +169,7 @@ class GlobTool(Tool):
         except ValueError:
             rel = path
         for part in rel.parts:
-            if part in self.EXCLUDED_DIRS or part.endswith('.egg-info'):
+            if part in EXCLUDED_DIRS or part.endswith('.egg-info'):
                 return True
         return False
 

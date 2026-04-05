@@ -23,6 +23,24 @@ SUPPORTED_EXTENSIONS: Set[str] = {
     '.sql', '.graphql',
 }
 
+# 自动排除的目录（通用工程无关目录）
+EXCLUDED_DIRS: Set[str] = {
+    # Python
+    '.venv', 'venv', 'env', '__pycache__', '.pytest_cache',
+    '.mypy_cache', '.ruff_cache', '.tox', '.nox',
+    # Node.js
+    'node_modules', '.next', '.nuxt', 'bower_components',
+    # 版本控制
+    '.git', '.svn', '.hg',
+    # 构建产物
+    'dist', 'build', '.build', 'out', 'target',
+    # IDE
+    '.idea', '.vscode',
+    # 其他语言
+    'vendor',  # Go/PHP
+    '.gradle', '.cargo',
+}
+
 def resolve_path(path: str) -> str:
     """
     解析路径：相对路径转绝对路径，规范化

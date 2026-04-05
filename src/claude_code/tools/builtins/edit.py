@@ -107,7 +107,7 @@ class EditTool(Tool):
         """返回安全上下文"""
         return {
             "is_sensitive": True,
-            "paths": [self.parameters.get("file_path", "")] if hasattr(self, 'parameters') else [],
+            "paths": [self.parameters.get("file_path", "")],
             "command_preview": ""
         }
 

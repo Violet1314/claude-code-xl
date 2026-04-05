@@ -4,7 +4,9 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from ..base import Tool, ToolResult
-from claude_code.utils.paths import resolve_workplace_path
+from claude_code.utils.paths import resolve_workplace_path, get_file_icon
+from claude_code.ui.theme import COLORS
+from rich.markup import escape
 
 
 class WriteTool(Tool):
@@ -69,14 +71,20 @@ class WriteTool(Tool):
             cache_result = file_cache.apply_write(file_path, content)
             
             output_msg = f"写入成功: {file_path} ({len(content)} 字符)"
+            syntax_warning = None
             if file_path.endswith('.py'):
                 is_valid, error_msg = self._validate_content(content, file_path)
                 if not is_valid:
                     output_msg += f"\n\n⚠️ 语法警告: {error_msg}"
+                    syntax_warning = error_msg
+
+            # 构建终端显示（卡片式）
+            display_output = self._build_terminal_display(path, content, syntax_warning)
 
             return ToolResult(
                 success=True,
                 output=output_msg,
+                display_output=display_output,
                 summary=f"Write {path.name}",
                 metadata={
                     "file_path": str(path.absolute()),
@@ -90,11 +98,28 @@ class WriteTool(Tool):
         except Exception as e:
             return ToolResult(success=False, output="", error=f"写入失败: {str(e)}")
 
+    def _build_terminal_display(self, path: Path, content: str, syntax_warning: Optional[str]) -> str:
+        """构建终端卡片式显示"""
+        icon = get_file_icon(path.suffix.lower())
+        content_len = len(content)
+        lines = content.count('\n') + 1
+
+        display = f"""[bold {COLORS['success']}]✓ 写入成功[/]
+┌─ {icon} [bold]{escape(path.name)}[/]
+│ 路径: [dim]{escape(str(path))}[/]
+│ 大小: {content_len} 字符, {lines} 行"""
+
+        if syntax_warning:
+            display += f"\n│ [yellow]⚠ 语法警告:[/] [dim]{escape(syntax_warning[:50])}...[/]"
+
+        display += "\n└─"
+        return display
+
     def get_security_context(self) -> Dict[str, Any]:
         """返回安全上下文"""
         return {
             "is_sensitive": True,
-            "paths": [self.parameters.get("file_path", "")] if hasattr(self, 'parameters') else [],
+            "paths": [self.parameters.get("file_path", "")],
             "command_preview": ""
         }
 

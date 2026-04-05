@@ -68,6 +68,8 @@ class Tool(ABC):
     # 工具元信息
     name: str = ""
     description: str = ""
+    # 当前执行的参数（在 execute 前设置，供 get_security_context 使用）
+    parameters: Dict[str, Any] = {}
 
     @abstractmethod
     def get_parameters_schema(self) -> Dict[str, Any]:

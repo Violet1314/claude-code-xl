@@ -1,10 +1,10 @@
-这是基于 v2.7.24 格式更新的 **README.md**，已同步至 **v2.8.0** 版本。
+这是基于 v2.8.0 格式更新的 **README.md**，已同步至 **v2.8.1** 版本。
 
 主要变更点：
-1.  **版本号**：更新至 `v2.8.0`。
-2.  **核心特性**：新增“结构化输出”、“安全上下文钩子”、“执行器中间件化”等架构级描述。
-3.  **测试覆盖**：更新测试用例数为 **95 passed**，并移除了过时的解析器测试说明。
-4.  **更新日志**：新增 v2.8.0 重构记录。
+1.  **版本号**：更新至 `v2.8.1`。
+2.  **代码质量优化**：移除硬编码、抽取公共常量、统一实现模式。
+3.  **Write 工具增强**：新增卡片式终端输出。
+4.  **更新日志**：新增 v2.8.1 重构记录。
 
 ---
 
@@ -12,7 +12,7 @@
 
 仿照官方 Claude Code 风格构建的 CLI AI 编程助手，支持 AI 驱动的文件操作和命令执行。
 
-**版本**：v2.8.0
+**版本**：v2.8.1
 
 ---
 
@@ -35,248 +35,117 @@
 - **Workplace 隔离** - Write/Edit/Bash 默认隔离到 workplace 目录，Read/Glob/Grep 直接访问项目文件
 - **目录自动过滤** - Glob/Grep 自动排除 .venv、node_modules、__pycache__ 等无关目录
 - **智能防死循环** - 连续同质错误自动熔断，防止模型无效重试
-- **静默重试机制** - API 连接波动时自动恢复，界面不再刷屏
-- **Unix 命令兼容** - 自动转换常见 Unix 命令为 PowerShell 等效指令
-- **架构标准化 (v2.8.0)** - 工具输出结构化、安全上下文通用化、执行器逻辑解耦
+- **静默重试机制** - API 连接重试不刷屏，仅最终失败时报错
 
 ---
 
 ## 快速开始
 
-### 1. 下载与进入目录
+### 安装
 
-```powershell
-cd G:\7-Claude-code-cli\Claude-Code-CLI-main
-```
+```bash
+# 克隆仓库
+git clone https://github.com/Violet1314/Claude-Code-CLI.git
+cd Claude-Code-CLI
 
-### 2. 创建虚拟环境
-
-```powershell
+# 创建虚拟环境
 python -m venv .venv
+.\.venv\Scripts\Activate.ps1  # Windows
+
+# 安装依赖
+pip install -e .
 ```
 
-### 3. 激活虚拟环境
+### 配置
 
-```powershell
-# Windows PowerShell
-.\.venv\Scripts\Activate.ps1
-
-# Windows CMD
-.\.venv\Scripts\activate.bat
-
-# Linux/Mac
-source .venv/bin/activate
-```
-
-### 4. 安装依赖
-
-```powershell
-pip install -e ".[dev]"
-```
-
-### 5. 配置 API
-
-编辑 `data/config/api-config.json`，设置你的 API 密钥：
+编辑 `data/config/api-config.json`：
 
 ```json
 {
-  "base_url": "https://yunwu.ai/v1",
-  "api_key": "你的API密钥"
+  "api_key": "your-api-key",
+  "base_url": "https://api.openai.com/v1",
+  "model": "gpt-4o"
 }
 ```
 
-### 6. 运行
+### 运行
 
-```powershell
+```bash
 python -m claude_code
 ```
-
----
-
-## 命令列表
-
-| 命令 | 别名 | 说明 |
-| --- | --- | --- |
-| /help | /h, /? | 显示命令帮助 |
-| /new | /reset, /clear | 开始新会话 |
-| /model | /m | 切换 AI 模型 |
-| /style | /persona, /p | 切换 AI 风格 |
-| /save | /s | 保存当前会话 |
-| /history | /hist | 查看历史会话 |
-| /tools | /tool | 查看工具执行历史 |
-| /quit | /q, /exit | 退出程序 |
 
 ---
 
 ## 内置工具
 
 | 工具 | 说明 |
-| --- | --- |
-| Read | 读取文件内容（卡片式输出，终端压缩显示，支持缓存引用） |
-| Write | 创建或覆盖文件（含 Python 语法检查） |
-| Edit | 精确替换文件内容（含 diff 显示，多处匹配警告） |
-| Glob | 按文件名模式搜索（卡片式输出，文件类型统计） |
-| Grep | 按内容正则搜索（卡片式输出） |
-| Bash | 执行 Shell 命令（流式输出，敏感/危险命令分级处理，默认隔离至 workplace/ ） |
-| AskUserQuestion | 向用户询问问题，获取选择或自由输入 |
-
-只读工具（Read、Glob、Grep）自动放行，无需确认。写入/执行工具（Write、Edit、Bash）需要用户授权。敏感操作（删除、提权等）每次都需确认。
+|------|------|
+| **Read** | 读取文件内容，支持缓存和摘要模式 |
+| **Write** | 创建或覆盖文件，卡片式输出 |
+| **Edit** | 精确替换文件内容，支持 diff 显示 |
+| **Glob** | 按文件名模式搜索，自动排除无关目录 |
+| **Grep** | 按内容搜索，支持正则表达式 |
+| **Bash** | 执行 Shell 命令，支持 Unix 命令转换 |
+| **AskUserQuestion** | 向用户询问选择，支持选项菜单 |
 
 ---
 
-## 安全机制
+## 权限系统
 
-### 权限分级
-*   **只读工具自动放行**：Read、Glob、Grep 无需确认，直接执行。
-*   **写入/执行工具需确认**：
-    *   `Yes (once)` - 仅允许当前操作（同工具同路径会话内缓存）
-    *   `No (once)` - 拒绝当前操作
-    *   `Esc/q` - 取消并中断后续执行
-
-### 敏感命令检测
-以下命令即使全局授权也需每次确认：
-*   删除：`rm`, `Remove-Item`, `del`, `rd`
-*   提权：`sudo`, `runas`
-*   危险操作：`git push`, `git reset --hard`
-
-### 危险命令拦截
-以下命令直接拦截，不显示权限菜单：
-*   `rm -rf /`, `rm -rf /*`
-*   `mkfs`, `fdisk`
-*   `curl ... | bash`
-*   `shutdown`, `reboot`
+- **只读工具**（Read、Glob、Grep）：自动放行
+- **写入/执行工具**（Write、Edit、Bash）：需用户确认
+- **敏感操作**（rm、git push 等）：每次都需确认，不缓存权限
+- **危险命令**（rm -rf / 等）：直接拦截
 
 ---
 
-## UI 预览
+## 测试
 
-### 欢迎界面
+```bash
+# 全量测试
+python -m pytest tests/ -q
 
-```text
-     ██████╗ ██╗       █████╗  ██╗   ██╗ ██████╗  ███████╗
-    ██╔════╝ ██║      ██╔══██╗ ██║   ██║ ██╔══██╗ ██╔════╝
-    ...
+# 工具测试
+python -m pytest tests/test_tools.py -q
 
-  Claude Code Terminal v2.8.0 │ DeepSeek V3.2
-  ────────────────────────────────────────────────────────
-  "Code is poetry." — WordPress
-
-  /help 查看命令  │  Tab 自动补全  │  Esc+Enter 发送
-```
-
-### 卡片式输出
-
-```text
-╭─ 🐍 defaults.py
-│  44 行  │  1.7 KB  │  ✓ cached
-│  📌 [file:defaults.py:v0]
-│  完整内容 · 行 1-44
-╰──────────────────────────────────────────
-```
-
-### 终端压缩显示（大文件）
-
-```text
-╭─ 🐍 large_file.py
-│  282 行  │  8.5 KB  │  ✓ cached
-│  显示 1-282 行:
-│     1  """模块文档"""
-│    ...
-│   ... 省略 232 行 ...
-│    263      demo_generators()
-│    ...
-╰──────────────────────────────────────────
-```
-
-### 状态栏
-
-```text
-◆ DEEPSEEK V3.2  │ $6/9 $/M │ ◆ 4.0K │ ≈$0.226
+# 权限测试
+python -m pytest tests/test_permission.py -q
 ```
 
 ---
 
 ## 项目结构
 
-```text
+```
 claude-code/
-├── pyproject.toml              # 包配置
-├── README.md
-├── 重构进度总结.md             # 交接文档
-│
 ├── src/claude_code/
-│   ├── __init__.py             # 版本信息
-│   ├── __main__.py             # 入口点
-│   ├── app.py                  # 主应用类（含防死循环逻辑）
-│   │
-│   ├── config/                 # 配置管理
-│   │   ├── defaults.py         # 常量配置
-│   │   └── settings.py         # 配置加载
-│   │
-│   ├── core/                   # 核心模块
-│   │   ├── client.py           # API 客户端（静默重试）
-│   │   ├── conversation.py     # 会话管理
-│   │   ├── files.py            # 文件挂载
-│   │   └── stats.py            # Token 统计（含费用累计）
-│   │
-│   ├── ui/                     # 界面模块
-│   │   ├── console.py          # Rich 封装
-│   │   ├── theme.py            # 主题配置
-│   │   ├── components.py       # UI 组件
-│   │   ├── input.py            # 输入处理（含中文宽度）
-│   │   ├── renderer.py         # 响应渲染
-│   │   └── progress_display.py # 进度显示（Bash 卡片化）
-│   │
-│   ├── commands/               # 命令系统
-│   │   ├── base.py             # 命令基类
-│   │   ├── registry.py         # 命令注册
-│   │   └── handlers.py         # 内置命令实现
-│   │
-│   ├── tools/                  # 工具系统 (v2.8.0 重构)
-│   │   ├── base.py             # 工具基类 (结构化输出/安全上下文)
-│   │   ├── executor.py         # 工具执行 (中间件化解耦)
-│   │   ├── permission.py       # 权限管理
-│   │   ├── permission_ui.py    # 权限确认 UI（极简卡片）
-│   │   ├── tool_calling.py     # Native Tool Calling
-│   │   ├── file_cache.py       # 文件缓存
-│   │   └── builtins/           # 内置工具
-│   │       └── bash.py         # Bash 工具（路径隔离 + Unix 转换）
-│   │
-│   └── utils/                  # 工具函数
-│
-├── tests/                      # 测试文件 (95 passed)
-│
-├── workplace/                  # 隔离目录（启动时自动创建）
-│
-└── data/
-    ├── config/                 # 配置文件
-    ├── history/                # 会话历史
-    └── stats/                  # 统计数据
+│   ├── app.py              # 主应用
+│   ├── config/             # 配置管理
+│   ├── core/               # 核心模块（API、会话、缓存）
+│   ├── ui/                 # UI 组件
+│   ├── tools/              # 工具系统
+│   │   ├── base.py         # Tool 基类
+│   │   ├── executor.py     # 工具执行器
+│   │   ├── permission.py   # 权限管理
+│   │   └── builtins/       # 内置工具
+│   └── utils/              # 工具函数
+├── tests/                  # 测试文件
+├── data/config/            # 配置文件
+└── workplace/              # 隔离目录
 ```
-
----
-
-## 开发
-
-### 运行测试
-
-```powershell
-python -m pytest tests/ -q
-```
-
-当前测试覆盖：`95 passed in 0.47s` (工具链全量验证通过，含架构契约测试)
-
-### 依赖
-
-| 依赖 | 版本 | 用途 |
-| --- | --- | --- |
-| httpx | >=0.27.0 | HTTP 客户端（流式请求） |
-| rich | >=13.7.0 | 终端 UI 渲染 |
-| prompt-toolkit | >=3.0.43 | 交互式输入 |
 
 ---
 
 ## 更新日志
+
+### v2.8.1 (2026-04-05)
+**代码质量优化与技术债清理**
+*   ✅ **移除硬编码**：`executor.py` 和 `permission.py` 中的工具名硬编码已清理
+*   ✅ **公共常量抽取**：`EXCLUDED_DIRS` 抽取到 `utils/paths.py`，Glob/Grep 统一使用
+*   ✅ **统一实现模式**：Tool 基类新增 `parameters` 属性，各工具 `get_security_context()` 移除 `hasattr` 检查
+*   ✅ **Write 卡片输出**：新增 `display_output` 卡片式终端显示，图标正确渲染
+*   ✅ **Bug 修复**：删除 `bash.py` 中重复定义的 `is_read_only()` 方法
+*   ✅ **全量回归通过**：95 个测试用例全部通过
 
 ### v2.8.0 (2026-04-04)
 **工具系统架构重构与测试体系升级**
@@ -299,7 +168,7 @@ python -m pytest tests/ -q
 *   ✅ Bash 路径隔离：默认 `cwd` 强制指向 `workplace/`，防止污染项目根目录
 *   ✅ Unix 命令兼容：自动转换 `ls/cat/rm` 等常见 Unix 命令为 PowerShell 等效指令
 *   ✅ 防死循环机制：连续 3 次同质错误触发熔断，强制模型停止无效重试
-*   ✅ Prompt 强化：明确告知模型 Bash 环境的“位置感知”，消除路径认知偏差
+*   ✅ Prompt 强化：明确告知模型 Bash 环境的"位置感知"，消除路径认知偏差
 *   ✅ 最大循环提升：`MAX_TOOL_ROUNDS` 提升至 10，配合熔断机制使用
 
 ### v2.7.23 (2026-04-03)

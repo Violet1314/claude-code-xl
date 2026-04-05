@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from ..base import Tool, ToolResult
-from claude_code.utils.paths import resolve_path, get_file_icon
+from claude_code.utils.paths import resolve_path, get_file_icon, EXCLUDED_DIRS
 from claude_code.ui.theme import COLORS, ICONS
 from rich.markup import escape
 
@@ -16,23 +16,6 @@ class GrepTool(Tool):
     MAX_FILE_SIZE = 1 * 1024 * 1024
     MAX_MATCHES = 30
     PREVIEW_WIDTH = 80
-
-    # 自动排除的目录
-    EXCLUDED_DIRS = {
-        # Python
-        '.venv', 'venv', 'env', '__pycache__', '.pytest_cache',
-        '.mypy_cache', '.ruff_cache', '.tox', '.nox',
-        # Node.js
-        'node_modules', '.next', '.nuxt', 'bower_components',
-        # 版本控制
-        '.git', '.svn', '.hg',
-        # 构建产物
-        'dist', 'build', '.build', 'out', 'target',
-        # IDE
-        '.idea', '.vscode',
-        # 其他语言
-        'vendor', '.gradle', '.cargo',
-    }
 
     def get_parameters_schema(self) -> Dict[str, Any]:
         """参数定义"""
@@ -244,7 +227,7 @@ class GrepTool(Tool):
         except ValueError:
             rel = path
         for part in rel.parts:
-            if part in self.EXCLUDED_DIRS or part.endswith('.egg-info'):
+            if part in EXCLUDED_DIRS or part.endswith('.egg-info'):
                 return True
         return False
 

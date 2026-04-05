@@ -177,8 +177,9 @@ class AskUserQuestionTool(Tool):
     
     def get_security_context(self) -> Dict[str, Any]:
         """询问用户通常不敏感，但属于交互操作"""
+        question = self.parameters.get("question", "")
         return {
             "is_sensitive": False,
             "paths": [],
-            "command_preview": self.parameters.get("question", "")[:30] if hasattr(self, 'parameters') else ""
+            "command_preview": question[:30] if len(question) > 30 else question
         }

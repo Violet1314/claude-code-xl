@@ -204,12 +204,10 @@ class PermissionManager:
         Returns:
             是否敏感
         """
-        # Bash 工具检查命令敏感性
-        if tool.name == "Bash" and hasattr(tool, 'is_sensitive'):
-            command = tool_call.parameters.get("command", "")
-            return tool.is_sensitive(command)
-
-        return False
+        # 使用工具的安全上下文获取敏感度信息（统一接口）
+        tool.parameters = tool_call.parameters  # 设置参数供 get_security_context 使用
+        security_context = tool.get_security_context()
+        return security_context.get("is_sensitive", False)
 
     def _build_tool_details(self, tool_call: ToolCall, tool: Tool) -> str:
         """

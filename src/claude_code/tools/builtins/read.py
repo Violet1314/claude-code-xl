@@ -146,6 +146,11 @@ class ReadTool(Tool):
                 was_cached, use_summary, offset, limit
             )
 
+            # 记录读取操作（用于重复读取检测）
+            start_line = offset if not use_summary else 1
+            end_line = min(offset + limit - 1, total_lines) if not use_summary else total_lines
+            file_cache.record_read(str(path.absolute()), total_lines, start_line, end_line)
+
             return ToolResult(
                 success=True,
                 output=output,
@@ -154,8 +159,8 @@ class ReadTool(Tool):
                 metadata={
                     "file_path": str(path.absolute()),
                     "total_lines": total_lines,
-                    "start_line": offset if not use_summary else 1,
-                    "end_line": min(offset + limit - 1, total_lines) if not use_summary else total_lines,
+                    "start_line": start_line,
+                    "end_line": end_line,
                     "file_size": file_size,
                     "summary_mode": use_summary,
                     "cache_version": version,
@@ -172,7 +177,7 @@ class ReadTool(Tool):
         """返回安全上下文（只读工具通常不敏感）"""
         return {
             "is_sensitive": False,
-            "paths": [self.parameters.get("file_path", "")] if hasattr(self, 'parameters') else [],
+            "paths": [self.parameters.get("file_path", "")],
             "command_preview": ""
         }
 
