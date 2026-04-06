@@ -1,7 +1,6 @@
 """Edit 工具 - 编辑文件（精确替换，集成缓存）"""
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-
 from ..base import Tool, ToolResult
 from ..file_cache import file_cache
 from claude_code.utils.paths import resolve_workplace_path
@@ -10,7 +9,6 @@ from rich.markup import escape
 
 class EditTool(Tool):
     """编辑文件工具（带缓存）"""
-
     name = "Edit"
     description = "精确替换文件中的内容。编辑后文件缓存自动更新，无需重新读取。"
 
@@ -25,7 +23,7 @@ class EditTool(Tool):
                 },
                 "old_string": {
                     "type": "string",
-                    "description": "要替换的原始内容（必须完全匹配）"
+                    "description": "要替换的原始内容（必须完全匹配，包括缩进和换行）"
                 },
                 "new_string": {
                     "type": "string",
@@ -56,9 +54,18 @@ class EditTool(Tool):
                 original_content = f.read()
 
             if old_string not in original_content:
+                # 【优化】提供更详细的错误上下文，帮助模型修正 old_string
+                similar_lines = self._find_similar_lines(original_content, old_string)
+                error_msg = f"未找到要替换的内容。\n"
+                error_msg += f"提示：请检查 old_string 是否包含多余的空格、换行或缩进差异。\n"
+                if similar_lines:
+                    error_msg += f"文件中相似的内容片段:\n{similar_lines}\n"
+                error_msg += "建议：请先调用 Read 工具获取文件最新内容，再重试 Edit。"
+                
                 return ToolResult(
-                    success=False, output="",
-                    error="未找到要替换的内容。请确保 old_string 与文件中的内容完全一致。"
+                    success=False, 
+                    output="",
+                    error=error_msg
                 )
 
             match_count = original_content.count(old_string)
@@ -128,7 +135,7 @@ class EditTool(Tool):
         parts = []
         parts.append(f"Edit: {path.name} - {reference} (v{version})")
         parts.append(f"  -{len(old_lines)} lines, +{len(new_lines)} lines at line {start_line}")
-        parts.append("")
+        parts.append(" ")
 
         # 简洁 diff
         for line in old_lines:
@@ -164,7 +171,7 @@ class EditTool(Tool):
         result = []
         result.append(f"[bold green]Update[/]([cyan]{escape(str(path))}[/])")
         result.append(f"  [dim]  [/][green bold]+{added_count}[/] [red bold]-{removed_count}[/]  📌 [cyan]{escaped_ref}[/]")
-        result.append("")
+        result.append(" ")
 
         context_lines = 2
 
@@ -237,6 +244,44 @@ class EditTool(Tool):
                     return i + 1
 
         return 1
+
+    def _find_similar_lines(self, content: str, target: str, max_suggestions: int = 3) -> str:
+        """
+        在 content 中查找与 target 最相似的几行，用于辅助调试。
+        """
+        if not target:
+            return ""
+        
+        target_lines = target.splitlines()
+        if not target_lines:
+            return ""
+        
+        # 取 target 的第一行作为搜索关键词（通常最具代表性）
+        keyword = target_lines[0].strip()
+        if len(keyword) < 5:
+            # 如果第一行太短，尝试第二行
+            if len(target_lines) > 1:
+                keyword = target_lines[1].strip()
+            else:
+                return ""
+
+        content_lines = content.splitlines()
+        matches = []
+        
+        for i, line in enumerate(content_lines):
+            if keyword in line:
+                # 记录行号和前后各一行作为上下文
+                start = max(0, i - 1)
+                end = min(len(content_lines), i + 2)
+                snippet = "\n".join(content_lines[start:end])
+                matches.append(f"Line {i+1}:\n{snippet}")
+                
+                if len(matches) >= max_suggestions:
+                    break
+        
+        if matches:
+            return "\n---\n".join(matches)
+        return ""
 
     def _truncate_line(self, line: str, max_len: int = 60) -> str:
         """截断过长的行"""

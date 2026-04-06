@@ -148,8 +148,23 @@ class ReadTool(Tool):
 
             # 记录读取操作（用于重复读取检测）
             start_line = offset if not use_summary else 1
-            end_line = min(offset + limit - 1, total_lines) if not use_summary else total_lines
-            file_cache.record_read(str(path.absolute()), total_lines, start_line, end_line)
+            end_line = min(offset + limit - 1,  total_lines) if not use_summary else total_lines
+            
+            # 【优化】检查是否触发拦截
+            read_status = file_cache.record_read(str(path.absolute()), total_lines, start_line, end_line)
+            if read_status["blocked"]:
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error=(
+                        f"⛔ 读取拦截：文件 {path.name} 已被多次读取（当前版本第 {read_status['count']} 次）。\n"
+                        f"原因：系统检测到重复读取行为，为节省资源已拦截。\n"
+                        f"解决方案：\n"
+                        f"1. 该文件内容已在你的上下文历史中（参考引用: {reference}）。\n"
+                        f"2. 如果你需要文件的特定部分，请使用 offset/limit 参数读取【未读取过的行】。\n"
+                        f"3. 如果文件已被外部修改，请先确认是否真的需要最新内容。"
+                    )
+                )
 
             return ToolResult(
                 success=True,
