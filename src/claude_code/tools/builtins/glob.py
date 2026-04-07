@@ -134,28 +134,29 @@ class GlobTool(Tool):
         return '\n'.join(parts)
 
     # ============================================================
-    # 终端显示（Rich markup，简洁摘要）
+    # 终端显示（统一格式）
     # ============================================================
 
     def _build_terminal_display(self, pattern: str, total: int, matches: List[Path]) -> str:
-        """给终端的简洁显示"""
-        # 统计文件类型
-        ext_count = Counter()
-        for match in matches:
-            if not match.is_dir():
-                ext = match.suffix.lower() or "(no ext)"
-                ext_count[ext] += 1
-
+        """给终端的统一格式显示"""
         parts = []
-        parts.append(f"[dim {COLORS['border_subtle']}]╭─[/] {ICONS.get('glob', '📁')} [bold]Glob[/]")
-        parts.append(f"[dim {COLORS['border_subtle']}]│[/]  模式 [cyan]\"{escape(pattern)}\"[/] 找到 [bold]{total}[/] 个结果")
 
-        if ext_count:
-            top_exts = ext_count.most_common(5)
-            stats = " |  ".join(f"{escape(ext)}: {count}" for ext, count in top_exts)
-            parts.append(f"[dim {COLORS['border_subtle']}]│[/]  [dim]{stats}[/]")
+        # 开头空行，与其他工具分隔
+        parts.append("")
+        # 标题行：✎ Glob: pattern [N 个匹配]
+        parts.append(f"[bold]{ICONS.get('edit', '✎')} Glob:[/] [cyan]{escape(pattern)}[/] [dim]\\[{total} 个匹配][/]")
+        # 分隔线
+        parts.append(f"[dim]{'─' * 50}[/]")
 
-        parts.append(f"[dim {COLORS['border_subtle']}]╰{'─' * 40}[/]")
+        # 文件列表（带行号）
+        for i, match in enumerate(matches, 1):
+            # 相对路径显示
+            try:
+                display_path = str(match)
+            except:
+                display_path = str(match)
+            parts.append(f"[dim]{i:>5}[/]  {escape(display_path)}")
+
         return '\n'.join(parts)
 
     # ============================================================

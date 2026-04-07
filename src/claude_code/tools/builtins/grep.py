@@ -93,14 +93,12 @@ class GrepTool(Tool):
             else:
                 output = self._build_model_content_output(truncated, pattern, len(all_matches))
 
-            # 给终端的简洁显示
-            display_output = self._build_terminal_display(
-                pattern, len(all_matches), len(matched_files)
-            )
-
+            # 给终端的统一格式显示
             if not all_matches:
                 output = f"No matches found for: {pattern}"
-                display_output = f"[dim {COLORS['border_subtle']}]╭─[/] {ICONS.get('grep', '🔍')} [bold]Grep[/]\n[dim {COLORS['border_subtle']}]│[/]  未找到匹配: [cyan]{escape(pattern)}[/]\n[dim {COLORS['border_subtle']}]╰{'─' * 40}[/]"
+                display_output = f"[bold]{ICONS.get('edit', '✎')} Grep:[/] [cyan]\"{escape(pattern)}\"[/] [dim]\\[0 处匹配][/]\n[dim]{'─' * 50}[/]"
+            else:
+                display_output = self._build_terminal_display(pattern, truncated, len(all_matches))
 
             return ToolResult(
                 success=True,
@@ -156,16 +154,26 @@ class GrepTool(Tool):
         return '\n'.join(parts)
 
     # ============================================================
-    # 终端显示（Rich markup，简洁摘要）
+    # 终端显示（统一格式）
     # ============================================================
 
-    def _build_terminal_display(self, pattern: str, match_count: int, file_count: int) -> str:
-        """给终端的简洁显示"""
+    def _build_terminal_display(self, pattern: str, matches: List[tuple], total: int) -> str:
+        """给终端的统一格式显示"""
         parts = []
-        parts.append(f"[dim {COLORS['border_subtle']}]╭─[/] {ICONS.get('grep', '🔍')} [bold]Grep[/]")
-        parts.append(f"[dim {COLORS['border_subtle']}]│[/]  搜索 [cyan]\"{escape(pattern)}\"[/]")
-        parts.append(f"[dim {COLORS['border_subtle']}]│[/]  找到 [bold]{match_count}[/] 处匹配，涉及 [bold]{file_count}[/] 个文件")
-        parts.append(f"[dim {COLORS['border_subtle']}]╰{'─' * 40}[/]")
+
+        # 开头空行，与其他工具分隔
+        parts.append("")
+        # 标题行：✎ Grep: "pattern" [N 处匹配]
+        parts.append(f"[bold]{ICONS.get('edit', '✎')} Grep:[/] [cyan]\"{escape(pattern)}\"[/] [dim]\\[{total} 处匹配][/]")
+        # 分隔线
+        parts.append(f"[dim]{'─' * 50}[/]")
+
+        # 匹配列表（带行号）
+        for i, (file_path, line_num, line_content) in enumerate(matches, 1):
+            # 截断过长的行
+            display_line = line_content[:100] + "..." if len(line_content) > 100 else line_content
+            parts.append(f"[dim]{i:>5}[/]  [dim]{escape(file_path)}:{line_num}:[/] {escape(display_line)}")
+
         return '\n'.join(parts)
 
     # ============================================================

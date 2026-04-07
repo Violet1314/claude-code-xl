@@ -161,9 +161,6 @@ class PermissionUI:
 
     @staticmethod
     def show_tool_start(tool_name: str, operation: str) -> None:
-        """显示工具开始执行"""
-        tool_icon = PermissionUI._get_tool_icon(tool_name)
-        console.print(f"\n  [{COLORS['primary']}]{tool_icon} 执行工具:[/]  ", end="")
-        console.print_raw(tool_name)
-        console.print(f"   ", end="")
-        console.print_raw(operation)
+        """显示工具开始执行 - 已移除，由工具自身的 display_output 统一显示"""
+        # 不再显示额外的工具名和参数行，避免与统一格式重复
+        pass

@@ -107,42 +107,42 @@ class BashStreamingDisplay:
         self._output_lines.append(line)
 
     def stop(self, success: bool, return_code: int = 0) -> None:
-        """停止并显示结果卡片"""
+        """停止并显示结果（混合方案：统一标题 + Panel 包裹）"""
         if self._display:
             self._display.stop()
-            
+
         duration = time.time() - self._start_time
+        status_str = '成功' if success else '失败'
+        icon = ICONS.get('edit', '✎')
         color = COLORS['success'] if success else COLORS['error']
-        icon = ICONS['success'] if success else ICONS['error']
-        
-        status_str = 'Success' if success else 'Failed'
-        title = f"{icon} Bash ({status_str} • {duration:.1f}s)"
-        
-        content = ""
+
+        # 标题行：✎ Bash: command [状态] (耗时 Xs)
+        display_cmd = self.command if len(self.command) <= 50 else self.command[:47] + "..."
+        app_console.print()
+        app_console.print(f"[bold]{icon} Bash:[/] [cyan]{display_cmd}[/] [dim]\\[{status_str}] ({duration:.2f}s)[/]")
+
+        # 输出内容用 Panel 包裹
         if self._output_lines:
             max_lines = 20
             if len(self._output_lines) > max_lines:
-                omitted = len(self._output_lines) - max_lines
                 display_lines = self._output_lines[-max_lines:]
                 content = "\n".join(display_lines)
-                content += f"\n\n[dim]... omitted {omitted} lines ...[/]"
+                omitted = len(self._output_lines) - max_lines
+                content += f"\n\n[dim]... (省略 {omitted} 行) ...[/]"
             else:
                 content = "\n".join(self._output_lines)
         else:
             if self._error_message:
                 content = f"[red]{self._error_message}[/]"
             else:
-                content = "[dim](No output)[/]"
-            
+                content = "[dim](无输出)[/]"
+
         panel = Panel(
             content,
-            title=title,
-            title_align="left",
             border_style=color,
             box=ROUNDED,
             padding=(1, 2),
         )
-        app_console.print()
         app_console.print(panel)
         app_console.print()
 

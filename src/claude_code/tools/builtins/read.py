@@ -142,7 +142,7 @@ class ReadTool(Tool):
                 was_cached, use_summary, offset, limit
             )
             display_output = self._build_terminal_display(
-                path, total_lines, size_kb, reference,
+                path, lines, total_lines, size_kb, reference,
                 was_cached, use_summary, offset, limit
             )
 
@@ -245,31 +245,50 @@ class ReadTool(Tool):
         return '\n'.join(parts)
 
     # ============================================================
-    # 终端显示（Rich markup，简洁摘要）
+    # 终端显示（统一格式）
     # ============================================================
 
     def _build_terminal_display(
-        self, path, total_lines, size_kb, reference,
+        self, path, lines, total_lines, size_kb, reference,
         was_cached, use_summary, offset, limit
     ) -> str:
-        """构建给终端的简洁显示"""
-        file_icon = get_file_icon(path.suffix.lower())
-        cache_status = "✓ cached" if was_cached else "+ new"
+        """构建给终端的统一格式显示"""
+        cache_status = "[v0]" if was_cached else "[v0]"
         escaped_ref = escape(reference)
 
-        parts = []
-        parts.append(f"[dim {COLORS['border_subtle']}]╭─[/] {file_icon} [bold]{escape(path.name)}[/]")
-        parts.append(f"[dim {COLORS['border_subtle']}]│[/]  {total_lines} 行  [dim]│[/]  {size_kb:.1f} KB  [dim]│[/]  {cache_status}")
-        parts.append(f"[dim {COLORS['border_subtle']}]│[/]  📌 [cyan]{escaped_ref}[/]")
-
-        if use_summary:
-            parts.append(f"[dim {COLORS['border_subtle']}]│[/]  [dim]摘要模式 · 前 {self.PREVIEW_LINES} 行预览 + 结构概览[/]")
+        # 格式化大小
+        if size_kb < 1024:
+            size_str = f"{size_kb:.1f}KB"
         else:
+            size_str = f"{size_kb / 1024:.1f}MB"
+
+        parts = []
+        # 开头空行，与其他工具分隔
+        parts.append("")
+        # 标题行：✎ Read: 文件名 [v0] (N lines, X KB)
+        parts.append(f"[bold]{ICONS.get('edit', '✎')} Read:[/] [cyan]{escape(path.name)}[/] [dim]{cache_status} ({total_lines} lines, {size_str})[/]")
+        # 分隔线
+        parts.append(f"[dim]{'─' * 50}[/]")
+
+        # 内容预览（带行号）
+        if use_summary:
+            # 摘要模式：显示前 PREVIEW_LINES 行
+            for i, line in enumerate(lines[:self.PREVIEW_LINES], 1):
+                display_line = line.rstrip()[:100] if len(line) > 100 else line.rstrip()
+                parts.append(f"[dim]{i:>5}[/]  {escape(display_line)}")
+            if total_lines > self.PREVIEW_LINES:
+                omitted_chars = sum(len(l) for l in lines[self.PREVIEW_LINES:])
+                parts.append(f"[dim]... (省略 {omitted_chars} 字符) ...[/]")
+        else:
+            # 完整模式：显示指定范围
             start_line = max(1, offset)
             end_line = min(total_lines, start_line + limit - 1)
-            parts.append(f"[dim {COLORS['border_subtle']}]│[/]  [dim]完整内容 · 行 {start_line}-{end_line}[/]")
-
-        parts.append(f"[dim {COLORS['border_subtle']}]╰{'─' * 40}[/]")
+            for i in range(start_line - 1, end_line):
+                line = lines[i].rstrip()
+                display_line = line[:100] if len(line) > 100 else line
+                parts.append(f"[dim]{i+1:>5}[/]  {escape(display_line)}")
+            if end_line < total_lines:
+                parts.append(f"[dim]... ({total_lines - end_line} more lines)[/]")
 
         return '\n'.join(parts)
 

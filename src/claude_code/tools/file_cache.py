@@ -243,6 +243,30 @@ class FileCacheManager:
         """检查当前版本是否已读取过该文件"""
         return self.get_read_count(file_path) > 0
 
+    def get_read_ranges(self, file_path: str) -> List[Tuple[int, int]]:
+        """获取当前版本已读取的行范围列表"""
+        key = self._get_file_key(file_path)
+        with self._lock:
+            if key in self._cache:
+                cached = self._cache[key]
+                stats = cached.get_version_stats(cached.version)
+                return stats.get("ranges", [])
+            return []
+
+    def reset_read_count(self, file_path: str) -> bool:
+        """
+        重置文件的读取计数（用于 Edit 失败时解锁 Read）
+        返回: 是否成功重置
+        """
+        key = self._get_file_key(file_path)
+        with self._lock:
+            if key in self._cache:
+                cached = self._cache[key]
+                # 重置当前版本的计数
+                cached.version_stats[cached.version] = {"count": 0, "ranges": []}
+                return True
+            return False
+
     def clear(self):
         """清空缓存"""
         with self._lock:

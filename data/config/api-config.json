@@ -1,80 +1,52 @@
 {
-  "base_url": "https://yunwu.ai/v1",
-  "api_key": "sk-hwvRPhrBz0OEMa6u4wSzdAKs2yEYsvHzA3FvFmCeT25HdI8B",
+  "base_url": "https://new-api.aiplan.mthreads.com/v1",
+  "api_key": "sk-mtcode-Cm1aUWR8u-shKYIEcH6h6xDDzzKsLJS4Cj-pHAbnGxI",
   "task_models": {
     "summary": "deepseek-v3.2"
   },
   "models": [
     {
-      "id": "claude-sonnet-4-6-thinking",
-      "name": "Claude Sonnet 4.6 Think",
-      "price": "Input: 12$/1M Output: 60$/1M",
-      "context_limit": 1000000,
-      "tool_mode": "native"
-    },
-    {
-      "id": "claude-opus-4-6-thinking",
-      "name": "Claude Opus 4.6 Think",
-      "price": "Input: 20$/1M Output: 100$/1M",
-      "context_limit": 1000000,
-      "tool_mode": "native"
-    },
-    {
-      "id": "gemini-3.1-pro-preview",
-      "name": "Gemini 3.1 Pro",
-      "price": "Input: 6$/1M Output: 36$/1M",
-      "context_limit": 2000000,
-      "tool_mode": "native"
-    },
-    {
-      "id": "gemini-3.1-flash-lite-preview",
-      "name": "Gemini 3.1 Flash Lite",
-      "price": "Input: 0.75$/1M Output: 4.5$/1M",
-      "context_limit": 2000000,
-      "tool_mode": "native"
-    },
-    {
-      "id": "gpt-5.4",
-      "name": "GPT 5.4",
-      "price": "Input: 7.5$/1M Output: 45$/1M",
-      "context_limit": 1000000,
-      "tool_mode": "native"
-    },
-    {
-      "id": "grok-4.2",
-      "name": "Grok 4.2",
-      "price": "Input: 3$/1M Output: 15$/1M",
-      "context_limit": 256000,
-      "tool_mode": "native"
-    },
-    {
       "id": "glm-5",
       "name": "GLM 5",
-      "price": "Input: 4$/1M Output: 18$/1M",
-      "context_limit": 200000,
+      "price": "Input: 1$/1M Output: 3.2$/1M",
+      "context_limit": 202752,
+      "tool_mode": "native"
+    },
+    {
+      "id": "kimi-k2.5",
+      "name": "Kimi K2.5",
+      "price": "Input: 0.6$/1M Output: 3$/1M",
+      "context_limit": 262144,
       "tool_mode": "native"
     },
     {
       "id": "MiniMax-M2.7",
       "name": "MiniMax M2.7",
-      "price": "Input: 2.1$/1M Output: 8.4$/1M",
-      "context_limit": 200000,
+      "price": "Input: 0.3$/1M Output: 1.2$/1M",
+      "context_limit": 204800,
       "tool_mode": "native"
     },
     {
       "id": "qwen3.5-plus",
       "name": "Qwen 3.5 Plus",
-      "price": "Input:0.8$/1M Output:4.8$/1M",
+      "price": "Input: 0.573$/1M Output: 3.44$/1M",
+      "context_limit": 1000000,
+      "tool_mode": "native"
+    },
+    {
+      "id": "qwen3-coder-plus",
+      "name": "Qwen3 Coder Plus",
+      "price": "Input: 1$/1M Output: 5$/1M",
       "context_limit": 1000000,
       "tool_mode": "native"
     },
     {
       "id": "deepseek-v3.2",
       "name": "DeepSeek V3.2",
-      "price": "Input: 2$/1M Output: 3$/1M",
+      "price": "Input: 0.27$/1M Output: 0.42$/1M",
       "context_limit": 128000,
       "tool_mode": "native"
     }
   ],
-  "default_model": "MiniMax-M2.7"
+  "default_model": "glm-5"
 }

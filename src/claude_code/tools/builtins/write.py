@@ -99,21 +99,47 @@ class WriteTool(Tool):
             return ToolResult(success=False, output="", error=f"写入失败: {str(e)}")
 
     def _build_terminal_display(self, path: Path, content: str, syntax_warning: Optional[str]) -> str:
-        """构建终端卡片式显示"""
-        icon = get_file_icon(path.suffix.lower())
-        content_len = len(content)
-        lines = content.count('\n') + 1
+        """构建终端统一格式显示"""
+        from claude_code.ui.theme import ICONS
 
-        display = f"""[bold {COLORS['success']}]✓ 写入成功[/]
-┌─ {icon} [bold]{escape(path.name)}[/]
-│ 路径: [dim]{escape(str(path))}[/]
-│ 大小: {content_len} 字符, {lines} 行"""
+        lines = content.count('\n') + 1
+        # 格式化大小
+        content_len = len(content)
+        if content_len < 1024:
+            size_str = f"{content_len}B"
+        else:
+            size_str = f"{content_len / 1024:.1f}KB"
+
+        # 判断是创建还是覆盖
+        status = "created" if not path.exists() else "overwritten"
+
+        parts = []
+        # 开头空行，与其他工具分隔
+        parts.append("")
+        # 标题行：✎ Write: 文件名 [status] (lines, size)
+        parts.append(f"[bold]{ICONS.get('edit', '✎')} Write:[/] [cyan]{escape(path.name)}[/] [dim]\\[{status}] ({lines} lines, {size_str})[/]")
+        # 分隔线
+        parts.append(f"[dim]{'─' * 50}[/]")
+
+        # 内容预览（带行号，最多显示20行）
+        content_lines = content.split('\n')
+        max_preview = 20
+        if len(content_lines) > max_preview:
+            for i, line in enumerate(content_lines[:max_preview], 1):
+                # 截断过长的行
+                display_line = line[:100] if len(line) > 100 else line
+                parts.append(f"[dim]{i:>5}[/]  {escape(display_line)}")
+            omitted = len(content_lines) - max_preview
+            parts.append(f"[dim]... (省略 {omitted} 行) ...[/]")
+        else:
+            for i, line in enumerate(content_lines, 1):
+                display_line = line[:100] if len(line) > 100 else line
+                parts.append(f"[dim]{i:>5}[/]  {escape(display_line)}")
 
         if syntax_warning:
-            display += f"\n│ [yellow]⚠ 语法警告:[/] [dim]{escape(syntax_warning[:50])}...[/]"
+            parts.append(f"[yellow]⚠ 语法警告:[/] [dim]{escape(syntax_warning[:80])}[/]")
 
-        display += "\n└─"
-        return display
+        return '\n'.join(parts)
 
     def get_security_context(self) -> Dict[str, Any]:
         """返回安全上下文"""

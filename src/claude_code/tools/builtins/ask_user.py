@@ -94,9 +94,10 @@ class AskUserQuestionTool(Tool):
 
     def _show_options_menu(self, question: str, options: List[Dict], header: str) -> Optional[str]:
         """显示选项菜单"""
-        console.blank()
-        console.print(f"[bold {COLORS['primary']}]{ICONS['claude']} 需要你的决策[/]")
-        console.rule()
+        # 统一格式标题行
+        display_question = question if len(question) <= 40 else question[:37] + "..."
+        console.print(f"[bold]{ICONS.get('edit', '✎')} AskUserQuestion:[/] [cyan]{display_question}[/] [dim]\\[等待输入][/]")
+        console.print(f"[dim]{'─' * 50}[/]")
 
         for line in question.split('\n'):
             console.print(f"  {line}")
@@ -131,9 +132,10 @@ class AskUserQuestionTool(Tool):
 
     def _show_input_prompt(self, question: str, default: str) -> Optional[str]:
         """显示输入框"""
-        console.blank()
-        console.print(f"[bold {COLORS['primary']}]{ICONS['claude']} 问题[/]")
-        console.rule()
+        # 统一格式标题行
+        display_question = question if len(question) <= 40 else question[:37] + "..."
+        console.print(f"[bold]{ICONS.get('edit', '✎')} AskUserQuestion:[/] [cyan]{display_question}[/] [dim]\\[等待输入][/]")
+        console.print(f"[dim]{'─' * 50}[/]")
         console.print(f"  {question}")
         console.blank()
 
