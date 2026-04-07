@@ -1,6 +1,6 @@
 {
-  "base_url": "https://new-api.aiplan.mthreads.com/v1",
-  "api_key": "sk-mtcode-Cm1aUWR8u-shKYIEcH6h6xDDzzKsLJS4Cj-pHAbnGxI",
+  "base_url": "https://yunwu.ai/v1",
+  "api_key": "sk-hwvRPhrBz0OEMa6u4wSzdAKs2yEYsvHzA3FvFmCeT25HdI8B",
   "task_models": {
     "summary": "deepseek-v3.2"
   },
