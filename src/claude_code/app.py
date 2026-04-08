@@ -44,7 +44,7 @@ class Application:
     """Claude Code Terminal 主应用"""
     # 工具执行限制
     MAX_TOOL_ROUNDS = 10        # 最大循环轮次
-    MAX_TOOLS_PER_ROUND = 10   # 每轮最大工具数
+    MAX_TOOLS_PER_ROUND = 20   # 每轮最大工具数
 
     def __init__(self, config_dir: str = "data/config"):
         """

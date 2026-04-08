@@ -19,7 +19,6 @@ class ReadTool(Tool):
     description = (
         "读取用户本机文件内容。你可以直接访问用户提供的任何本地路径，无需用户手动粘贴内容。"
         "文件会被完整缓存，后续操作使用缓存引用节省 Token。"
-        "**重要**：每个文件只需读取一次，系统会自动检测并阻止重复读取。"
         "读取后请直接执行任务，不要再次调用 Read。如需编辑，直接使用 Edit 工具。"
     )
 
@@ -146,25 +145,10 @@ class ReadTool(Tool):
                 was_cached, use_summary, offset, limit
             )
 
-            # 记录读取操作（用于重复读取检测）
+# 记录读取操作（用于追踪，不再拦截）
             start_line = offset if not use_summary else 1
-            end_line = min(offset + limit - 1,  total_lines) if not use_summary else total_lines
-            
-            # 【优化】检查是否触发拦截
-            read_status = file_cache.record_read(str(path.absolute()), total_lines, start_line, end_line)
-            if read_status["blocked"]:
-                return ToolResult(
-                    success=False,
-                    output="",
-                    error=(
-                        f"⛔ 读取拦截：文件 {path.name} 已被多次读取（当前版本第 {read_status['count']} 次）。\n"
-                        f"原因：系统检测到重复读取行为，为节省资源已拦截。\n"
-                        f"解决方案：\n"
-                        f"1. 该文件内容已在你的上下文历史中（参考引用: {reference}）。\n"
-                        f"2. 如果你需要文件的特定部分，请使用 offset/limit 参数读取【未读取过的行】。\n"
-                        f"3. 如果文件已被外部修改，请先确认是否真的需要最新内容。"
-                    )
-                )
+            end_line = min(offset + limit - 1, total_lines) if not use_summary else total_lines
+            file_cache.record_read(str(path.absolute()), total_lines, start_line, end_line)
 
             return ToolResult(
                 success=True,
@@ -204,7 +188,7 @@ class ReadTool(Tool):
         self, path, lines, total_lines, size_kb,
         reference, was_cached, use_summary, offset, limit
     ) -> str:
-        """构建给模型的纯文本输出"""
+        """构建给模型的纯文本输出（始终返回完整内容）"""
         parts = []
 
         # 文件元信息
@@ -213,48 +197,33 @@ class ReadTool(Tool):
         parts.append(f"Cache: {reference}")
         parts.append("")
 
-        if use_summary:
-            # 摘要模式
-            structure = self._analyze_structure(lines, path.suffix.lower())
-            if structure:
-                parts.append("Structure:")
-                for item in structure[:15]:
-                    parts.append(f"  {item}")
-                parts.append("")
+        # 始终返回完整内容给模型
+        start_line = max(1, offset)
+        end_line = min(total_lines, start_line + limit - 1)
 
-            parts.append(f"Preview (first {self.PREVIEW_LINES} lines):")
-            for i, line in enumerate(lines[:self.PREVIEW_LINES], 1):
-                parts.append(f"{i:5d} | {line.rstrip()}")
+        parts.append(f"Content (lines {start_line}-{end_line}):")
+        for i in range(start_line - 1, end_line):
+            parts.append(f"{i+1:5d} | {lines[i].rstrip()}")
 
-            if total_lines > self.PREVIEW_LINES:
-                parts.append(f"  ... ({total_lines - self.PREVIEW_LINES} more lines)")
-            parts.append("")
-            parts.append("Use offset/limit to read specific sections.")
-        else:
-            # 完整模式
-            start_line = max(1, offset)
-            end_line = min(total_lines, start_line + limit - 1)
-
-            parts.append(f"Content (lines {start_line}-{end_line}):")
-            for i in range(start_line - 1, end_line):
-                parts.append(f"{i+1:5d} | {lines[i].rstrip()}")
-
-            if end_line < total_lines:
-                parts.append(f"  ... ({total_lines - end_line} more lines, use offset to continue)")
+        if end_line < total_lines:
+            parts.append(f"  ... ({total_lines - end_line} more lines, use offset to continue)")
 
         return '\n'.join(parts)
 
     # ============================================================
-    # 终端显示（统一格式）
+    # 终端显示（始终省略模式）
     # ============================================================
 
     def _build_terminal_display(
         self, path, lines, total_lines, size_kb, reference,
         was_cached, use_summary, offset, limit
     ) -> str:
-        """构建给终端的统一格式显示"""
+        """构建给终端的统一格式显示（始终省略模式）
+
+        短文件（< TERMINAL_DISPLAY_THRESHOLD 行）：完整显示
+        长文件（≥ TERMINAL_DISPLAY_THRESHOLD 行）：头 + 尾
+        """
         cache_status = "[v0]" if was_cached else "[v0]"
-        escaped_ref = escape(reference)
 
         # 格式化大小
         if size_kb < 1024:
@@ -270,25 +239,33 @@ class ReadTool(Tool):
         # 分隔线
         parts.append(f"[dim]{'─' * 50}[/]")
 
-        # 内容预览（带行号）
-        if use_summary:
-            # 摘要模式：显示前 PREVIEW_LINES 行
-            for i, line in enumerate(lines[:self.PREVIEW_LINES], 1):
-                display_line = line.rstrip()[:100] if len(line) > 100 else line.rstrip()
+        # 终端显示始终使用省略模式
+        if total_lines < self.TERMINAL_DISPLAY_THRESHOLD:
+            # 短文件：完整显示
+            for i, line in enumerate(lines, 1):
+                display_line = line.rstrip()[:120] if len(line.rstrip()) > 120 else line.rstrip()
                 parts.append(f"[dim]{i:>5}[/]  {escape(display_line)}")
-            if total_lines > self.PREVIEW_LINES:
-                omitted_chars = sum(len(l) for l in lines[self.PREVIEW_LINES:])
-                parts.append(f"[dim]... (省略 {omitted_chars} 字符) ...[/]")
         else:
-            # 完整模式：显示指定范围
-            start_line = max(1, offset)
-            end_line = min(total_lines, start_line + limit - 1)
-            for i in range(start_line - 1, end_line):
+            # 长文件：头 + 尾
+            # 显示头部
+            for i in range(self.TERMINAL_HEAD_LINES):
+                if i >= total_lines:
+                    break
                 line = lines[i].rstrip()
-                display_line = line[:100] if len(line) > 100 else line
+                display_line = line[:120] if len(line) > 120 else line
                 parts.append(f"[dim]{i+1:>5}[/]  {escape(display_line)}")
-            if end_line < total_lines:
-                parts.append(f"[dim]... ({total_lines - end_line} more lines)[/]")
+
+            # 省略提示
+            omitted_lines = total_lines - self.TERMINAL_HEAD_LINES - self.TERMINAL_TAIL_LINES
+            if omitted_lines > 0:
+                parts.append(f"[dim]       ... (省略 {omitted_lines} 行) ...[/]")
+
+            # 显示尾部
+            tail_start = total_lines - self.TERMINAL_TAIL_LINES
+            for i in range(tail_start, total_lines):
+                line = lines[i].rstrip()
+                display_line = line[:120] if len(line) > 120 else line
+                parts.append(f"[dim]{i+1:>5}[/]  {escape(display_line)}")
 
         return '\n'.join(parts)
 

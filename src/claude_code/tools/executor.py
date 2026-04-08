@@ -156,22 +156,7 @@ class ToolExecutor:
         """
         执行前的安全检查与重复检测
         """
-        # A. 重复读取检测 (利用 file_cache)
-        if tool_call.name == "Read":
-            file_path = tool_call.parameters.get("file_path", "")
-            if file_path:
-                resolved_path = resolve_path(file_path)
-                read_count = file_cache.get_read_count(resolved_path)
-                
-                # 第 5 次及以后：阻止执行
-                if read_count >= 4:
-                    ranges = file_cache.get_read_ranges(resolved_path)
-                    return ExecutionResult(
-                        tool_call=tool_call,
-                        success=True,
-                        output=f"⚠️ 文件已读取 {read_count} 次，已达上限。\n📌 缓存引用: {resolved_path}\n已读取范围: {ranges}\n请直接执行任务或使用 Edit 工具编辑。",
-                        skipped=True
-                    )
+        # A. Read 工具不再限制读取次数，移除拦截逻辑
 
         # B. 危险命令拦截 (利用工具自身的钩子)
         if hasattr(tool, '_check_dangerous'):
@@ -201,19 +186,7 @@ class ToolExecutor:
         """
         执行后的处理：显示结果、记录历史、更新缓存
         """
-        # A. 重复读取警告 (Read 工具)
-        if tool_call.name == "Read" and result.success:
-            file_path = tool_call.parameters.get("file_path", "")
-            if file_path:
-                resolved_path = resolve_path(file_path)
-                current_count = file_cache.get_read_count(resolved_path) + 1
-                if 2 <= current_count <= 4:
-                    warning = f"\n\n⚠️ 提示: 该文件已读取 {current_count} 次。建议直接使用缓存内容执行任务。"
-                    result.output = result.output + warning
-                    from claude_code.ui import console as ui_console
-                    ui_console.print(f"  [yellow]⚠️ 该文件已读取 {current_count} 次，建议使用缓存内容[/]  ")
-
-        # B. 显示结果
+        # A. 显示结果
         # Bash 已有流式卡片，跳过重复显示
         if tool.name != "Bash":
             # 确定要显示的内容

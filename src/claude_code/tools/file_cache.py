@@ -46,9 +46,6 @@ class FileCacheManager:
     - 【优化】按版本追踪读取次数，防止跨版本误拦截
     """
     
-    # 最大重复读取次数限制
-    MAX_READ_COUNT = 5
-
     def __init__(self):
         self._cache: Dict[str, CachedFile] = {}
         self._lock = threading.Lock()
@@ -219,15 +216,14 @@ class FileCacheManager:
             # 获取当前版本的统计数据
             stats = cached.get_version_stats(current_version)
             
-            # 增加计数
+# 增加计数
             stats["count"] += 1
             # 记录范围
             stats["ranges"].append((start_line, end_line))
-            
+
             current_count = stats["count"]
-            blocked = current_count > self.MAX_READ_COUNT
-            
-            return {"count": current_count, "blocked": blocked}
+            # 不再限制读取次数
+            return {"count": current_count, "blocked": False}
 
     def get_read_count(self, file_path: str) -> int:
         """获取当前版本的读取次数"""
