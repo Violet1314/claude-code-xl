@@ -34,11 +34,13 @@ class GlobTool(Tool):
 
     def execute(self, parameters: Dict[str, Any]) -> ToolResult:
         """执行搜索"""
+        # 参数验证（与 Read/Edit/Bash 工具一致）
+        validation_error = self.validate_parameters(parameters)
+        if validation_error:
+            return ToolResult(success=False, output="", error=validation_error)
+
         pattern = parameters.get("pattern", "")
         search_path = parameters.get("path", ".")
-
-        if not pattern:
-            return ToolResult(success=False, output="", error="缺少 pattern 参数")
 
         search_path = resolve_path(search_path)
 
@@ -144,17 +146,13 @@ class GlobTool(Tool):
         # 开头空行，与其他工具分隔
         parts.append("")
         # 标题行：✎ Glob: pattern [N 个匹配]
-        parts.append(f"[bold]{ICONS.get('edit', '✎')} Glob:[/] [cyan]{escape(pattern)}[/] [dim]\\[{total} 个匹配][/]")
+        parts.append(f"[bold]{ICONS.get('glob', '📁')} Glob:[/] [cyan]{escape(pattern)}[/] [dim]\\[{total} 个匹配][/]")
         # 分隔线
         parts.append(f"[dim]{'─' * 50}[/]")
 
         # 文件列表（带行号）
         for i, match in enumerate(matches, 1):
-            # 相对路径显示
-            try:
-                display_path = str(match)
-            except:
-                display_path = str(match)
+            display_path = str(match)
             parts.append(f"[dim]{i:>5}[/]  {escape(display_path)}")
 
         return '\n'.join(parts)

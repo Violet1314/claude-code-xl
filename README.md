@@ -1,14 +1,11 @@
-这是基于 v2.8.5 格式更新的 **README.md**，已同步至 **v2.8.10** 版本。
+这是基于 v2.8.5 格式更新的 **README.md**，已同步至 **v2.8.11** 版本。
 
 主要变更点：
-*   **版本号**：更新至 `v2.8.10`。
-*   **Bash 工具重构**：拆分 execute() 方法（213 行→70 行），新增 3 个辅助方法。
-*   **移除兜底转换**：删除 _translate_unix_command()，依靠错误提示引导模型使用正确 PowerShell 语法。
-*   **Edit 严格化**：移除模糊匹配和 lines 模式，只有精确匹配，强制模型认真 Read + 精确复制。
-*   **Read 简化**：移除死代码（结构分析方法 100+ 行）、移除无效的 summary 参数。
-*   **参数验证集成**：所有工具 execute() 开头调用 validate_parameters()，保持一致风格。
-*   **Bug 修复**：修复 BashStreamingDisplay/ReadProgressDisplay icon 错误。
-*   **更新日志**：新增 v2.8.8、v2.8.9、v2.8.10 重构记录。
+*   **版本号**：更新至 `v2.8.11`。
+*   **全工具一致性**：所有 7 个工具 execute() 开头统一调用 validate_parameters()。
+*   **Icon 规范化**：Grep→🔍、Glob→📁、AskUserQuestion→❓（不再借用 edit 的 ✎）。
+*   **冗余代码清理**：删除 Glob 中无效 try/except。
+*   **更新日志**：新增 v2.8.11 重构记录。
 
 ---
 
@@ -16,7 +13,7 @@
 
 仿照官方 Claude Code 风格构建的 CLI AI 编程助手，支持 AI 驱动的文件操作和命令执行。
 
-**版本：v2.8.10**
+**版本：v2.8.11**
 
 ## 功能特性
 
@@ -124,6 +121,16 @@ claude-code/
 ```
 
 ## 更新日志
+
+### v2.8.11 (2026-04-10)
+**全工具一致性修复**
+*   ✅ Write 参数验证统一：execute() 开头调用 validate_parameters()
+*   ✅ Grep 参数验证统一 + icon 修复：edit→grep，正确显示 🔍
+*   ✅ Glob 参数验证统一 + icon 修复：edit→glob，正确显示 📁
+*   ✅ Glob 冗余代码删除：移除无效 try/except（str(match) 不会抛异常）
+*   ✅ AskUserQuestion 参数验证统一 + icon 修复：edit→ask，正确显示 ❓
+*   ✅ 全量测试通过：100 passed in 1.35s
+*   ✅ **全部 7 个工具进入稳定状态**
 
 ### v2.8.10 (2026-04-10)
 **Bash 工具重构**

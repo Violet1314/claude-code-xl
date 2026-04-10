@@ -54,20 +54,14 @@ class ReadTool(Tool):
 
     def execute(self, parameters: Dict[str, Any]) -> ToolResult:
         """执行读取操作"""
-        # 参数验证
+        # 参数验证（与 Edit/Bash 工具一致）
         validation_error = self.validate_parameters(parameters)
         if validation_error:
             return ToolResult(success=False, output="", error=validation_error)
 
         file_path = parameters.get("file_path", "")
-        try:
-            offset = int(parameters.get("offset", 1))
-        except (ValueError, TypeError):
-            offset = 1
-        try:
-            limit = int(parameters.get("limit", self.DEFAULT_LIMIT))
-        except (ValueError, TypeError):
-            limit = self.DEFAULT_LIMIT
+        offset = int(parameters.get("offset", 1))
+        limit = int(parameters.get("limit", self.DEFAULT_LIMIT))
 
         file_path = resolve_path(file_path)
 
@@ -291,11 +285,19 @@ class ReadTool(Tool):
         if not file_path:
             return "缺少 file_path 参数"
 
-        offset = parameters.get("offset", 1)
+        # offset 验证（类型 + 范围）
+        try:
+            offset = int(parameters.get("offset", 1))
+        except (ValueError, TypeError):
+            return "offset 必须是整数"
         if offset < 1:
             return "offset 必须 >= 1"
 
-        limit = parameters.get("limit", self.DEFAULT_LIMIT)
+        # limit 验证（类型 + 范围）
+        try:
+            limit = int(parameters.get("limit", self.DEFAULT_LIMIT))
+        except (ValueError, TypeError):
+            return "limit 必须是整数"
         if limit < 1:
             return "limit 必须 >= 1"
 

@@ -59,16 +59,14 @@ class EditTool(Tool):
 
     def execute(self, parameters: Dict[str, Any]) -> ToolResult:
         """执行编辑操作（精确匹配模式）"""
+        # 参数验证（与 Read/Bash 工具一致）
+        validation_error = self.validate_parameters(parameters)
+        if validation_error:
+            return ToolResult(success=False, output="", error=validation_error)
+
         file_path = parameters.get("file_path", "")
         old_string = parameters.get("old_string", "")
         new_string = parameters.get("new_string", "")
-
-        # 参数验证
-        if not file_path:
-            return ToolResult(success=False, output="", error="缺少 file_path 参数")
-
-        if not old_string:
-            return ToolResult(success=False, output="", error="缺少 old_string 参数")
 
         file_path = resolve_workplace_path(file_path)
 

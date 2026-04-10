@@ -51,14 +51,16 @@ class GrepTool(Tool):
 
     def execute(self, parameters: Dict[str, Any]) -> ToolResult:
         """执行搜索"""
+        # 参数验证（与 Read/Edit/Bash 工具一致）
+        validation_error = self.validate_parameters(parameters)
+        if validation_error:
+            return ToolResult(success=False, output="", error=validation_error)
+
         pattern = parameters.get("pattern", "")
         search_path = parameters.get("path", ".")
         file_type = parameters.get("type")
         ignore_case = parameters.get("-i", False)
         output_mode = parameters.get("output_mode", "content")
-
-        if not pattern:
-            return ToolResult(success=False, output="", error="缺少 pattern 参数")
 
         search_path = resolve_path(search_path)
 
@@ -96,7 +98,7 @@ class GrepTool(Tool):
             # 给终端的统一格式显示
             if not all_matches:
                 output = f"No matches found for: {pattern}"
-                display_output = f"[bold]{ICONS.get('edit', '✎')} Grep:[/] [cyan]\"{escape(pattern)}\"[/] [dim]\\[0 处匹配][/]\n[dim]{'─' * 50}[/]"
+                display_output = f"[bold]{ICONS.get('grep', '🔍')} Grep:[/] [cyan]\"{escape(pattern)}\"[/] [dim]\\[0 处匹配][/]\n[dim]{'─' * 50}[/]"
             else:
                 display_output = self._build_terminal_display(pattern, truncated, len(all_matches))
 
@@ -164,7 +166,7 @@ class GrepTool(Tool):
         # 开头空行，与其他工具分隔
         parts.append("")
         # 标题行：✎ Grep: "pattern" [N 处匹配]
-        parts.append(f"[bold]{ICONS.get('edit', '✎')} Grep:[/] [cyan]\"{escape(pattern)}\"[/] [dim]\\[{total} 处匹配][/]")
+        parts.append(f"[bold]{ICONS.get('grep', '🔍')} Grep:[/] [cyan]\"{escape(pattern)}\"[/] [dim]\\[{total} 处匹配][/]")
         # 分隔线
         parts.append(f"[dim]{'─' * 50}[/]")
 

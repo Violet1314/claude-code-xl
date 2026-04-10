@@ -62,13 +62,15 @@ class AskUserQuestionTool(Tool):
 
     def execute(self, parameters: Dict[str, Any]) -> ToolResult:
         """执行询问"""
+        # 参数验证（与 Read/Edit/Bash 工具一致）
+        validation_error = self.validate_parameters(parameters)
+        if validation_error:
+            return ToolResult(success=False, output="", error=validation_error)
+
         question = parameters.get("question", "")
         options = parameters.get("options", [])
         header = parameters.get("header", "")
         default = parameters.get("default", "")
-
-        if not question:
-            return ToolResult(success=False, output="", error="缺少 question 参数")
 
         try:
             if options:
@@ -96,7 +98,7 @@ class AskUserQuestionTool(Tool):
         """显示选项菜单"""
         # 统一格式标题行
         display_question = question if len(question) <= 40 else question[:37] + "..."
-        console.print(f"[bold]{ICONS.get('edit', '✎')} AskUserQuestion:[/] [cyan]{display_question}[/] [dim]\\[等待输入][/]")
+        console.print(f"[bold]{ICONS.get('ask', '❓')} AskUserQuestion:[/] [cyan]{display_question}[/] [dim]\\[等待输入][/]")
         console.print(f"[dim]{'─' * 50}[/]")
 
         for line in question.split('\n'):
@@ -134,7 +136,7 @@ class AskUserQuestionTool(Tool):
         """显示输入框"""
         # 统一格式标题行
         display_question = question if len(question) <= 40 else question[:37] + "..."
-        console.print(f"[bold]{ICONS.get('edit', '✎')} AskUserQuestion:[/] [cyan]{display_question}[/] [dim]\\[等待输入][/]")
+        console.print(f"[bold]{ICONS.get('ask', '❓')} AskUserQuestion:[/] [cyan]{display_question}[/] [dim]\\[等待输入][/]")
         console.print(f"[dim]{'─' * 50}[/]")
         console.print(f"  {question}")
         console.blank()
