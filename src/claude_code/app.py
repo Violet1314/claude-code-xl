@@ -9,7 +9,23 @@ import atexit
 import threading
 from typing import Optional, List
 from datetime import datetime
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
+from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn
+from rich.text import Text
+from rich.table import Column
+
+
+class SafeTextColumn(TextColumn):
+    """安全的 TextColumn，避免 description 中的花括号导致格式化错误"""
+
+    def __init__(self):
+        # 使用空的 text_format，避免格式化
+        super().__init__("")
+
+    def __call__(self, task):
+        # 直接返回 Text 对象，不使用 format()
+        if task.description:
+            return Text.from_markup(task.description)
+        return Text("")
 from claude_code.config.settings import Settings, load_settings
 from claude_code.config.defaults import VERSION, APP_NAME, WORKPLACE_DIR
 from claude_code.core.client import APIClient
@@ -43,8 +59,8 @@ from claude_code.tools import (
 class Application:
     """Claude Code Terminal 主应用"""
     # 工具执行限制
-    MAX_TOOL_ROUNDS = 10        # 最大循环轮次
-    MAX_TOOLS_PER_ROUND = 20   # 每轮最大工具数
+    MAX_TOOL_ROUNDS = 20        # 最大循环轮次
+    MAX_TOOLS_PER_ROUND = 40   # 每轮最大工具数
 
     def __init__(self, config_dir: str = "data/config"):
         """
@@ -314,9 +330,8 @@ class Application:
         # 思考状态：显示进度条
         with Progress(
             SpinnerColumn(spinner_name="dots", style=COLORS['primary']),
-            TextColumn("{task.description}"),  # 【修改】使用占位符，动态更新描述
+            SafeTextColumn(),  # 使用安全的 TextColumn，避免花括号格式化错误
             BarColumn(bar_width=20, pulse_style=COLORS['primary']),
-            TextColumn("[cyan]{task.completed:,} tok[/]"), # 显示 Token/字符计数
             console=console.get_console(),
             transient=True,
         ) as progress:
@@ -497,7 +512,10 @@ class Application:
         for result in report.results:
             if result.skipped:
                 lines.append(f"<result tool=\"{result.tool_call.name}\" status=\"skipped\">")
-                lines.append("用户取消或拒绝执行")
+                if result.permission_denied:
+                    lines.append("权限被拒绝，此操作需要用户明确授权")
+                else:
+                    lines.append("用户主动取消执行")
             elif result.success:
                 lines.append(f"<result tool=\"{result.tool_call.name}\" status=\"success\">")
                 # 压缩大结果

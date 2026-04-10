@@ -145,6 +145,39 @@ class BashTool(Tool):
                 return True, "此命令可能导致系统损坏或数据丢失"
         return False, ""
 
+    # 交互式命令模式（会等待用户输入导致卡住）
+    INTERACTIVE_PATTERNS = [
+        r'\bpython\b.*\binput\s*\(',       # python input()
+        r'\bpython\b.*\drawinput\s*\(',    # python raw_input()
+        r'\bnode\b.*\breadline\s*\(',      # node readline
+        r'\bpython\b.*-i\b',               # python -i (交互模式)
+        r'\bnode\b.*-i\b',                 # node -i (交互模式)
+        r'\bipython\b',                    # ipython
+        r'\bpsql\b',                       # postgres interactive
+        r'\bmysql\b(?!.*-e)',              # mysql (无 -e 参数)
+        r'\bmongo\b',                      # mongodb shell
+        r'\bredis-cli\b(?!.*-.*\b)',       # redis-cli (无命令参数)
+        r'\bvim?\b\s+',                    # vim/vi
+        r'\bnano\b',                       # nano
+        r'\bless\b',                       # less
+        r'\bmore\b',                       # more
+        r'\btop\b',                        # top
+        r'\bhtop\b',                       # htop
+        r'\bgit\s+commit\b(?!.*-m)',       # git commit (无 -m 参数)
+        r'\bgit\s+rebase\s+-i\b',          # git rebase -i
+        r'\bsftp\b',                       # sftp
+        r'\bftp\b',                        # ftp
+        r'\btelnet\b',                     # telnet
+        r'\bssh\b(?!.*@.*".*")',           # ssh (无命令参数)
+    ]
+
+    def _check_interactive(self, command: str) -> Tuple[bool, str]:
+        """检查命令是否为交互式命令（会导致卡住）"""
+        for pattern in self.INTERACTIVE_PATTERNS:
+            if re.search(pattern, command, re.IGNORECASE):
+                return True, "此命令需要交互式输入，会卡住直到超时。请使用非交互式替代方案（如 -e 参数、-m 参数、管道输入等）"
+        return False, ""
+
     def execute(self, parameters: Dict[str, Any]) -> ToolResult:
         """执行命令"""
         from claude_code.config.defaults import WORKPLACE_DIR
@@ -179,6 +212,11 @@ class BashTool(Tool):
         if is_dangerous:
             return ToolResult(success=False, output="", error=f"危险命令已拦截: {danger_reason}")
 
+        # 检查交互式命令
+        is_interactive, interactive_reason = self._check_interactive(command)
+        if is_interactive:
+            return ToolResult(success=False, output="", error=f"交互式命令已拦截: {interactive_reason}")
+
         # Windows 环境下检查 Unix 不兼容语法 (作为第二道防线)
         if os.name == 'nt':
             unix_error = self._check_unix_syntax(command)
@@ -200,7 +238,7 @@ class BashTool(Tool):
                 process = subprocess.Popen(
                     ["powershell", "-NoProfile", "-Command", ps_command],
                     stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
+                    stderr=subprocess.PIPE,
                     cwd=str(work_dir)
                 )
             else:
@@ -208,15 +246,32 @@ class BashTool(Tool):
                     command,
                     shell=True,
                     stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
+                    stderr=subprocess.PIPE,
                     cwd=str(work_dir)
                 )
 
-            output_lines = []
-            
+            stdout_lines = []
+            stderr_lines = []
+
+            def decode_line(line: bytes, is_windows: bool) -> str:
+                """解码单行输出"""
+                if is_windows:
+                    decoded = None
+                    for encoding in ['utf-8', 'utf-16-le', 'gbk']:
+                        try:
+                            decoded = line.decode(encoding).rstrip('\r\n')
+                            break
+                        except (UnicodeDecodeError, UnicodeError):
+                            continue
+                    if decoded is None:
+                        decoded = line.decode('utf-8', errors='replace').rstrip('\r\n')
+                else:
+                    decoded = line.decode('utf-8', errors='replace').rstrip('\n')
+                return decoded
+
             try:
                 while True:
-                    # 检查超时 (依赖 progress_display.py 中的 is_timeout 方法)
+                    # 检查超时
                     if hasattr(progress, 'is_timeout') and progress.is_timeout():
                         process.kill()
                         if hasattr(progress, 'set_error'):
@@ -224,32 +279,44 @@ class BashTool(Tool):
                         progress.stop(False, -1)
                         return ToolResult(success=False, output="", error=f"命令执行超时（{timeout}秒）")
 
-                    line = process.stdout.readline()
-                    if not line:
-                        if process.poll() is not None:
-                            break
-                        continue
-
-                    try:
-                        if is_windows:
-                            decoded = None
-                            for encoding in ['utf-8', 'utf-16-le', 'gbk']:
-                                try:
-                                    decoded = line.decode(encoding).rstrip('\r\n')
-                                    break
-                                except (UnicodeDecodeError, UnicodeError):
-                                    continue
-                            if decoded is None:
-                                decoded = line.decode('utf-8', errors='replace').rstrip('\r\n')
-                        else:
-                            decoded = line.decode('utf-8', errors='replace').rstrip('\n')
-
+                    # 读取 stdout
+                    stdout_line = process.stdout.readline()
+                    if stdout_line:
+                        decoded = decode_line(stdout_line, is_windows)
                         if decoded:
-                            output_lines.append(decoded)
+                            stdout_lines.append(decoded)
                             if hasattr(progress, 'feed_output'):
                                 progress.feed_output(decoded)
-                    except Exception:
-                        pass
+
+                    # 读取 stderr（非阻塞）
+                    if process.stderr:
+                        try:
+                            stderr_line = process.stderr.readline()
+                            if stderr_line:
+                                decoded = decode_line(stderr_line, is_windows)
+                                if decoded:
+                                    stderr_lines.append(decoded)
+                                    if hasattr(progress, 'feed_output'):
+                                        progress.feed_output(f"[stderr] {decoded}")
+                        except Exception:
+                            pass
+
+                    # 检查进程是否结束
+                    if process.poll() is not None:
+                        # 读取剩余输出
+                        remaining_stdout = process.stdout.read()
+                        remaining_stderr = process.stderr.read() if process.stderr else b''
+                        if remaining_stdout:
+                            for line in remaining_stdout.splitlines():
+                                decoded = decode_line(line, is_windows)
+                                if decoded:
+                                    stdout_lines.append(decoded)
+                        if remaining_stderr:
+                            for line in remaining_stderr.splitlines():
+                                decoded = decode_line(line, is_windows)
+                                if decoded:
+                                    stderr_lines.append(decoded)
+                        break
 
             except Exception as e:
                 process.kill()
@@ -258,14 +325,43 @@ class BashTool(Tool):
                     progress.set_error(error_msg)
                 progress.stop(False, -1)
                 return ToolResult(success=False, output="", error=error_msg)
-            
-            return_code = process.wait()
-            output = '\n'.join(output_lines)
-            if len(output) > self.MAX_OUTPUT_LENGTH:
-                output = output[:self.MAX_OUTPUT_LENGTH] + f"\n... (输出过长，已截断，共 {len(output)} 字符)"
 
+            return_code = process.wait()
             success = return_code == 0
-            
+
+            # 智能截断：失败时优先保留 stderr
+            if success:
+                # 成功时：合并 stdout（stderr 通常为空或警告）
+                output = '\n'.join(stdout_lines)
+                if stderr_lines:
+                    output += '\n[stderr]\n' + '\n'.join(stderr_lines)
+            else:
+                # 失败时：优先显示 stderr，然后是 stdout
+                if stderr_lines:
+                    output = '[stderr]\n' + '\n'.join(stderr_lines)
+                    if stdout_lines:
+                        output += '\n[stdout]\n' + '\n'.join(stdout_lines)
+                else:
+                    output = '\n'.join(stdout_lines) if stdout_lines else "(命令执行失败，无输出)"
+
+            # 截断处理
+            if len(output) > self.MAX_OUTPUT_LENGTH:
+                # 失败时优先保留 stderr 的截断策略
+                if not success and stderr_lines:
+                    stderr_text = '\n'.join(stderr_lines)
+                    if len(stderr_text) > self.MAX_OUTPUT_LENGTH:
+                        output = stderr_text[:self.MAX_OUTPUT_LENGTH] + f"\n... (stderr 已截断，共 {len(stderr_text)} 字符)"
+                    else:
+                        # stderr 未超限，保留完整 stderr + 截断 stdout
+                        stdout_text = '\n'.join(stdout_lines) if stdout_lines else ""
+                        remaining = self.MAX_OUTPUT_LENGTH - len(stderr_text) - 10
+                        if stdout_text and remaining > 0:
+                            output = stderr_text + '\n[stdout]\n' + stdout_text[:remaining] + f"\n... (stdout 已截断)"
+                        else:
+                            output = stderr_text
+                else:
+                    output = output[:self.MAX_OUTPUT_LENGTH] + f"\n... (输出过长，已截断，共 {len(output)} 字符)"
+
             if hasattr(progress, 'stop'):
                 progress.stop(success, return_code)
 

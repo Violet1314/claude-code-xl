@@ -204,6 +204,127 @@ class TestEditTool:
 
         assert not result.success
 
+    def test_edit_lines_mode_basic(self):
+        """测试 lines 模式基本功能"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("line1\nline2\nline3\nline4\nline5\n")
+            f.flush()
+            temp_path = f.name
+
+        try:
+            tool = EditTool()
+            result = tool.execute({
+                "file_path": temp_path,
+                "mode": "lines",
+                "start_line": 2,
+                "end_line": 4,
+                "new_content": "new2\nnew3\nnew4"
+            })
+
+            assert result.success
+
+            with open(temp_path, 'r') as f:
+                content = f.read()
+            assert content == "line1\nnew2\nnew3\nnew4\nline5\n"
+        finally:
+            os.unlink(temp_path)
+
+    def test_edit_lines_mode_single_line(self):
+        """测试 lines 模式替换单行"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("def hello():\n    pass\n")
+            f.flush()
+            temp_path = f.name
+
+        try:
+            tool = EditTool()
+            result = tool.execute({
+                "file_path": temp_path,
+                "mode": "lines",
+                "start_line": 2,
+                "end_line": 2,
+                "new_content": "    return True"
+            })
+
+            assert result.success
+
+            with open(temp_path, 'r') as f:
+                content = f.read()
+            assert content == "def hello():\n    return True\n"
+        finally:
+            os.unlink(temp_path)
+
+    def test_edit_lines_mode_delete(self):
+        """测试 lines 模式删除行"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("line1\nline2\nline3\nline4\n")
+            f.flush()
+            temp_path = f.name
+
+        try:
+            tool = EditTool()
+            result = tool.execute({
+                "file_path": temp_path,
+                "mode": "lines",
+                "start_line": 2,
+                "end_line": 3,
+                "new_content": ""
+            })
+
+            assert result.success
+
+            with open(temp_path, 'r') as f:
+                content = f.read()
+            assert content == "line1\nline4\n"
+        finally:
+            os.unlink(temp_path)
+
+    def test_edit_lines_mode_out_of_range(self):
+        """测试 lines 模式行号越界"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("line1\nline2\n")
+            f.flush()
+            temp_path = f.name
+
+        try:
+            tool = EditTool()
+            result = tool.execute({
+                "file_path": temp_path,
+                "mode": "lines",
+                "start_line": 1,
+                "end_line": 10,
+                "new_content": "new"
+            })
+
+            assert not result.success
+            assert "超出文件行数" in result.error
+        finally:
+            os.unlink(temp_path)
+
+    def test_edit_lines_mode_invalid_params(self):
+        """测试 lines 模式参数无效"""
+        tool = EditTool()
+
+        # 缺少 start_line
+        result = tool.execute({
+            "file_path": "some.py",
+            "mode": "lines",
+            "end_line": 5,
+            "new_content": "new"
+        })
+        assert not result.success
+        assert "start_line" in result.error
+
+        # end_line < start_line
+        result = tool.execute({
+            "file_path": "some.py",
+            "mode": "lines",
+            "start_line": 5,
+            "end_line": 3,
+            "new_content": "new"
+        })
+        assert not result.success
+
 
 class TestGlobTool:
     """Glob 工具测试"""

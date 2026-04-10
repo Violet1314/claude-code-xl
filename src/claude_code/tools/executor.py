@@ -57,7 +57,7 @@ class ExecutionReport:
 class ToolExecutor:
     """工具执行器"""
     # 执行限制
-    MAX_TOOLS_PER_TURN = 20    # 单轮最大工具数
+    MAX_TOOLS_PER_TURN = 40    # 单轮最大工具数
     MAX_EXECUTION_TIME = 120    # 单个工具最大执行时间（秒）
 
     def __init__(self, registry: ToolRegistry, permission_manager: PermissionManager):
