@@ -204,126 +204,120 @@ class TestEditTool:
 
         assert not result.success
 
-    def test_edit_lines_mode_basic(self):
-        """测试 lines 模式基本功能"""
+    def test_edit_multiple_matches(self):
+        """测试多处匹配时要求添加上下文"""
         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-            f.write("line1\nline2\nline3\nline4\nline5\n")
+            f.write("def foo():\n    pass\n\ndef bar():\n    pass\n")
             f.flush()
             temp_path = f.name
 
         try:
             tool = EditTool()
+            # "pass" 出现两次，应该失败并要求添加上下文
             result = tool.execute({
                 "file_path": temp_path,
-                "mode": "lines",
-                "start_line": 2,
-                "end_line": 4,
-                "new_content": "new2\nnew3\nnew4"
-            })
-
-            assert result.success
-
-            with open(temp_path, 'r') as f:
-                content = f.read()
-            assert content == "line1\nnew2\nnew3\nnew4\nline5\n"
-        finally:
-            os.unlink(temp_path)
-
-    def test_edit_lines_mode_single_line(self):
-        """测试 lines 模式替换单行"""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-            f.write("def hello():\n    pass\n")
-            f.flush()
-            temp_path = f.name
-
-        try:
-            tool = EditTool()
-            result = tool.execute({
-                "file_path": temp_path,
-                "mode": "lines",
-                "start_line": 2,
-                "end_line": 2,
-                "new_content": "    return True"
-            })
-
-            assert result.success
-
-            with open(temp_path, 'r') as f:
-                content = f.read()
-            assert content == "def hello():\n    return True\n"
-        finally:
-            os.unlink(temp_path)
-
-    def test_edit_lines_mode_delete(self):
-        """测试 lines 模式删除行"""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-            f.write("line1\nline2\nline3\nline4\n")
-            f.flush()
-            temp_path = f.name
-
-        try:
-            tool = EditTool()
-            result = tool.execute({
-                "file_path": temp_path,
-                "mode": "lines",
-                "start_line": 2,
-                "end_line": 3,
-                "new_content": ""
-            })
-
-            assert result.success
-
-            with open(temp_path, 'r') as f:
-                content = f.read()
-            assert content == "line1\nline4\n"
-        finally:
-            os.unlink(temp_path)
-
-    def test_edit_lines_mode_out_of_range(self):
-        """测试 lines 模式行号越界"""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-            f.write("line1\nline2\n")
-            f.flush()
-            temp_path = f.name
-
-        try:
-            tool = EditTool()
-            result = tool.execute({
-                "file_path": temp_path,
-                "mode": "lines",
-                "start_line": 1,
-                "end_line": 10,
-                "new_content": "new"
+                "old_string": "pass",
+                "new_string": "return True"
             })
 
             assert not result.success
-            assert "超出文件行数" in result.error
+            assert "多处匹配" in result.error or "多" in result.error
         finally:
             os.unlink(temp_path)
 
-    def test_edit_lines_mode_invalid_params(self):
-        """测试 lines 模式参数无效"""
-        tool = EditTool()
+    def test_edit_with_context_unique(self):
+        """测试添加上下文后替换成功"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("def foo():\n    pass\n\ndef bar():\n    pass\n")
+            f.flush()
+            temp_path = f.name
 
-        # 缺少 start_line
-        result = tool.execute({
-            "file_path": "some.py",
-            "mode": "lines",
-            "end_line": 5,
-            "new_content": "new"
-        })
-        assert not result.success
-        assert "start_line" in result.error
+        try:
+            tool = EditTool()
+            # 添加上下文使其唯一
+            result = tool.execute({
+                "file_path": temp_path,
+                "old_string": "def foo():\n    pass",
+                "new_string": "def foo():\n    return True"
+            })
 
-        # end_line < start_line
-        result = tool.execute({
-            "file_path": "some.py",
-            "mode": "lines",
-            "start_line": 5,
-            "end_line": 3,
-            "new_content": "new"
-        })
-        assert not result.success
+            assert result.success
+
+            with open(temp_path, 'r') as f:
+                content = f.read()
+            assert "return True" in content
+            assert "def bar():\n    pass" in content  # bar 函数未受影响
+        finally:
+            os.unlink(temp_path)
+
+    def test_edit_no_match_with_hint(self):
+        """测试无匹配时返回清晰指导"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("def hello():\n    print('world')\n")
+            f.flush()
+            temp_path = f.name
+
+        try:
+            tool = EditTool()
+            result = tool.execute({
+                "file_path": temp_path,
+                "old_string": "print('hello')",  # 不存在
+                "new_string": "print('goodbye')"
+            })
+
+            assert not result.success
+            # 应提供清晰的操作指导
+            assert "Read" in result.error or "读取" in result.error or "精确" in result.error
+        finally:
+            os.unlink(temp_path)
+
+    def test_edit_preserves_indentation(self):
+        """测试保持缩进的精确匹配"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("def test():\n    if True:\n        pass\n    return None\n")
+            f.flush()
+            temp_path = f.name
+
+        try:
+            tool = EditTool()
+            # 精确复制带缩进的代码
+            result = tool.execute({
+                "file_path": temp_path,
+                "old_string": "        pass",
+                "new_string": "        return 1"
+            })
+
+            assert result.success
+
+            with open(temp_path, 'r') as f:
+                content = f.read()
+            assert "        return 1" in content
+            assert "        pass" not in content
+        finally:
+            os.unlink(temp_path)
+
+    def test_edit_empty_new_string(self):
+        """测试删除内容（new_string 为空）"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("def test():\n    # TODO: implement\n    pass\n")
+            f.flush()
+            temp_path = f.name
+
+        try:
+            tool = EditTool()
+            result = tool.execute({
+                "file_path": temp_path,
+                "old_string": "    # TODO: implement\n",
+                "new_string": ""
+            })
+
+            assert result.success
+
+            with open(temp_path, 'r') as f:
+                content = f.read()
+            assert "# TODO" not in content
+        finally:
+            os.unlink(temp_path)
 
 
 class TestGlobTool:

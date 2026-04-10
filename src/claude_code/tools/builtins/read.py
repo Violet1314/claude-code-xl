@@ -1,12 +1,10 @@
 """Read 工具 - 读取文件内容（集成缓存 + 进度显示）"""
-import os
-import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from ..base import Tool, ToolResult
 from ..file_cache import file_cache
-from claude_code.utils.paths import resolve_path, get_file_icon
+from claude_code.utils.paths import resolve_path
 from claude_code.ui import console
 from claude_code.ui.theme import COLORS, ICONS
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
@@ -26,10 +24,6 @@ class ReadTool(Tool):
     MAX_FILE_SIZE = 1 * 1024 * 1024
     # 默认读取行数限制
     DEFAULT_LIMIT = 1500
-    # 摘要模式阈值（行数）
-    SUMMARY_THRESHOLD = 1500
-    # 摘要预览行数
-    PREVIEW_LINES = 50
     # 终端显示阈值
     TERMINAL_DISPLAY_THRESHOLD = 80
     TERMINAL_HEAD_LINES = 30
@@ -53,11 +47,6 @@ class ReadTool(Tool):
                     "type": "integer",
                     "description": f"读取的最大行数，默认 {self.DEFAULT_LIMIT} 行。大文件建议分段读取。",
                     "default": self.DEFAULT_LIMIT
-                },
-                "summary": {
-                    "type": "boolean",
-                    "description": "是否返回摘要模式。大文件默认 true，设置 false 获取完整内容。",
-                    "default": True
                 }
             },
             "required": ["file_path"]
@@ -65,6 +54,11 @@ class ReadTool(Tool):
 
     def execute(self, parameters: Dict[str, Any]) -> ToolResult:
         """执行读取操作"""
+        # 参数验证
+        validation_error = self.validate_parameters(parameters)
+        if validation_error:
+            return ToolResult(success=False, output="", error=validation_error)
+
         file_path = parameters.get("file_path", "")
         try:
             offset = int(parameters.get("offset", 1))
@@ -74,15 +68,6 @@ class ReadTool(Tool):
             limit = int(parameters.get("limit", self.DEFAULT_LIMIT))
         except (ValueError, TypeError):
             limit = self.DEFAULT_LIMIT
-
-        summary = parameters.get("summary", True)
-        if isinstance(summary, str):
-            summary = summary.lower() not in ("false", "0", "no")
-
-        has_specific_range = offset > 1 or limit < self.DEFAULT_LIMIT
-
-        if not file_path:
-            return ToolResult(success=False, output="", error="缺少 file_path 参数")
 
         file_path = resolve_path(file_path)
 
@@ -127,27 +112,19 @@ class ReadTool(Tool):
             reference = cache_result["reference"]
             version = cache_result["version"]
             was_cached = cache_result["cached"]
-
-            use_summary = (
-                summary
-                and not has_specific_range
-                and total_lines >= self.SUMMARY_THRESHOLD
-            )
             size_kb = file_size / 1024
 
             # 构建输出
             output = self._build_model_output(
-                path, lines, total_lines, size_kb, reference,
-                was_cached, use_summary, offset, limit
+                path, lines, total_lines, size_kb, reference, offset, limit
             )
             display_output = self._build_terminal_display(
-                path, lines, total_lines, size_kb, reference,
-                was_cached, use_summary, offset, limit
+                path, lines, total_lines, size_kb, reference, version, was_cached
             )
 
-# 记录读取操作（用于追踪，不再拦截）
-            start_line = offset if not use_summary else 1
-            end_line = min(offset + limit - 1, total_lines) if not use_summary else total_lines
+            # 记录读取操作
+            start_line = offset
+            end_line = min(offset + limit - 1, total_lines)
             file_cache.record_read(str(path.absolute()), total_lines, start_line, end_line)
 
             return ToolResult(
@@ -161,7 +138,6 @@ class ReadTool(Tool):
                     "start_line": start_line,
                     "end_line": end_line,
                     "file_size": file_size,
-                    "summary_mode": use_summary,
                     "cache_version": version,
                     "cache_reference": reference,
                 }
@@ -185,10 +161,9 @@ class ReadTool(Tool):
     # ============================================================
 
     def _build_model_output(
-        self, path, lines, total_lines, size_kb,
-        reference, was_cached, use_summary, offset, limit
+        self, path, lines, total_lines, size_kb, reference, offset, limit
     ) -> str:
-        """构建给模型的纯文本输出（始终返回完整内容）"""
+        """构建给模型的纯文本输出"""
         parts = []
 
         # 文件元信息
@@ -197,7 +172,7 @@ class ReadTool(Tool):
         parts.append(f"Cache: {reference}")
         parts.append("")
 
-        # 始终返回完整内容给模型
+        # 计算读取范围
         start_line = max(1, offset)
         end_line = min(total_lines, start_line + limit - 1)
 
@@ -211,19 +186,19 @@ class ReadTool(Tool):
         return '\n'.join(parts)
 
     # ============================================================
-    # 终端显示（始终省略模式）
+    # 终端显示（省略模式）
     # ============================================================
 
     def _build_terminal_display(
-        self, path, lines, total_lines, size_kb, reference,
-        was_cached, use_summary, offset, limit
+        self, path, lines, total_lines, size_kb, reference, version, was_cached
     ) -> str:
-        """构建给终端的统一格式显示（始终省略模式）
+        """构建给终端的统一格式显示
 
         短文件（< TERMINAL_DISPLAY_THRESHOLD 行）：完整显示
         长文件（≥ TERMINAL_DISPLAY_THRESHOLD 行）：头 + 尾
         """
-        cache_status = "[v0]" if was_cached else "[v0]"
+        # 缓存状态：显示版本号
+        cache_status = f"[v{version}]" + (" cached" if was_cached else "")
 
         # 格式化大小
         if size_kb < 1024:
@@ -234,12 +209,12 @@ class ReadTool(Tool):
         parts = []
         # 开头空行，与其他工具分隔
         parts.append("")
-        # 标题行：✎ Read: 文件名 [v0] (N lines, X KB)
-        parts.append(f"[bold]{ICONS.get('edit', '✎')} Read:[/] [cyan]{escape(path.name)}[/] [dim]{cache_status} ({total_lines} lines, {size_str})[/]")
+        # 标题行：📖 Read: 文件名 [v0] (N lines, X KB)
+        parts.append(f"[bold]{ICONS.get('read', '📖')} Read:[/] [cyan]{escape(path.name)}[/] [dim]{cache_status} ({total_lines} lines, {size_str})[/]")
         # 分隔线
         parts.append(f"[dim]{'─' * 50}[/]")
 
-        # 终端显示始终使用省略模式
+        # 终端显示使用省略模式
         if total_lines < self.TERMINAL_DISPLAY_THRESHOLD:
             # 短文件：完整显示
             for i, line in enumerate(lines, 1):
@@ -305,112 +280,6 @@ class ReadTool(Tool):
         except UnicodeDecodeError:
             with open(path, 'r', encoding='gbk') as f:
                 return f.read()
-
-    # ============================================================
-    # 结构分析
-    # ============================================================
-
-    def _analyze_structure(self, lines: List[str], file_ext: str) -> List[str]:
-        """分析文件结构"""
-        if file_ext == '.py':
-            return self._analyze_python(lines)
-        elif file_ext in ('.js', '.ts', '.jsx', '.tsx'):
-            return self._analyze_javascript(lines)
-        else:
-            return self._analyze_generic(lines)
-
-    def _analyze_python(self, lines: List[str]) -> List[str]:
-        """分析 Python 文件结构"""
-        structure = []
-        current_class = None
-
-        for i, line in enumerate(lines, start=1):
-            stripped = line.strip()
-
-            if not stripped or stripped.startswith('#'):
-                continue
-
-            if stripped.startswith('class ') and ':' in stripped:
-                match = re.match(r'class\s+(\w+)', stripped)
-                if match:
-                    class_name = match.group(1)
-                    structure.append(f"L{i:4d}  class {class_name}")
-                    current_class = class_name
-
-            elif stripped.startswith('def ') and ':' in stripped:
-                match = re.match(r'def\s+(\w+)', stripped)
-                if match:
-                    func_name = match.group(1)
-                    indent = len(line) - len(line.lstrip())
-                    if indent == 0:
-                        structure.append(f"L{i:4d}  def {func_name}()")
-                        current_class = None
-                    elif current_class and indent == 4:
-                        structure.append(f"L{i:4d}    def {func_name}()  # in {current_class}")
-
-        if len(structure) > 20:
-            structure = structure[:20]
-            structure.append("  ... (more)")
-
-        return structure
-
-    def _analyze_javascript(self, lines: List[str]) -> List[str]:
-        """分析 JavaScript/TypeScript 文件结构"""
-        structure = []
-
-        for i, line in enumerate(lines, start=1):
-            stripped = line.strip()
-
-            if not stripped or stripped.startswith('//'):
-                continue
-
-            if re.match(r'(export\s+)?(async\s+)?function\s+\w+', stripped):
-                match = re.search(r'function\s+(\w+)', stripped)
-                if match:
-                    structure.append(f"L{i:4d}  function {match.group(1)}()")
-
-            elif re.match(r'(export\s+)?(const|let)\s+\w+\s*=\s*(async\s*)?\([^)]*\)\s*=>', stripped):
-                match = re.match(r'(export\s+)?(const|let)\s+(\w+)', stripped)
-                if match:
-                    structure.append(f"L{i:4d}  const {match.group(3)}()")
-
-            elif stripped.startswith('class ') and '{' in stripped:
-                match = re.match(r'class\s+(\w+)', stripped)
-                if match:
-                    structure.append(f"L{i:4d}  class {match.group(1)}")
-
-        if len(structure) > 20:
-            structure = structure[:20]
-            structure.append("  ... (more)")
-
-        return structure
-
-    def _analyze_generic(self, lines: List[str]) -> List[str]:
-        """通用结构分析"""
-        structure = []
-        prev_empty = True  # 上一行是否为空行
-
-        for i, line in enumerate(lines, start=1):
-            stripped = line.strip()
-
-            if not stripped:
-                prev_empty = True
-                continue
-
-            indent = len(line) - len(line.lstrip())
-
-            # 采集条件：顶层行（缩进为0）且前面有空行分隔（段落开头）
-            if indent == 0 and prev_empty:
-                content = stripped[:60]
-                structure.append(f"L{i:4d}  {content}")
-
-            prev_empty = False
-
-        if len(structure) > 15:
-            structure = structure[:15]
-            structure.append("  ... (more)")
-
-        return structure
 
     # ============================================================
     # 工具属性

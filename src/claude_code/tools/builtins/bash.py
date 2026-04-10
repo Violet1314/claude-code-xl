@@ -2,11 +2,7 @@
 import os
 import re
 import subprocess
-import shlex
-import locale
-import threading
-import queue
-from typing import Any, Dict, List, Optional, Tuple, Generator
+from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
 from ..base import Tool, ToolResult
 from claude_code.ui.progress_display import BashStreamingDisplay
@@ -113,38 +109,6 @@ class BashTool(Tool):
         r'^git\s+clean',
     ]
 
-    def get_parameters_schema(self) -> Dict[str, Any]:
-        """参数定义"""
-        return {
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string",
-                    "description": "要执行的 shell 命令"
-                },
-                "timeout": {
-                    "type": "integer",
-                    "description": "超时时间（秒），默认 120",
-                    "default": 120
-                },
-                "cwd": {
-                    "type": "string",
-                    "description": "工作目录，默认当前目录",
-                    "default": "."
-                }
-            },
-            "required": ["command"]
-        }
-
-
-    def _check_dangerous(self, command: str) -> Tuple[bool, str]:
-        """检查命令是否危险"""
-        cmd = command.strip().lower()
-        for pattern in self.DANGEROUS_PATTERNS:
-            if re.search(pattern, cmd, re.IGNORECASE):
-                return True, "此命令可能导致系统损坏或数据丢失"
-        return False, ""
-
     # 交互式命令模式（会等待用户输入导致卡住）
     INTERACTIVE_PATTERNS = [
         r'\bpython\b.*\binput\s*\(',       # python input()
@@ -171,6 +135,52 @@ class BashTool(Tool):
         r'\bssh\b(?!.*@.*".*")',           # ssh (无命令参数)
     ]
 
+    # Unix 语法检查模式
+    UNIX_SYNTAX_PATTERNS = [
+        (r'mkdir\s+-p\s+', "PowerShell 不支持 -p 参数。\n正确语法：mkdir dir1, dir2（多个目录用逗号分隔）"),
+        (r'ls\s+-[la]+\b', "PowerShell 的 ls 不支持 -l/-a/-la 参数。\n正确语法：Get-ChildItem（显示详细信息）或 ls（简单列表）"),
+        (r'rm\s+-[rf]+\b', "PowerShell 的 rm 不支持 -r/-f 参数。\n正确语法：Remove-Item -Recurse -Force path"),
+        (r'cp\s+-r\b', "PowerShell 的 cp 不支持 -r 参数。\n正确语法：Copy-Item -Recurse src dst"),
+        (r'cat\s+-n\b', "PowerShell 的 cat 不支持 -n 参数。\n正确语法：Get-Content path"),
+        (r'^touch\s+', "PowerShell 没有 touch 命令。\n正确语法：New-Item -Type File -Path name -Force"),
+        (r'^which\s+', "PowerShell 没有 which 命令。\n正确语法：Get-Command name"),
+        (r'^find\s+', "PowerShell 没有 Unix find 命令。\n正确语法：Get-ChildItem -Recurse -Filter pattern"),
+        (r'^grep\s+', "PowerShell 没有 grep 命令。\n正确语法：Select-String -Pattern regex -Path file"),
+        (r'^chmod\s+', "PowerShell 没有 chmod 命令。\n正确语法：icacls 或 Set-Acl"),
+        (r'^chown\s+', "PowerShell 没有 chown 命令。\n正确语法：icacls 或 Set-Acl"),
+    ]
+
+    def get_parameters_schema(self) -> Dict[str, Any]:
+        """参数定义"""
+        return {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "要执行的 shell 命令"
+                },
+                "timeout": {
+                    "type": "integer",
+                    "description": "超时时间（秒），默认 120",
+                    "default": 120
+                },
+                "cwd": {
+                    "type": "string",
+                    "description": "工作目录，默认当前目录",
+                    "default": "."
+                }
+            },
+            "required": ["command"]
+        }
+
+    def _check_dangerous(self, command: str) -> Tuple[bool, str]:
+        """检查命令是否危险"""
+        cmd = command.strip().lower()
+        for pattern in self.DANGEROUS_PATTERNS:
+            if re.search(pattern, cmd, re.IGNORECASE):
+                return True, "此命令可能导致系统损坏或数据丢失"
+        return False, ""
+
     def _check_interactive(self, command: str) -> Tuple[bool, str]:
         """检查命令是否为交互式命令（会导致卡住）"""
         for pattern in self.INTERACTIVE_PATTERNS:
@@ -178,192 +188,222 @@ class BashTool(Tool):
                 return True, "此命令需要交互式输入，会卡住直到超时。请使用非交互式替代方案（如 -e 参数、-m 参数、管道输入等）"
         return False, ""
 
-    def execute(self, parameters: Dict[str, Any]) -> ToolResult:
-        """执行命令"""
-        from claude_code.config.defaults import WORKPLACE_DIR
-        from pathlib import Path
+    def _check_unix_syntax(self, command: str) -> Optional[str]:
+        """检查 Windows PowerShell 不兼容的 Unix 语法"""
+        cmd_lower = command.lower()
+        for pattern, message in self.UNIX_SYNTAX_PATTERNS:
+            if re.search(pattern, cmd_lower, re.IGNORECASE):
+                return message
+        return None
 
-        command = parameters.get("command", "").strip()
-        try:
-            timeout = int(parameters.get("timeout", 120))
-        except (ValueError, TypeError):
-            timeout = 120
-        timeout = min(timeout, self.MAX_EXECUTION_TIME)
-        
-        # 【关键修改 1】：路径隔离逻辑
-        user_cwd = parameters.get("cwd", ".")
-        work_dir = Path(user_cwd).resolve()
-        
-        # 如果用户未指定绝对路径，强制使用 workplace 目录
-        if not Path(user_cwd).is_absolute():
-            work_dir = Path(WORKPLACE_DIR).resolve()
-            work_dir.mkdir(parents=True, exist_ok=True)
-
-        if not command:
-            return ToolResult(success=False, output="", error="缺少 command 参数")
-
-        # 【关键修改 2】：Unix 命令自动转换 (兜底策略)
-        if os.name == 'nt':
-            original_command = command
-            command = self._translate_unix_command(command)
-
-        # 检查黑名单
-        is_dangerous, danger_reason = self._check_dangerous(command)
+    def _run_pre_checks(self, command: str) -> Optional[ToolResult]:
+        """
+        执行前置检查，返回拦截结果或 None（通过）
+        """
+        # 1. 危险命令
+        is_dangerous, reason = self._check_dangerous(command)
         if is_dangerous:
-            return ToolResult(success=False, output="", error=f"危险命令已拦截: {danger_reason}")
+            return ToolResult(success=False, output="", error=f"危险命令已拦截: {reason}")
 
-        # 检查交互式命令
-        is_interactive, interactive_reason = self._check_interactive(command)
+        # 2. 交互式命令
+        is_interactive, reason = self._check_interactive(command)
         if is_interactive:
-            return ToolResult(success=False, output="", error=f"交互式命令已拦截: {interactive_reason}")
+            return ToolResult(success=False, output="", error=f"交互式命令已拦截: {reason}")
 
-        # Windows 环境下检查 Unix 不兼容语法 (作为第二道防线)
+        # 3. Unix 语法检查 (Windows)
         if os.name == 'nt':
             unix_error = self._check_unix_syntax(command)
             if unix_error:
                 return ToolResult(success=False, output="", error=unix_error)
+
+        return None  # 通过
+
+    def _decode_line(self, line: bytes, is_windows: bool) -> str:
+        """解码单行输出"""
+        if is_windows:
+            # Windows: UTF-8 优先，GBK 兜底
+            try:
+                return line.decode('utf-8').rstrip('\r\n')
+            except UnicodeDecodeError:
+                return line.decode('gbk', errors='replace').rstrip('\r\n')
+        else:
+            return line.decode('utf-8', errors='replace').rstrip('\n')
+
+    def _run_subprocess(
+        self,
+        command: str,
+        work_dir: Path,
+        timeout: int,
+        progress: BashStreamingDisplay
+    ) -> Tuple[int, List[str], List[str], Optional[str]]:
+        """
+        执行 subprocess 并收集输出
+
+        Returns:
+            (return_code, stdout_lines, stderr_lines, error_message)
+        """
+        is_windows = os.name == 'nt'
+
+        if is_windows:
+            win_command = command.replace(' &&', ';')
+            ps_command = f"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; {win_command}"
+            process = subprocess.Popen(
+                ["powershell", "-NoProfile", "-Command", ps_command],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=str(work_dir)
+            )
+        else:
+            process = subprocess.Popen(
+                command,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=str(work_dir)
+            )
+
+        stdout_lines = []
+        stderr_lines = []
+
+        try:
+            while True:
+                # 检查超时
+                if progress.is_timeout():
+                    process.kill()
+                    progress.set_error(f"命令执行超时（{timeout}秒）")
+                    progress.stop(False, -1)
+                    return -1, [], [], f"命令执行超时（{timeout}秒）"
+
+                # 读取 stdout
+                stdout_line = process.stdout.readline()
+                if stdout_line:
+                    decoded = self._decode_line(stdout_line, is_windows)
+                    if decoded:
+                        stdout_lines.append(decoded)
+                        progress.feed_output(decoded)
+
+                # 读取 stderr
+                if process.stderr:
+                    try:
+                        stderr_line = process.stderr.readline()
+                        if stderr_line:
+                            decoded = self._decode_line(stderr_line, is_windows)
+                            if decoded:
+                                stderr_lines.append(decoded)
+                                progress.feed_output(f"[stderr] {decoded}")
+                    except Exception:
+                        pass
+
+                # 检查进程是否结束
+                if process.poll() is not None:
+                    # 读取剩余输出
+                    remaining_stdout = process.stdout.read()
+                    remaining_stderr = process.stderr.read() if process.stderr else b''
+                    if remaining_stdout:
+                        for line in remaining_stdout.splitlines():
+                            decoded = self._decode_line(line, is_windows)
+                            if decoded:
+                                stdout_lines.append(decoded)
+                    if remaining_stderr:
+                        for line in remaining_stderr.splitlines():
+                            decoded = self._decode_line(line, is_windows)
+                            if decoded:
+                                stderr_lines.append(decoded)
+                    break
+
+        except Exception as e:
+            process.kill()
+            error_msg = f"读取输出失败: {str(e)}"
+            progress.set_error(error_msg)
+            progress.stop(False, -1)
+            return -1, [], [], error_msg
+
+        return_code = process.wait()
+        return return_code, stdout_lines, stderr_lines, None
+
+    def _build_final_output(
+        self,
+        stdout_lines: List[str],
+        stderr_lines: List[str],
+        success: bool
+    ) -> str:
+        """
+        构建最终输出（含截断）
+        """
+        # 成功：stdout + stderr（如有）
+        # 失败：stderr + stdout（如有）
+        if success:
+            output = '\n'.join(stdout_lines)
+            if stderr_lines:
+                output += '\n[stderr]\n' + '\n'.join(stderr_lines)
+        else:
+            if stderr_lines:
+                output = '[stderr]\n' + '\n'.join(stderr_lines)
+                if stdout_lines:
+                    output += '\n[stdout]\n' + '\n'.join(stdout_lines)
+            else:
+                output = '\n'.join(stdout_lines) if stdout_lines else "(命令执行失败，无输出)"
+
+        # 截断处理：优先保留错误信息
+        if len(output) > self.MAX_OUTPUT_LENGTH:
+            if not success and stderr_lines:
+                stderr_text = '\n'.join(stderr_lines)
+                if len(stderr_text) > self.MAX_OUTPUT_LENGTH:
+                    output = stderr_text[:self.MAX_OUTPUT_LENGTH] + f"\n... (stderr 已截断，共 {len(stderr_text)} 字符)"
+                else:
+                    stdout_text = '\n'.join(stdout_lines) if stdout_lines else ""
+                    remaining = self.MAX_OUTPUT_LENGTH - len(stderr_text) - 10
+                    if stdout_text and remaining > 0:
+                        output = stderr_text + '\n[stdout]\n' + stdout_text[:remaining] + f"\n... (stdout 已截断)"
+                    else:
+                        output = stderr_text
+            else:
+                output = output[:self.MAX_OUTPUT_LENGTH] + f"\n... (输出过长，已截断，共 {len(output)} 字符)"
+
+        return output
+
+    def execute(self, parameters: Dict[str, Any]) -> ToolResult:
+        """执行命令"""
+        # 参数验证（与 Read/Edit 工具一致）
+        validation_error = self.validate_parameters(parameters)
+        if validation_error:
+            return ToolResult(success=False, output="", error=validation_error)
+
+        from claude_code.config.defaults import WORKPLACE_DIR
+
+        command = parameters.get("command", "").strip()
+        timeout = min(int(parameters.get("timeout", 120)), self.MAX_EXECUTION_TIME)
+
+        # 路径隔离逻辑
+        user_cwd = parameters.get("cwd", ".")
+        work_dir = Path(user_cwd).resolve()
+        if not Path(user_cwd).is_absolute():
+            work_dir = Path(WORKPLACE_DIR).resolve()
+            work_dir.mkdir(parents=True, exist_ok=True)
+
+        # 前置检查（危险命令、交互式命令、Unix 语法）
+        pre_check_result = self._run_pre_checks(command)
+        if pre_check_result:
+            return pre_check_result
 
         # 检查工作目录
         if not work_dir.exists():
             return ToolResult(success=False, output="", error=f"工作目录不存在: {work_dir}")
 
         try:
-            is_windows = os.name == 'nt'
             progress = BashStreamingDisplay(command, timeout)
             progress.start()
 
-            if is_windows:
-                win_command = command.replace(' &&', ';')
-                ps_command = f"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; {win_command}"
-                process = subprocess.Popen(
-                    ["powershell", "-NoProfile", "-Command", ps_command],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    cwd=str(work_dir)
-                )
-            else:
-                process = subprocess.Popen(
-                    command,
-                    shell=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    cwd=str(work_dir)
-                )
+            return_code, stdout_lines, stderr_lines, exec_error = self._run_subprocess(
+                command, work_dir, timeout, progress
+            )
+            if exec_error:
+                return ToolResult(success=False, output="", error=exec_error)
 
-            stdout_lines = []
-            stderr_lines = []
-
-            def decode_line(line: bytes, is_windows: bool) -> str:
-                """解码单行输出"""
-                if is_windows:
-                    decoded = None
-                    for encoding in ['utf-8', 'utf-16-le', 'gbk']:
-                        try:
-                            decoded = line.decode(encoding).rstrip('\r\n')
-                            break
-                        except (UnicodeDecodeError, UnicodeError):
-                            continue
-                    if decoded is None:
-                        decoded = line.decode('utf-8', errors='replace').rstrip('\r\n')
-                else:
-                    decoded = line.decode('utf-8', errors='replace').rstrip('\n')
-                return decoded
-
-            try:
-                while True:
-                    # 检查超时
-                    if hasattr(progress, 'is_timeout') and progress.is_timeout():
-                        process.kill()
-                        if hasattr(progress, 'set_error'):
-                            progress.set_error(f"命令执行超时（{timeout}秒）")
-                        progress.stop(False, -1)
-                        return ToolResult(success=False, output="", error=f"命令执行超时（{timeout}秒）")
-
-                    # 读取 stdout
-                    stdout_line = process.stdout.readline()
-                    if stdout_line:
-                        decoded = decode_line(stdout_line, is_windows)
-                        if decoded:
-                            stdout_lines.append(decoded)
-                            if hasattr(progress, 'feed_output'):
-                                progress.feed_output(decoded)
-
-                    # 读取 stderr（非阻塞）
-                    if process.stderr:
-                        try:
-                            stderr_line = process.stderr.readline()
-                            if stderr_line:
-                                decoded = decode_line(stderr_line, is_windows)
-                                if decoded:
-                                    stderr_lines.append(decoded)
-                                    if hasattr(progress, 'feed_output'):
-                                        progress.feed_output(f"[stderr] {decoded}")
-                        except Exception:
-                            pass
-
-                    # 检查进程是否结束
-                    if process.poll() is not None:
-                        # 读取剩余输出
-                        remaining_stdout = process.stdout.read()
-                        remaining_stderr = process.stderr.read() if process.stderr else b''
-                        if remaining_stdout:
-                            for line in remaining_stdout.splitlines():
-                                decoded = decode_line(line, is_windows)
-                                if decoded:
-                                    stdout_lines.append(decoded)
-                        if remaining_stderr:
-                            for line in remaining_stderr.splitlines():
-                                decoded = decode_line(line, is_windows)
-                                if decoded:
-                                    stderr_lines.append(decoded)
-                        break
-
-            except Exception as e:
-                process.kill()
-                error_msg = f"读取输出失败: {str(e)}"
-                if hasattr(progress, 'set_error'):
-                    progress.set_error(error_msg)
-                progress.stop(False, -1)
-                return ToolResult(success=False, output="", error=error_msg)
-
-            return_code = process.wait()
             success = return_code == 0
+            output = self._build_final_output(stdout_lines, stderr_lines, success)
 
-            # 智能截断：失败时优先保留 stderr
-            if success:
-                # 成功时：合并 stdout（stderr 通常为空或警告）
-                output = '\n'.join(stdout_lines)
-                if stderr_lines:
-                    output += '\n[stderr]\n' + '\n'.join(stderr_lines)
-            else:
-                # 失败时：优先显示 stderr，然后是 stdout
-                if stderr_lines:
-                    output = '[stderr]\n' + '\n'.join(stderr_lines)
-                    if stdout_lines:
-                        output += '\n[stdout]\n' + '\n'.join(stdout_lines)
-                else:
-                    output = '\n'.join(stdout_lines) if stdout_lines else "(命令执行失败，无输出)"
-
-            # 截断处理
-            if len(output) > self.MAX_OUTPUT_LENGTH:
-                # 失败时优先保留 stderr 的截断策略
-                if not success and stderr_lines:
-                    stderr_text = '\n'.join(stderr_lines)
-                    if len(stderr_text) > self.MAX_OUTPUT_LENGTH:
-                        output = stderr_text[:self.MAX_OUTPUT_LENGTH] + f"\n... (stderr 已截断，共 {len(stderr_text)} 字符)"
-                    else:
-                        # stderr 未超限，保留完整 stderr + 截断 stdout
-                        stdout_text = '\n'.join(stdout_lines) if stdout_lines else ""
-                        remaining = self.MAX_OUTPUT_LENGTH - len(stderr_text) - 10
-                        if stdout_text and remaining > 0:
-                            output = stderr_text + '\n[stdout]\n' + stdout_text[:remaining] + f"\n... (stdout 已截断)"
-                        else:
-                            output = stderr_text
-                else:
-                    output = output[:self.MAX_OUTPUT_LENGTH] + f"\n... (输出过长，已截断，共 {len(output)} 字符)"
-
-            if hasattr(progress, 'stop'):
-                progress.stop(success, return_code)
+            progress.stop(success, return_code)
 
             if success:
                 return ToolResult(
@@ -392,61 +432,6 @@ class BashTool(Tool):
             return ToolResult(success=False, output="", error=f"命令执行超时（{timeout}秒）")
         except Exception as e:
             return ToolResult(success=False, output="", error=f"执行失败: {str(e)}")
-
-    def _translate_unix_command(self, command: str) -> str:
-        """
-        将常见的 Unix 命令转换为 PowerShell 等效命令 (兜底策略)
-        """
-        import re
-        cmd_lower = command.lower().strip()
-        
-        # 1. ls -la / ll -> Get-ChildItem -Force
-        if re.match(r'^ls\s+(-[la]+|-\w*la\w*)\b', cmd_lower) or cmd_lower.startswith('ll'):
-            args = command.split()[1:] if ' ' in command else []
-            path_arg = " ".join([a for a in args if not a.startswith('-')])
-            return f"Get-ChildItem -Force {path_arg}".strip()
-        
-        # 2. cat file -> Get-Content file
-        if cmd_lower.startswith('cat '):
-            return command.replace('cat ', 'Get-Content ', 1)
-        
-        # 3. rm -rf dir -> Remove-Item -Recurse -Force dir
-        if re.match(r'^rm\s+(-[rf]+\s+)*', cmd_lower):
-            args = command.split()[1:]
-            clean_args = [a for a in args if not re.match(r'^-[rf]+$', a)]
-            return f"Remove-Item -Recurse -Force {' '.join(clean_args)}"
-        
-        # 4. mkdir -p a/b/c -> New-Item -ItemType Directory -Path a/b/c -Force
-        if re.match(r'^mkdir\s+-p\s+', cmd_lower):
-            path = command.split('-p ')[1].strip()
-            return f"New-Item -ItemType Directory -Path '{path}' -Force"
-        
-        # 5. grep "pattern" file -> Select-String -Pattern "pattern" -Path file
-        if cmd_lower.startswith('grep '):
-            return command.replace('grep ', 'Select-String -Pattern ', 1).replace(' -i', ' -CaseSensitive:$false')
-
-        return command
-
-    def _check_unix_syntax(self, command: str) -> Optional[str]:
-        """检查 Windows PowerShell 不兼容的 Unix 语法"""
-        unix_patterns = [
-            (r'mkdir\s+-p\s+', "PowerShell 不支持 -p 参数。\n正确语法：mkdir dir1, dir2（多个目录用逗号分隔）"),
-            (r'ls\s+-[la]+\b', "PowerShell 的 ls 不支持 -l/-a/-la 参数。\n正确语法：Get-ChildItem（显示详细信息）或 ls（简单列表）"),
-            (r'rm\s+-[rf]+\b', "PowerShell 的 rm 不支持 -r/-f 参数。\n正确语法：Remove-Item -Recurse -Force path"),
-            (r'cp\s+-r\b', "PowerShell 的 cp 不支持 -r 参数。\n正确语法：Copy-Item -Recurse src dst"),
-            (r'cat\s+-n\b', "PowerShell 的 cat 不支持 -n 参数。\n正确语法：Get-Content path"),
-            (r'^touch\s+', "PowerShell 没有 touch 命令。\n正确语法：New-Item -Type File -Path name -Force"),
-            (r'^which\s+', "PowerShell 没有 which 命令。\n正确语法：Get-Command name"),
-            (r'^find\s+', "PowerShell 没有 Unix find 命令。\n正确语法：Get-ChildItem -Recurse -Filter pattern"),
-            (r'^grep\s+', "PowerShell 没有 grep 命令。\n正确语法：Select-String -Pattern regex -Path file"),
-            (r'^chmod\s+', "PowerShell 没有 chmod 命令。\n正确语法：icacls 或 Set-Acl"),
-            (r'^chown\s+', "PowerShell 没有 chown 命令。\n正确语法：icacls 或 Set-Acl"),
-        ]
-        cmd_lower = command.lower()
-        for pattern, message in unix_patterns:
-            if re.search(pattern, cmd_lower, re.IGNORECASE):
-                return message
-        return None
 
     def is_sensitive(self, command: str) -> bool:
         """检查命令是否敏感"""
@@ -523,7 +508,7 @@ class BashTool(Tool):
         if timeout < 1 or timeout > 600:
             return "timeout 必须在 1-600 秒之间"
         return None
-    
+
     def get_security_context(self) -> Dict[str, Any]:
         """返回 Bash 工具的安全上下文"""
         command = self.parameters.get("command", "")

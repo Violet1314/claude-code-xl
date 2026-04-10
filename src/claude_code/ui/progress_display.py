@@ -113,7 +113,7 @@ class BashStreamingDisplay:
 
         duration = time.time() - self._start_time
         status_str = '成功' if success else '失败'
-        icon = ICONS.get('edit', '✎')
+        icon = ICONS.get('bash', '⚡')
         color = COLORS['success'] if success else COLORS['error']
 
         # 标题行：✎ Bash: command [状态] (耗时 Xs)

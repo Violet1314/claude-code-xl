@@ -1,13 +1,14 @@
-这是基于 v2.8.5 格式更新的 **README.md**，已同步至 **v2.8.7** 版本。
+这是基于 v2.8.5 格式更新的 **README.md**，已同步至 **v2.8.10** 版本。
 
 主要变更点：
-*   **版本号**：更新至 `v2.8.7`。
-*   **工具执行上限提升**：MAX_TOOL_ROUNDS 10→20，MAX_TOOLS_PER_ROUND 20→40，总容量提升 4 倍。
-*   **Bash 输出优化**：分离 stdout/stderr，失败时优先保留 stderr，避免丢失关键错误信息。
-*   **异常捕获精细化**：Write/Edit 新增 FileNotFoundError、OSError、UnicodeError 等具体异常。
-*   **skipped 状态细分**：区分"权限拒绝"和"用户主动取消"，反馈更精准。
-*   **交互式命令检测**：新增 20+ 种交互式命令模式检测，提前拦截会卡住的命令。
-*   **更新日志**：新增 v2.8.6、v2.8.7 重构记录。
+*   **版本号**：更新至 `v2.8.10`。
+*   **Bash 工具重构**：拆分 execute() 方法（213 行→70 行），新增 3 个辅助方法。
+*   **移除兜底转换**：删除 _translate_unix_command()，依靠错误提示引导模型使用正确 PowerShell 语法。
+*   **Edit 严格化**：移除模糊匹配和 lines 模式，只有精确匹配，强制模型认真 Read + 精确复制。
+*   **Read 简化**：移除死代码（结构分析方法 100+ 行）、移除无效的 summary 参数。
+*   **参数验证集成**：所有工具 execute() 开头调用 validate_parameters()，保持一致风格。
+*   **Bug 修复**：修复 BashStreamingDisplay/ReadProgressDisplay icon 错误。
+*   **更新日志**：新增 v2.8.8、v2.8.9、v2.8.10 重构记录。
 
 ---
 
@@ -15,7 +16,7 @@
 
 仿照官方 Claude Code 风格构建的 CLI AI 编程助手，支持 AI 驱动的文件操作和命令执行。
 
-**版本：v2.8.7**
+**版本：v2.8.10**
 
 ## 功能特性
 
@@ -36,7 +37,7 @@
 *   **Workplace 隔离** - Write/Edit/Bash 默认隔离到 workplace 目录，Read/Glob/Grep 直接访问项目文件
 *   **目录自动过滤** - Glob/Grep 自动排除 .venv、node_modules、pycache 等无关目录
 *   **智能防死循环** - 连续同质错误自动熔断，防止模型无效重试
-*   **Edit 容错增强** - 多层匹配策略（精确→忽略空白→模糊），返回候选和相似度分数
+*   **Edit 精确匹配** - 只有精确匹配，失败时提供 Read + 精确复制指导，强制模型认真操作
 
 ## 安装
 
@@ -123,6 +124,36 @@ claude-code/
 ```
 
 ## 更新日志
+
+### v2.8.10 (2026-04-10)
+**Bash 工具重构**
+*   ✅ execute() 拆分：213 行→70 行，减少 67%
+*   ✅ 新增 `_run_pre_checks()`：合并危险/交互/Unix语法检查
+*   ✅ 新增 `_run_subprocess()`：封装 subprocess 执行逻辑
+*   ✅ 新增 `_build_final_output()`：统一输出构建和截断处理
+*   ✅ 移除 `_translate_unix_command()`：依靠错误提示引导模型
+*   ✅ 修复 BashStreamingDisplay icon：edit→bash，正确显示 ⚡
+*   ✅ 集成参数验证：execute() 开头调用 validate_parameters()
+*   ✅ 全量测试通过：100 passed in 1.53s
+
+### v2.8.9 (2026-04-10)
+**Read 工具简化**
+*   ✅ 移除死代码：删除结构分析方法 100+ 行
+*   ✅ 移除 summary 参数：schema + execute 逻辑完全移除
+*   ✅ 修复 ReadProgressDisplay icon：edit→read，正确显示 📖
+*   ✅ 修复缓存状态显示：显示版本号 + cached 状态
+*   ✅ 集成参数验证：execute() 开头调用 validate_parameters()
+*   ✅ 代码精简：427 行→306 行，减少 28%
+*   ✅ 全量测试通过：100 passed in 1.63s
+
+### v2.8.8 (2026-04-10)
+**Edit 工具严格化重构**
+*   ✅ 移除模糊匹配：只保留精确匹配，代码量减少 40%
+*   ✅ 移除 lines 模式：只保留 replace 模式
+*   ✅ 多处匹配处理：直接失败 + 要求添加上下文
+*   ✅ 错误反馈简化：Read + 精确复制步骤指导
+*   ✅ 测试用例更新：新增 5 个测试覆盖新行为
+*   ✅ 全量测试通过：100 passed in 1.60s
 
 ### v2.8.7 (2026-04-10)
 **工具反馈机制优化**
