@@ -93,6 +93,9 @@ class Application:
         os.makedirs(self.history_dir, exist_ok=True)
         os.makedirs(WORKPLACE_DIR, exist_ok=True)
         atexit.register(self._on_exit)
+        # CTRL+C 中断管理：记录上次信号时间，实现单击中断、双击退出
+        self._last_sigint: float = 0.0
+        self._sigint_double_threshold: float = 1.0  # 双击判定窗口（秒）
         signal.signal(signal.SIGINT, self._signal_handler)
 
 
@@ -164,10 +167,20 @@ class Application:
         self.client.close()
 
     def _signal_handler(self, sig, frame) -> None:
-        """信号处理"""
-        self._on_exit()
-        console.print(f"\n[{COLORS['primary']}]{ICONS['claude']} 再见！[/]\n")
-        sys.exit(0)
+        """信号处理：单击中断当前操作，双击退出程序"""
+        now = time.time()
+        if now - self._last_sigint < self._sigint_double_threshold:
+            # 双击：退出程序
+            self._on_exit()
+            console.print(f"\n[{COLORS['primary']}]{ICONS['claude']} 再见！[/]\n")
+            sys.exit(0)
+        # 单击：标记中断，不退出
+        self._last_sigint = now
+        console.print(f"\n[{COLORS['warning']}]{ICONS['warning']} 中断中...，再按一次退出[/]")
+
+    def _is_interrupted(self) -> bool:
+        """检查是否有待处理的中断信号"""
+        return time.time() - self._last_sigint < self._sigint_double_threshold
 
     # ============================================================
     # 对话功能
@@ -362,6 +375,11 @@ class Application:
                     tools=tools_definition,
                     stream=True,
                 ):
+                    # 检查是否被中断（CTRL+C）
+                    if self._is_interrupted():
+                        console.print(f"[{COLORS['warning']}]{ICONS['warning']} 已中断请求[/]")
+                        break
+
                     # 提取文本内容
                     content = self.client.extract_content(chunk)
                     if content:
@@ -486,8 +504,8 @@ class Application:
             tool_calls = tool_calls[:self.MAX_TOOLS_PER_ROUND]
             console.warning(f"工具调用数量超过限制，仅执行前 {self.MAX_TOOLS_PER_ROUND} 个")
 
-        # 执行工具
-        report = self.tool_executor.execute_batch(tool_calls)
+        # 执行工具（传入中断检查函数）
+        report = self.tool_executor.execute_batch(tool_calls, interrupt_check=self._is_interrupted)
 
         # 显示执行摘要 (可选，如果 progress_display 已经展示了详细卡片，这里可以简化)
         # console.print(report.get_summary()) 
@@ -829,18 +847,19 @@ class Application:
                     user_input = self.input_handler.prompt()
 
                     if not user_input:
+                        console.info("请输入内容，或使用 /help 查看帮助")
                         continue
 
                     if user_input.startswith('/'):
                         result = self.commands.execute(user_input)
                         if result is True:
                             break
+                        # 命令执行反馈
+                        console.success("命令已执行")
                         continue
 
                     self.chat(user_input)
 
-                except KeyboardInterrupt:
-                    continue
                 except EOFError:
                     break
 

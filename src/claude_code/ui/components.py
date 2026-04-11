@@ -94,10 +94,10 @@ def show_status_bar(
     total_cost: float = 0.0,
 ) -> None:
     """
-    显示紧凑状态信息 (不再占用整行，而是作为对话头部的元数据)
+    显示紧凑状态信息 (使用完整 Panel 边框)
     """
     con = console.get_console()
-    
+
     # 模型名称处理
     if len(model_name) <= 20:
         model_short = model_name.upper()
@@ -109,26 +109,26 @@ def show_status_bar(
 
     # 构建状态文本
     status_parts = []
-    
+
     # 1. 模型
     status_parts.append(f"[bold {COLORS['primary']}]{ICONS['claude']} {model_short}[/]")
-    
-    # 2. Token
+
+    # 2. Token (添加含义说明)
     token_display = _format_token_count(total_tokens)
-    status_parts.append(f"[dim]{ICONS['token']} {token_display}[/]")
-    
+    status_parts.append(f"[dim]{ICONS['token']} {token_display} tokens[/]")
+
     # 3. 费用
     if total_cost > 0:
         cost_display = _format_cost(total_cost)
-        status_parts.append(f"[dim]≈${cost_display}[/]")
-        
+        status_parts.append(f"[dim]$ {cost_display}[/]")
+
     # 4. 文件数
     if file_count > 0:
-        status_parts.append(f"[dim]{ICONS['folder']} {file_count}[/]")
+        status_parts.append(f"[dim]{ICONS['folder']} {file_count} files[/]")
 
-    # 输出为一行，使用 Panel 包裹以增加质感 (可选，这里先保持简洁行)
-    status_line = "  ".join(status_parts)
-    con.print(f"[dim]┌─[/] {status_line} [dim]─┐[/]")
+    # 输出为一行
+    status_line = " │ ".join(status_parts)
+    con.print(status_line)
 
 def _format_token_count(count: int) -> str:
     """格式化 token 数量显示"""

@@ -9,6 +9,32 @@ import httpx
 from claude_code.config.defaults import API
 from claude_code.ui import console
 
+
+def _get_error_suggestion(error_type: str) -> str:
+    """根据错误类型提供解决建议"""
+    suggestions = {
+        "ConnectError": "检查网络连接，确认 API 地址是否正确",
+        "ConnectTimeout": "网络连接超时，请检查网络稳定性或尝试更换网络",
+        "ReadTimeout": "服务器响应超时，可能是请求过大或服务器繁忙",
+        "WriteTimeout": "发送请求超时，请检查网络上传速度",
+        "PoolTimeout": "连接池耗尽，请减少并发请求",
+        "SSLError": "SSL 证书验证失败，检查系统证书或代理设置",
+    }
+    return suggestions.get(error_type, "")
+
+
+def _get_http_error_suggestion(status_code: int) -> str:
+    """根据 HTTP 状态码提供解决建议"""
+    suggestions = {
+        400: "请求格式错误，检查参数是否正确",
+        401: "API Key 无效或已过期，请检查配置",
+        402: "账户余额不足，请充值或更换账户",
+        403: "权限不足，检查 API Key 权限设置",
+        404: "API 端点不存在，检查 base_url 配置",
+        422: "请求参数验证失败，检查模型 ID 和参数",
+    }
+    return suggestions.get(status_code, "")
+
 class APIClient:
     """统一 API 客户端"""
 
@@ -101,13 +127,18 @@ class APIClient:
 
             except httpx.HTTPError as e:
                 last_error = f"{type(e).__name__}: {e}"
-                
+
                 # 【优化】：静默处理前 N-1 次重试
                 is_last_attempt = (attempt == self.max_retries - 1)
-                
+
                 if is_last_attempt:
+                    # 提供更详细的解决建议
+                    error_type = type(e).__name__
+                    suggestion = _get_error_suggestion(error_type)
                     console.error(f"请求最终失败: {last_error}")
-                
+                    if suggestion:
+                        console.info(f"建议: {suggestion}")
+
                 self._reset_client()
 
                 if attempt < self.max_retries - 1:
@@ -131,13 +162,19 @@ class APIClient:
                     continue
 
                 if 400 <= e.response.status_code < 500:
-                    console.error(f"API 错误 [{e.response.status_code}]: {e.response.text}")
+                    status_code = e.response.status_code
+                    console.error(f"API 错误 [{status_code}]: {e.response.text[:200]}")
+                    # 提供针对常见错误的建议
+                    suggestion = _get_http_error_suggestion(status_code)
+                    if suggestion:
+                        console.info(f"建议: {suggestion}")
                     return
 
                 last_error = f"HTTP {e.response.status_code}"
                 is_last_attempt = (attempt == self.max_retries - 1)
                 if is_last_attempt:
                     console.error(f"服务器错误: {last_error}")
+                    console.info("建议: 服务端临时故障，稍后重试")
                 
                 self._reset_client()
 

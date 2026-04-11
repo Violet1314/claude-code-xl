@@ -6,34 +6,59 @@ from claude_code.ui import console
 
 class HelpCommand(Command):
     """帮助命令"""
-    
+
     name = "help"
     description = "显示命令帮助"
     aliases = ["h", "?"]
-    
+
     def execute(self, args: List[str]) -> None:
-        from claude_code.ui.theme import COLORS
-        
+        from claude_code.ui.theme import COLORS, ICONS
+
         console.blank()
         console.print(f"[bold {COLORS['primary']}]📖 可用命令[/]")
         console.rule()
-        
+
         if self.app and hasattr(self.app, 'commands'):
             for cmd_info in self.app.commands.list_commands():
                 name = cmd_info["name"]
                 desc = cmd_info["description"]
-                console.print(f"  [bold {COLORS['success']}]/{name:<12}[/] {desc}")
-        
+                aliases = cmd_info.get("aliases", [])
+                alias_str = f" [dim](/{', /'.join(aliases)})[/]" if aliases else ""
+                console.print(f"  [bold {COLORS['success']}]/{name:<10}[/] {desc}{alias_str}")
+
         console.blank()
         console.print(f"[bold {COLORS['info']}]💡 输入技巧[/]")
-        console.print("  • [dim]Enter[/] = 换行")
+        console.print("  • [dim]Enter[/] = 换行（对话模式）")
+        console.print("  • [dim]Enter[/] = 直接发送（命令模式，如 /help）")
         console.print("  • [dim]Esc + Enter[/] = 发送消息")
-        console.print("  • [dim]Ctrl+C[/] = 中断生成")
+        console.print("  • [dim]Ctrl+C[/] = 中断生成（单击中断，双击退出）")
+        console.print("  • [dim]↑/↓ 或 j/k[/] = 菜单上下选择")
+        console.print("  • [dim]1-9 数字键[/] = 快速选择菜单项")
+        console.print("  • [dim]Esc 或 q[/] = 取消菜单")
+
+        console.blank()
+        console.print(f"[bold {COLORS['info']}]📝 常用命令示例[/]")
+        console.print("  • [dim]/new[/]     → 开始新会话，清空历史")
+        console.print("  • [dim]/save[/]    → 保存会话到 data/history/")
+        console.print("  • [dim]/history[/] → 加载历史会话")
+        console.print("  • [dim]/model[/]   → 切换 AI 模型")
+        console.print("  • [dim]/tools[/]   → 查看工具执行历史")
+
         console.blank()
         console.print(f"[bold {COLORS['info']}]🔧 工具系统[/]")
-        console.print("  • AI 可以读取、创建、编辑文件")
-        console.print("  • 每次操作前会请求权限确认")
-        console.print("  • 支持 yes/no 两种权限模式，或按Esc取消")
+        console.print(f"  {ICONS['read']} [dim]Read[/]    → 读取文件内容（≤1MB）")
+        console.print(f"  {ICONS['write']} [dim]Write[/]   → 创建/覆盖文件，自动语法检查")
+        console.print(f"  {ICONS['edit']} [dim]Edit[/]    → 精确匹配替换，需先 Read")
+        console.print(f"  {ICONS['bash']} [dim]Bash[/]    → 执行命令，流式输出显示")
+        console.print(f"  {ICONS['grep']} [dim]Grep[/]    → 正则搜索文件内容")
+        console.print(f"  {ICONS['glob']} [dim]Glob[/]    → 文件名模式匹配")
+        console.print(f"  {ICONS['ask']} [dim]Ask[/]     → 交互式询问用户")
+
+        console.blank()
+        console.print(f"[bold {COLORS['info']}]🔒 权限确认[/]")
+        console.print("  • [dim]允许 (本次)[/] → 仅本次通过，后续需再确认")
+        console.print("  • [dim]允许 (会话)[/] → 本次会话同类操作自动通过")
+        console.print("  • [dim]拒绝[/]       → 仅本次拒绝")
         console.blank()
 
 class NewCommand(Command):

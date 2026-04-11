@@ -79,12 +79,17 @@ class PermissionUI:
         # 5. 构建菜单选项
         options = [
             {
-                "name": "Yes (once)",
+                "name": "✓ 允许 (本次)",
                 "value": "once",
-                "desc": "仅本次允许"
+                "desc": "仅本次允许，后续相同操作需再确认"
             },
             {
-                "name": "No (once)",
+                "name": "✓ 允许 (会话)",
+                "value": "session",
+                "desc": "本次会话所有同类操作自动通过"
+            },
+            {
+                "name": "✗ 拒绝",
                 "value": "no_once",
                 "desc": "仅本次拒绝"
             },
@@ -121,7 +126,10 @@ class PermissionUI:
     @staticmethod
     def show_cached_decision(tool_name: str, level: PermissionLevel, operation: str) -> None:
         """显示缓存决策"""
-        if level == PermissionLevel.ONCE:
+        if level == PermissionLevel.SESSION:
+            color = COLORS['success']
+            msg = "✓ 会话授权：自动通过"
+        elif level == PermissionLevel.ONCE:
             color = COLORS['success']
             msg = "✓ 已授权：自动通过"
         else:

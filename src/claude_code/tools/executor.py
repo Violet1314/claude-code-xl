@@ -214,10 +214,16 @@ class ToolExecutor:
     def execute_batch(
         self,
         tool_calls: List[ToolCall],
-        on_progress: Optional[Callable[[str, str], None]] = None
+        on_progress: Optional[Callable[[str, str], None]] = None,
+        interrupt_check: Optional[Callable[[], bool]] = None
     ) -> ExecutionReport:
         """
         批量执行工具调用
+
+        Args:
+            tool_calls: 工具调用列表
+            on_progress: 进度回调
+            interrupt_check: 中断检查函数，返回 True 表示应该中断
         """
         report = ExecutionReport()
 
@@ -225,6 +231,12 @@ class ToolExecutor:
             tool_calls = tool_calls[:self.MAX_TOOLS_PER_TURN]
 
         for i, tool_call in enumerate(tool_calls, 1):
+            # 检查是否被中断
+            if interrupt_check and interrupt_check():
+                from claude_code.ui import console
+                console.print("\n[dim]已中断，跳过后续工具[/]")
+                break
+
             if on_progress:
                 on_progress(tool_call.name, f"执行 {i}/{len(tool_calls)}")
 

@@ -123,7 +123,7 @@ class PermissionManager:
         # 检查缓存权限（敏感操作和项目外操作跳过缓存）
         if not is_sensitive and not is_outside_scope:
             cached_level = self.get_cached_permission(tool.name, identifier)
-            if cached_level == PermissionLevel.ONCE:
+            if cached_level in (PermissionLevel.ONCE, PermissionLevel.SESSION):
                 PermissionUI.show_cached_decision(tool.name, cached_level, str(tool_call))
                 return PermissionDecision(
                     allowed=True,
@@ -164,11 +164,11 @@ class PermissionManager:
         level = PermissionLevel(choice)
 
         # 记录权限决定（敏感操作不缓存）
-        if level == PermissionLevel.ONCE and not is_sensitive and not is_outside_scope:
+        if level in (PermissionLevel.ONCE, PermissionLevel.SESSION) and not is_sensitive and not is_outside_scope:
             self.set_permission(tool.name, level, identifier)
 
         # 显示决定结果
-        allowed = level == PermissionLevel.ONCE
+        allowed = level in (PermissionLevel.ONCE, PermissionLevel.SESSION)
         PermissionUI.show_result(allowed, level)
 
         return PermissionDecision(allowed=allowed, level=level, cached=False)

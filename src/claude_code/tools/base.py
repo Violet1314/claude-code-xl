@@ -7,7 +7,8 @@ from enum import Enum
 
 class PermissionLevel(Enum):
     """权限级别"""
-    ONCE = "once"           # 允许（同工具同路径会话内缓存）
+    ONCE = "once"           # 允许本次
+    SESSION = "session"     # 允许本次会话全部
     NO_ONCE = "no_once"     # 仅本次拒绝
 
 @dataclass

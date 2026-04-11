@@ -117,8 +117,9 @@ class InputHandler:
         ]
 
     def _get_continuation(self, width, line_number, is_soft_wrap):
-        """获取续行提示符"""
-        return [('class:input-lead', '  ')]
+        """获取续行提示符 - 显示行号"""
+        # 显示续行标记和行号，更清晰的多行输入体验
+        return [('class:input-lead', f'… {line_number + 1}> ')]
 
     def update_state(self, model_name: str = None, file_count: int = None) -> None:
         if model_name is not None:
