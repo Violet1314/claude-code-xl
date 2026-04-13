@@ -100,8 +100,18 @@ class ReadTool(Tool):
             else:
                 content = self._read_file(path)
 
-            lines = content.split('\n')
-            total_lines = len(lines)
+            # 使用 splitlines() 计算实际行数，但保留原始内容用于精确匹配
+            # splitlines() 不保留末尾空行，更符合"行数"概念
+            lines_for_count = content.splitlines()
+            total_lines = len(lines_for_count)
+
+            # 但模型输出需要保留完整原始内容（包括末尾换行），确保 Edit 精确匹配
+            # 使用 split('\n') 获取每行内容，但最后一行如果是空字符串则不显示
+            raw_lines = content.split('\n')
+            # 如果文件末尾有换行，最后一项是空字符串，不需要作为单独一行显示
+            if raw_lines and raw_lines[-1] == '':
+                raw_lines = raw_lines[:-1]
+            lines = raw_lines
             cache_result = file_cache.read_file(file_path, content)
             reference = cache_result["reference"]
             version = cache_result["version"]
@@ -172,7 +182,8 @@ class ReadTool(Tool):
 
         parts.append(f"Content (lines {start_line}-{end_line}):")
         for i in range(start_line - 1, end_line):
-            parts.append(f"{i+1:5d} | {lines[i].rstrip()}")
+            # 不使用 rstrip()，保留原始内容（包括行尾空格），确保 Edit 精确匹配
+            parts.append(f"{i+1:5d} | {lines[i]}")
 
         if end_line < total_lines:
             parts.append(f"  ... ({total_lines - end_line} more lines, use offset to continue)")

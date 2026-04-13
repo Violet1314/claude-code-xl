@@ -26,6 +26,8 @@ class PermissionManager:
         """
         # 会话级权限规则: {规则key: PermissionLevel}
         self.session_rules: Dict[str, PermissionLevel] = {}
+        # 全局会话放行标志：任意工具授权 SESSION 后，所有工具都放行
+        self.session_globally_allowed: bool = False
 
         # 项目目录（用于路径范围检查）
         self.project_dir = Path(project_dir) if project_dir else Path.cwd()
@@ -76,6 +78,7 @@ class PermissionManager:
     def clear_session(self) -> None:
         """清除会话所有权限规则"""
         self.session_rules.clear()
+        self.session_globally_allowed = False
 
     def get_rule_summary(self) -> str:
         """
@@ -84,12 +87,18 @@ class PermissionManager:
         Returns:
             规则摘要字符串
         """
-        if not self.session_rules:
-            return "当前没有缓存的权限规则"
+        lines = []
 
-        lines = ["会话权限规则:"]
-        for key, level in self.session_rules.items():
-            lines.append(f"  {key} → {level.value}")
+        if self.session_globally_allowed:
+            lines.append("✓ 会话全局放行已启用（所有工具自动通过）")
+
+        if self.session_rules:
+            lines.append("会话权限规则:")
+            for key, level in self.session_rules.items():
+                lines.append(f"  {key} → {level.value}")
+
+        if not lines:
+            return "当前没有缓存的权限规则"
 
         return "\n".join(lines)
 
@@ -119,6 +128,15 @@ class PermissionManager:
         # 检查路径范围（Bash 工具）
         path_check = self._check_path_scope(tool_call, tool)
         is_outside_scope = not path_check["in_scope"]
+
+        # 检查全局会话放行（任意工具授权 SESSION 后，所有工具、所有路径都放行）
+        if self.session_globally_allowed:
+            PermissionUI.show_cached_decision(tool.name, PermissionLevel.SESSION, str(tool_call))
+            return PermissionDecision(
+                allowed=True,
+                level=PermissionLevel.SESSION,
+                cached=True
+            )
 
         # 检查缓存权限（敏感操作和项目外操作跳过缓存）
         if not is_sensitive and not is_outside_scope:
@@ -163,9 +181,14 @@ class PermissionManager:
         # 转换为 PermissionLevel
         level = PermissionLevel(choice)
 
-        # 记录权限决定（敏感操作不缓存）
-        if level in (PermissionLevel.ONCE, PermissionLevel.SESSION) and not is_sensitive and not is_outside_scope:
-            self.set_permission(tool.name, level, identifier)
+        # 记录权限决定
+        if level in (PermissionLevel.ONCE, PermissionLevel.SESSION):
+            if level == PermissionLevel.SESSION:
+                # 会话级别：设置全局放行标志，所有工具、所有路径都自动通过
+                self.session_globally_allowed = True
+            # 敏感操作和项目外路径不缓存到 session_rules，但全局标志已生效
+            if not is_sensitive and not is_outside_scope:
+                self.set_permission(tool.name, level, identifier)
 
         # 显示决定结果
         allowed = level in (PermissionLevel.ONCE, PermissionLevel.SESSION)

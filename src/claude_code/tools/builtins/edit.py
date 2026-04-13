@@ -170,8 +170,15 @@ class EditTool(Tool):
         self, content: str, old_string: str, file_path: str
     ) -> ToolResult:
         """构建无匹配时的错误信息（提供清晰的指导）"""
-        content_lines = content.splitlines()
-        old_lines = old_string.splitlines()
+        # 使用与 Read 一致的换行处理方式
+        raw_lines = content.split('\n')
+        if raw_lines and raw_lines[-1] == '':
+            raw_lines = raw_lines[:-1]
+        content_lines = raw_lines
+
+        old_lines = old_string.split('\n')
+        if old_lines and old_lines[-1] == '':
+            old_lines = old_lines[:-1]
 
         # 尝试找到最相似的行（仅用于提示，不用于匹配）
         similar_info = self._find_similar_lines_hint(content_lines, old_lines)
@@ -219,8 +226,15 @@ class EditTool(Tool):
         self, content: str, old_string: str, positions: List[int]
     ) -> ToolResult:
         """构建多处匹配时的错误信息（要求添加上下文）"""
-        content_lines = content.splitlines()
-        old_lines = old_string.splitlines()
+        # 使用与 Read 一致的换行处理方式
+        raw_lines = content.split('\n')
+        if raw_lines and raw_lines[-1] == '':
+            raw_lines = raw_lines[:-1]
+        content_lines = raw_lines
+
+        old_lines = old_string.split('\n')
+        if old_lines and old_lines[-1] == '':
+            old_lines = old_lines[:-1]
 
         # 计算所有匹配位置的行号
         match_lines = []

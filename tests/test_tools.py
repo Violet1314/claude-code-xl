@@ -440,7 +440,8 @@ class TestToolResultStructure:
             # 2. 验证 metadata 包含关键信息
             assert "file_path" in result.metadata
             assert "total_lines" in result.metadata
-            assert result.metadata["total_lines"] == 3  # def test(): \n pass \n (empty line if any)
+            # 文件 "def test():\n    pass\n" 实际是 2 行（末尾换行表示第2行结束，不是空行）
+            assert result.metadata["total_lines"] == 2
             
         finally:
             os.unlink(temp_path)
