@@ -1,6 +1,6 @@
 """Glob 工具 - 按文件名模式搜索"""
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Callable
 from collections import Counter
 from ..base import Tool, ToolResult
 from claude_code.utils.paths import resolve_path, EXCLUDED_DIRS
@@ -10,7 +10,13 @@ from rich.markup import escape
 class GlobTool(Tool):
     """文件名模式搜索工具"""
     name = "Glob"
-    description = "按文件名模式搜索文件。支持通配符：* 匹配任意字符，** 递归匹配目录。"
+    description = (
+        "按文件名模式搜索文件。支持通配符：* 匹配任意字符，** 递归匹配目录。\n"
+        "重要：\n"
+        "- pattern 必须是相对模式（不能是绝对路径），如 **/*.py、src/**/*.js\n"
+        "- path 必须是绝对路径或明确的目录，默认 '.' 会搜索 workplace 目录\n"
+        "- 建议明确指定 path，如：path=\"E:\\项目目录\\src\""
+    )
 
     MAX_RESULTS = 100
 
@@ -21,18 +27,22 @@ class GlobTool(Tool):
             "properties": {
                 "pattern": {
                     "type": "string",
-                    "description": "glob 模式，如 **/*.py, src/**/*.js"
+                    "description": "glob 模式（相对模式，不能含绝对路径），如 **/*.py, src/**/*.js"
                 },
                 "path": {
                     "type": "string",
-                    "description": "搜索的起始目录，默认当前目录",
+                    "description": "搜索的起始目录（建议使用绝对路径），默认 workplace 目录",
                     "default": "."
                 }
             },
             "required": ["pattern"]
         }
 
-    def execute(self, parameters: Dict[str, Any]) -> ToolResult:
+    def execute(
+        self,
+        parameters: Dict[str, Any],
+        interrupt_check: Optional[Callable[[], bool]] = None
+    ) -> ToolResult:
         """执行搜索"""
         # 参数验证（与 Read/Edit/Bash 工具一致）
         validation_error = self.validate_parameters(parameters)
@@ -49,7 +59,23 @@ class GlobTool(Tool):
             if not base_path.exists():
                 return ToolResult(success=False, output="", error=f"目录不存在: {search_path}")
 
-            raw_matches = list(base_path.glob(pattern))
+            # 使用迭代器而非 list()，支持中断检查
+            raw_matches = []
+            check_interval = 50
+            file_count = 0
+
+            for path in base_path.glob(pattern):
+                # 定期检查中断
+                file_count += 1
+                if interrupt_check and file_count % check_interval == 0 and interrupt_check():
+                    return ToolResult(
+                        success=False,
+                        output="",
+                        error="用户中断执行",
+                        interrupted=True
+                    )
+                raw_matches.append(path)
+
             matches = [m for m in raw_matches if not self._should_exclude(m, base_path)]
             matches.sort(key=lambda p: str(p).lower())
 

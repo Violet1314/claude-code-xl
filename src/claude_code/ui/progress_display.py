@@ -76,16 +76,22 @@ class BashStreamingDisplay:
         self._task_id: Optional[int] = None
         self._error_message: Optional[str] = None
 
+    def _escape_for_rich(self, text: str) -> str:
+        """转义花括号，避免 Rich 格式化错误"""
+        return text.replace('{', '{{').replace('}', '}}')
+
     def start(self) -> None:
         """开始执行"""
         self._start_time = time.time()
-        
+
         display_cmd = self.command if len(self.command) <= 60 else self.command[:57] + "..."
-        
+        # 转义 PowerShell 花括号，避免 Rich 格式化错误
+        safe_cmd = self._escape_for_rich(display_cmd)
+
         self._display = Progress(
             SpinnerColumn(spinner_name="dots", style=COLORS['primary']),
             TextColumn(f"[bold]{ICONS['bash']} Bash[/] "),
-            TextColumn(f"[dim]$ {display_cmd}[/] "),
+            TextColumn(f"[dim]$ {safe_cmd}[/] "),
             console=app_console.get_console(),
             transient=True,
         )

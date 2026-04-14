@@ -1,8 +1,10 @@
-"""Bash 工具 - 执行 shell 命令（支持流式输出）"""
+"""Bash 工具 - 执行 shell 命令（支持流式输出 + 可中断）"""
 import os
 import re
 import subprocess
-from typing import Any, Dict, List, Optional, Tuple
+import threading
+import queue
+from typing import Any, Dict, List, Optional, Tuple, Callable
 from pathlib import Path
 from ..base import Tool, ToolResult
 from claude_code.ui.progress_display import BashStreamingDisplay
@@ -166,7 +168,7 @@ class BashTool(Tool):
                 },
                 "cwd": {
                     "type": "string",
-                    "description": "工作目录，默认当前目录",
+                    "description": "工作目录（建议使用绝对路径），默认 workplace 目录",
                     "default": "."
                 }
             },
@@ -234,10 +236,11 @@ class BashTool(Tool):
         command: str,
         work_dir: Path,
         timeout: int,
-        progress: BashStreamingDisplay
+        progress: BashStreamingDisplay,
+        interrupt_check: Optional[Callable[[], bool]] = None
     ) -> Tuple[int, List[str], List[str], Optional[str]]:
         """
-        执行 subprocess 并收集输出
+        执行 subprocess 并收集输出（线程读取，支持中断）
 
         Returns:
             (return_code, stdout_lines, stderr_lines, error_message)
@@ -265,54 +268,115 @@ class BashTool(Tool):
         stdout_lines = []
         stderr_lines = []
 
+        # 使用线程异步读取输出，避免 readline() 阻塞导致无法响应中断
+        stdout_queue = queue.Queue()
+        stderr_queue = queue.Queue()
+
+        def _read_stream(stream, q, is_stderr=False):
+            """线程函数：持续读取流并放入队列"""
+            try:
+                for line in stream:
+                    q.put((line, is_stderr))
+                q.put(None)  # 结束标记
+            except Exception:
+                q.put(None)
+
+        # 启动读取线程
+        stdout_thread = threading.Thread(
+            target=_read_stream, args=(process.stdout, stdout_queue, False),
+            daemon=True
+        )
+        stderr_thread = threading.Thread(
+            target=_read_stream, args=(process.stderr, stderr_queue, True),
+            daemon=True
+        )
+        stdout_thread.start()
+        stderr_thread.start()
+
         try:
             while True:
+                # 优先检查中断（CTRL+C）- 这是修复的关键
+                if interrupt_check and interrupt_check():
+                    process.kill()
+                    stdout_thread.join(timeout=0.5)
+                    stderr_thread.join(timeout=0.5)
+                    progress.set_error("用户中断执行")
+                    progress.stop(False, -1)
+                    return -1, [], [], "用户中断执行"
+
                 # 检查超时
                 if progress.is_timeout():
                     process.kill()
+                    stdout_thread.join(timeout=0.5)
+                    stderr_thread.join(timeout=0.5)
                     progress.set_error(f"命令执行超时（{timeout}秒）")
                     progress.stop(False, -1)
                     return -1, [], [], f"命令执行超时（{timeout}秒）"
 
-                # 读取 stdout
-                stdout_line = process.stdout.readline()
-                if stdout_line:
-                    decoded = self._decode_line(stdout_line, is_windows)
-                    if decoded:
-                        stdout_lines.append(decoded)
-                        progress.feed_output(decoded)
-
-                # 读取 stderr
-                if process.stderr:
-                    try:
-                        stderr_line = process.stderr.readline()
-                        if stderr_line:
-                            decoded = self._decode_line(stderr_line, is_windows)
-                            if decoded:
-                                stderr_lines.append(decoded)
-                                progress.feed_output(f"[stderr] {decoded}")
-                    except Exception:
+                # 从队列获取输出（非阻塞，timeout=0.1秒）
+                try:
+                    item = stdout_queue.get(timeout=0.1)
+                    if item is None:
+                        # stdout 流结束
                         pass
+                    else:
+                        line, is_stderr = item
+                        decoded = self._decode_line(line, is_windows)
+                        if decoded:
+                            stdout_lines.append(decoded)
+                            progress.feed_output(decoded)
+                except queue.Empty:
+                    pass
 
-                # 检查进程是否结束
+                try:
+                    item = stderr_queue.get(timeout=0.1)
+                    if item is None:
+                        # stderr 流结束
+                        pass
+                    else:
+                        line, is_stderr = item
+                        decoded = self._decode_line(line, is_windows)
+                        if decoded:
+                            stderr_lines.append(decoded)
+                            progress.feed_output(f"[stderr] {decoded}")
+                except queue.Empty:
+                    pass
+
+                # 检查进程是否结束且队列是否清空
                 if process.poll() is not None:
-                    # 读取剩余输出
-                    remaining_stdout = process.stdout.read()
-                    remaining_stderr = process.stderr.read() if process.stderr else b''
-                    if remaining_stdout:
-                        for line in remaining_stdout.splitlines():
-                            decoded = self._decode_line(line, is_windows)
-                            if decoded:
-                                stdout_lines.append(decoded)
-                    if remaining_stderr:
-                        for line in remaining_stderr.splitlines():
-                            decoded = self._decode_line(line, is_windows)
-                            if decoded:
-                                stderr_lines.append(decoded)
+                    # 等待线程结束，确保所有输出被收集
+                    stdout_thread.join(timeout=1.0)
+                    stderr_thread.join(timeout=1.0)
+
+                    # 收集队列剩余数据
+                    while not stdout_queue.empty():
+                        try:
+                            item = stdout_queue.get_nowait()
+                            if item is not None:
+                                line, _ = item
+                                decoded = self._decode_line(line, is_windows)
+                                if decoded:
+                                    stdout_lines.append(decoded)
+                        except queue.Empty:
+                            break
+
+                    while not stderr_queue.empty():
+                        try:
+                            item = stderr_queue.get_nowait()
+                            if item is not None:
+                                line, _ = item
+                                decoded = self._decode_line(line, is_windows)
+                                if decoded:
+                                    stderr_lines.append(decoded)
+                        except queue.Empty:
+                            break
+
                     break
 
         except Exception as e:
             process.kill()
+            stdout_thread.join(timeout=0.5)
+            stderr_thread.join(timeout=0.5)
             error_msg = f"读取输出失败: {str(e)}"
             progress.set_error(error_msg)
             progress.stop(False, -1)
@@ -362,7 +426,11 @@ class BashTool(Tool):
 
         return output
 
-    def execute(self, parameters: Dict[str, Any]) -> ToolResult:
+    def execute(
+        self,
+        parameters: Dict[str, Any],
+        interrupt_check: Optional[Callable[[], bool]] = None
+    ) -> ToolResult:
         """执行命令"""
         # 参数验证（与 Read/Edit 工具一致）
         validation_error = self.validate_parameters(parameters)
@@ -395,10 +463,17 @@ class BashTool(Tool):
             progress.start()
 
             return_code, stdout_lines, stderr_lines, exec_error = self._run_subprocess(
-                command, work_dir, timeout, progress
+                command, work_dir, timeout, progress, interrupt_check
             )
             if exec_error:
-                return ToolResult(success=False, output="", error=exec_error)
+                # 区分用户中断和其他错误
+                is_interrupted = exec_error == "用户中断执行"
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error=exec_error,
+                    interrupted=is_interrupted
+                )
 
             success = return_code == 0
             output = self._build_final_output(stdout_lines, stderr_lines, success)

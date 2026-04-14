@@ -1,7 +1,7 @@
 """Grep 工具 - 按内容搜索文件"""
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Callable
 from ..base import Tool, ToolResult
 from claude_code.utils.paths import resolve_path, get_file_icon, EXCLUDED_DIRS
 from claude_code.ui.theme import COLORS, ICONS
@@ -11,7 +11,13 @@ from rich.markup import escape
 class GrepTool(Tool):
     """文件内容搜索工具"""
     name = "Grep"
-    description = "在文件中搜索匹配正则表达式的内容。返回匹配的行及其上下文。建议使用精确模式减少匹配数量。"
+    description = (
+        "在文件中搜索匹配正则表达式的内容。返回匹配的行及其上下文。\n"
+        "重要：\n"
+        "- path 建议使用绝对路径，如 path=\"E:\\项目目录\\src\"\n"
+        "- 默认 path='.' 会搜索 workplace 目录（可能不是你想要的）\n"
+        "- 建议使用精确模式减少匹配数量"
+    )
 
     MAX_FILE_SIZE = 1 * 1024 * 1024
     MAX_MATCHES = 30
@@ -28,7 +34,7 @@ class GrepTool(Tool):
                 },
                 "path": {
                     "type": "string",
-                    "description": "搜索的文件或目录路径",
+                    "description": "搜索的文件或目录路径（建议使用绝对路径）",
                     "default": "."
                 },
                 "type": {
@@ -49,7 +55,11 @@ class GrepTool(Tool):
             "required": ["pattern"]
         }
 
-    def execute(self, parameters: Dict[str, Any]) -> ToolResult:
+    def execute(
+        self,
+        parameters: Dict[str, Any],
+        interrupt_check: Optional[Callable[[], bool]] = None
+    ) -> ToolResult:
         """执行搜索"""
         # 参数验证（与 Read/Edit/Bash 工具一致）
         validation_error = self.validate_parameters(parameters)
@@ -74,12 +84,31 @@ class GrepTool(Tool):
             if not base_path.exists():
                 return ToolResult(success=False, output="", error=f"路径不存在: {search_path}")
 
-            files_to_search = self._collect_files(base_path, file_type)
+            # 收集文件时检查中断
+            files_to_search = self._collect_files(base_path, file_type, interrupt_check)
+
+            # 如果被中断，直接返回
+            if files_to_search is None:
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error="用户中断执行",
+                    interrupted=True
+                )
 
             all_matches = []
             matched_files = []
 
             for file_path in files_to_search:
+                # 检查中断
+                if interrupt_check and interrupt_check():
+                    return ToolResult(
+                        success=False,
+                        output="",
+                        error="用户中断执行",
+                        interrupted=True
+                    )
+
                 matches = self._search_in_file(file_path, regex)
                 if matches:
                     matched_files.append(file_path)
@@ -182,8 +211,18 @@ class GrepTool(Tool):
     # 搜索逻辑
     # ============================================================
 
-    def _collect_files(self, base_path: Path, file_type: Optional[str]) -> List[Path]:
-        """收集要搜索的文件"""
+    def _collect_files(
+        self,
+        base_path: Path,
+        file_type: Optional[str],
+        interrupt_check: Optional[Callable[[], bool]] = None
+    ) -> Optional[List[Path]]:
+        """
+        收集要搜索的文件
+
+        Returns:
+            文件列表，或 None（用户中断）
+        """
         files = []
 
         if base_path.is_file():
@@ -216,7 +255,16 @@ class GrepTool(Tool):
 
         extensions = type_to_ext.get(file_type, []) if file_type else None
 
+        # 每遍历一定数量文件后检查中断
+        check_interval = 50
+        file_count = 0
+
         for path in base_path.rglob("*"):
+            # 定期检查中断
+            file_count += 1
+            if interrupt_check and file_count % check_interval == 0 and interrupt_check():
+                return None  # 用户中断
+
             if path.is_file():
                 if self._should_exclude(path, base_path):
                     continue
@@ -227,6 +275,8 @@ class GrepTool(Tool):
                 if extensions and path.suffix not in extensions:
                     continue
                 files.append(path)
+
+        return files
 
         return files
 

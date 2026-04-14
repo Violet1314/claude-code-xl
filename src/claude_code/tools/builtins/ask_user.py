@@ -1,5 +1,5 @@
 """AskUserQuestion 工具 - 向用户询问问题"""
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Callable
 from ..base import Tool, ToolResult
 from claude_code.ui.input import interactive_menu
 from claude_code.ui import console
@@ -60,7 +60,11 @@ class AskUserQuestionTool(Tool):
             "required": ["question"]
         }
 
-    def execute(self, parameters: Dict[str, Any]) -> ToolResult:
+    def execute(
+        self,
+        parameters: Dict[str, Any],
+        interrupt_check: Optional[Callable[[], bool]] = None
+    ) -> ToolResult:
         """执行询问"""
         # 参数验证（与 Read/Edit/Bash 工具一致）
         validation_error = self.validate_parameters(parameters)
@@ -88,7 +92,7 @@ class AskUserQuestionTool(Tool):
 
             return ToolResult(
                 success=True,
-                output=result,
+                output=f"用户输入: {result}",  # 让模型知道用户输入了什么
                 metadata={"user_response": result}
             )
         except Exception as e:

@@ -1,6 +1,6 @@
 """Read 工具 - 读取文件内容（集成缓存 + 进度显示）"""
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Callable, Tuple
 
 from ..base import Tool, ToolResult
 from ..file_cache import file_cache
@@ -18,6 +18,7 @@ class ReadTool(Tool):
         "读取用户本机文件内容。你可以直接访问用户提供的任何本地路径，无需用户手动粘贴内容。"
         "文件会被完整缓存，后续操作使用缓存引用节省 Token。"
         "读取后请直接执行任务，不要再次调用 Read。如需编辑，直接使用 Edit 工具。"
+        "\n重要：建议使用绝对路径，如 file_path=\"E:\\项目目录\\src\\file.py\""
     )
 
     # 文件大小限制 (1MB)
@@ -36,7 +37,7 @@ class ReadTool(Tool):
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "要读取的文件路径（绝对路径或相对路径）"
+                    "description": "文件路径（建议使用绝对路径）"
                 },
                 "offset": {
                     "type": "integer",
@@ -52,7 +53,11 @@ class ReadTool(Tool):
             "required": ["file_path"]
         }
 
-    def execute(self, parameters: Dict[str, Any]) -> ToolResult:
+    def execute(
+        self,
+        parameters: Dict[str, Any],
+        interrupt_check: Optional[Callable[[], bool]] = None
+    ) -> ToolResult:
         """执行读取操作"""
         # 参数验证（与 Edit/Bash 工具一致）
         validation_error = self.validate_parameters(parameters)
@@ -95,7 +100,16 @@ class ReadTool(Tool):
                     transient=True,
                 ) as progress_bar:
                     task = progress_bar.add_task("", total=100)
-                    content = self._read_file_with_progress(path, progress_bar, task)
+                    content, interrupted = self._read_file_with_progress(
+                        path, progress_bar, task, interrupt_check
+                    )
+                    if interrupted:
+                        return ToolResult(
+                            success=False,
+                            output="",
+                            error="用户中断执行",
+                            interrupted=True
+                        )
                 console.print(f"  [{COLORS['success']}]{ICONS['success']}[/] [dim]读取完成[/] ")
             else:
                 content = self._read_file(path)
@@ -262,8 +276,19 @@ class ReadTool(Tool):
             with open(path, 'r', encoding='gbk') as f:
                 return f.read()
 
-    def _read_file_with_progress(self, path: Path, progress_bar, task) -> str:
-        """读取文件内容（带进度显示）"""
+    def _read_file_with_progress(
+        self,
+        path: Path,
+        progress_bar,
+        task,
+        interrupt_check: Optional[Callable[[], bool]] = None
+    ) -> Tuple[str, bool]:
+        """
+        读取文件内容（带进度显示 + 中断检查）
+
+        Returns:
+            (内容, 是否被中断)
+        """
         content_chunks = []
         file_size = path.stat().st_size
         read_bytes = 0
@@ -272,6 +297,10 @@ class ReadTool(Tool):
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 while True:
+                    # 检查中断
+                    if interrupt_check and interrupt_check():
+                        return '', True  # 用户中断
+
                     chunk = f.read(chunk_size)
                     if not chunk:
                         break
@@ -280,11 +309,11 @@ class ReadTool(Tool):
                     progress = min(100, int(read_bytes / file_size * 100))
                     progress_bar.update(task, completed=progress)
 
-            return ''.join(content_chunks)
+            return ''.join(content_chunks), False
 
         except UnicodeDecodeError:
             with open(path, 'r', encoding='gbk') as f:
-                return f.read()
+                return f.read(), False
 
     # ============================================================
     # 工具属性

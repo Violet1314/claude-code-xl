@@ -18,6 +18,7 @@ class ExecutionResult:
     error: Optional[str] = None
     skipped: bool = False           # 是否被跳过（用户拒绝或取消）
     permission_denied: bool = False  # 是否因权限拒绝
+    interrupted: bool = False       # 是否因用户 CTRL+C 中断
     duration_ms: int = 0
 
 @dataclass
@@ -40,6 +41,15 @@ class ExecutionReport:
     @property
     def skipped_count(self) -> int:
         return sum(1 for r in self.results if r.skipped)
+
+    @property
+    def interrupted_count(self) -> int:
+        return sum(1 for r in self.results if r.interrupted)
+
+    @property
+    def has_interrupted(self) -> bool:
+        """是否有任何工具被用户中断"""
+        return any(r.interrupted for r in self.results)
 
     def add(self, result: ExecutionResult) -> None:
         self.results.append(result)
@@ -77,7 +87,8 @@ class ToolExecutor:
     def execute_single(
         self,
         tool_call: ToolCall,
-        on_progress: Optional[Callable[[str, str], None]] = None
+        on_progress: Optional[Callable[[str, str], None]] = None,
+        interrupt_check: Optional[Callable[[], bool]] = None
     ) -> ExecutionResult:
         """
         执行单个工具调用
@@ -85,6 +96,7 @@ class ToolExecutor:
         Args:
             tool_call: 工具调用
             on_progress: 进度回调函数
+            interrupt_check: 中断检查函数
 
         Returns:
             执行结果
@@ -124,9 +136,10 @@ class ToolExecutor:
         # 5. 执行工具
         PermissionUI.show_tool_start(tool.name, str(tool_call))
         start_time = time.time()
-        
+
         try:
-            result = tool.execute(tool_call.parameters)
+            # 传入中断检查函数，让工具（如 Bash）能响应 CTRL+C
+            result = tool.execute(tool_call.parameters, interrupt_check=interrupt_check)
             duration_ms = int((time.time() - start_time) * 1000)
 
             # 6. 后处理：记录与显示
@@ -137,6 +150,7 @@ class ToolExecutor:
                 success=result.success,
                 output=result.output,
                 error=result.error,
+                interrupted=result.interrupted,
                 duration_ms=duration_ms
             )
 
@@ -188,7 +202,8 @@ class ToolExecutor:
         """
         # A. 显示结果
         # Bash 已有流式卡片，跳过重复显示
-        if tool.name != "Bash":
+        # AskUserQuestion 用户已在交互中看到输入，跳过重复显示
+        if tool.name not in ("Bash", "AskUserQuestion"):
             # 确定要显示的内容
             display_content = ""
             if result.success:
@@ -240,7 +255,7 @@ class ToolExecutor:
             if on_progress:
                 on_progress(tool_call.name, f"执行 {i}/{len(tool_calls)}")
 
-            result = self.execute_single(tool_call, on_progress)
+            result = self.execute_single(tool_call, on_progress, interrupt_check)
             report.add(result)
 
             if result.skipped and not result.permission_denied:

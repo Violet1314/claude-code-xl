@@ -1,7 +1,7 @@
 """工具基类和结果定义"""
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Callable
 from enum import Enum
 
 
@@ -18,7 +18,8 @@ class ToolResult:
     output: str  # 返回给模型的完整内容（保持向后兼容）
     error: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
-    
+    interrupted: bool = False  # 是否因用户 CTRL+C 中断
+
     # --- 新增字段：用于 UI 渲染的结构化数据 ---
     display_output: Optional[str] = None  # 终端显示的简化版（Rich Markup）
     summary: Optional[str] = None         # 简短摘要（用于卡片标题或日志）
@@ -27,6 +28,8 @@ class ToolResult:
     def __str__(self) -> str:
         if self.success:
             return f"✓ {self.summary or self.output[:50]}"
+        if self.interrupted:
+            return f"⚡ {self.error or '用户中断'}"
         return f"✗ {self.error or self.output}"
 
 
@@ -78,8 +81,17 @@ class Tool(ABC):
         pass
 
     @abstractmethod
-    def execute(self, parameters: Dict[str, Any]) -> ToolResult:
-        """执行工具"""
+    def execute(
+        self,
+        parameters: Dict[str, Any],
+        interrupt_check: Optional[Callable[[], bool]] = None
+    ) -> ToolResult:
+        """执行工具
+
+        Args:
+            parameters: 工具参数
+            interrupt_check: 中断检查函数，返回 True 表示应中断执行
+        """
         pass
 
     def validate_parameters(self, parameters: Dict[str, Any]) -> Optional[str]:

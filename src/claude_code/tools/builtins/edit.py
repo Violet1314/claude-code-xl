@@ -7,7 +7,7 @@ v2.8.8 重构要点：
 4. 简化错误反馈 - 更明确的操作步骤指导
 """
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Callable
 from ..base import Tool, ToolResult
 from ..file_cache import file_cache
 from ..syntax_checker import check_syntax
@@ -33,6 +33,7 @@ class EditTool(Tool):
         "2. 如果 old_string 在文件中出现多次，必须添加更多上下文使其唯一\n"
         "3. 操作前应先用 Read 工具查看文件内容，复制精确的原文\n"
         "\n"
+        "重要：建议使用绝对路径，如 file_path=\"E:\\项目目录\\src\\file.py\"\n"
         "不要猜测或简化 old_string，必须从 Read 结果中精确复制。"
     )
 
@@ -43,7 +44,7 @@ class EditTool(Tool):
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "文件路径"
+                    "description": "文件路径（建议使用绝对路径）"
                 },
                 "old_string": {
                     "type": "string",
@@ -57,7 +58,11 @@ class EditTool(Tool):
             "required": ["file_path", "old_string", "new_string"]
         }
 
-    def execute(self, parameters: Dict[str, Any]) -> ToolResult:
+    def execute(
+        self,
+        parameters: Dict[str, Any],
+        interrupt_check: Optional[Callable[[], bool]] = None
+    ) -> ToolResult:
         """执行编辑操作（精确匹配模式）"""
         # 参数验证（与 Read/Bash 工具一致）
         validation_error = self.validate_parameters(parameters)

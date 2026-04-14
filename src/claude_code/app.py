@@ -59,7 +59,7 @@ from claude_code.tools import (
 class Application:
     """Claude Code Terminal 主应用"""
     # 工具执行限制
-    MAX_TOOL_ROUNDS = 20        # 最大循环轮次
+    MAX_TOOL_ROUNDS = 15        # 最大循环轮次
     MAX_TOOLS_PER_ROUND = 40   # 每轮最大工具数
 
     def __init__(self, config_dir: str = "data/config"):
@@ -221,9 +221,16 @@ class Application:
             
             last_msg = self.conversation.get_messages()[-1]
             is_error_round = False
+            is_interrupted = False
             current_error_sig = ""
 
             if last_msg["role"] == "user" and "<tool_results>" in last_msg["content"]:
+                # 检查是否有用户中断
+                if 'status="interrupted"' in last_msg["content"] or "user_interrupt" in last_msg["content"]:
+                    is_interrupted = True
+                    console.print(f"\n[{COLORS['warning']}]{ICONS['warning']} 用户中断执行，停止当前任务[/]")
+                    break  # 直接退出循环，不再让模型重试
+
                 # 简单解析：如果反馈中包含多个 error 且没有 success，视为失败轮次
                 if '<status="error">' in last_msg["content"] and '<status="success">' not in last_msg["content"]:
                     is_error_round = True
@@ -527,6 +534,14 @@ class Application:
 
         lines = ["<tool_results>"]
 
+        # 如果有用户中断，添加特殊标记
+        if report.has_interrupted:
+            lines.append("<system_message type=\"user_interrupt\">")
+            lines.append("用户按下 CTRL+C 中断了正在执行的操作。")
+            lines.append("这表示用户希望停止当前任务，不要再继续尝试。")
+            lines.append("请向用户确认是否需要继续其他工作，或者直接等待用户的新指令。")
+            lines.append("</system_message>")
+
         for result in report.results:
             if result.skipped:
                 lines.append(f"<result tool=\"{result.tool_call.name}\" status=\"skipped\">")
@@ -534,6 +549,10 @@ class Application:
                     lines.append("权限被拒绝，此操作需要用户明确授权")
                 else:
                     lines.append("用户主动取消执行")
+            elif result.interrupted:
+                # 用户中断：使用特殊状态，让模型理解这不是"失败"
+                lines.append(f"<result tool=\"{result.tool_call.name}\" status=\"interrupted\">")
+                lines.append("用户按下 CTRL+C 中断了此操作")
             elif result.success:
                 lines.append(f"<result tool=\"{result.tool_call.name}\" status=\"success\">")
                 # 压缩大结果

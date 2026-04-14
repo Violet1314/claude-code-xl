@@ -2,7 +2,7 @@
 from ..file_cache import file_cache
 from ..syntax_checker import check_syntax
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Callable
 
 from ..base import Tool, ToolResult
 from claude_code.utils.paths import resolve_workplace_path, get_file_icon
@@ -14,7 +14,10 @@ class WriteTool(Tool):
     """写入文件工具"""
 
     name = "Write"
-    description = "创建新文件或覆盖文件。慎用，会覆盖已有内容。"
+    description = (
+        "创建新文件或覆盖文件。慎用，会覆盖已有内容。"
+        "\n重要：建议使用绝对路径，如 file_path=\"E:\\项目目录\\src\\file.py\""
+    )
 
     def get_parameters_schema(self) -> Dict[str, Any]:
         """参数定义"""
@@ -23,7 +26,7 @@ class WriteTool(Tool):
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "文件路径"
+                    "description": "文件路径（建议使用绝对路径）"
                 },
                 "content": {
                     "type": "string",
@@ -33,7 +36,11 @@ class WriteTool(Tool):
             "required": ["file_path", "content"]
         }
 
-    def execute(self, parameters: Dict[str, Any]) -> ToolResult:
+    def execute(
+        self,
+        parameters: Dict[str, Any],
+        interrupt_check: Optional[Callable[[], bool]] = None
+    ) -> ToolResult:
         """执行写入操作"""
         # 参数验证（与 Read/Edit/Bash 工具一致）
         validation_error = self.validate_parameters(parameters)
