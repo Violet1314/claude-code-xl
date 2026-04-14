@@ -73,16 +73,16 @@ class StatsManager:
 
     def set_real_usage(self, input_tokens: int, output_tokens: int) -> None:
         """
-        设置 API 返回的真实 token 使用量（优先于估算值）
+        累加 API 返回的真实 token 使用量
 
         Args:
-            input_tokens: 输入 token 数
-            output_tokens: 输出 token 数
+            input_tokens: 本次请求输入 token 数
+            output_tokens: 本次请求输出 token 数
         """
         if input_tokens > 0:
-            self._session.input_tokens = input_tokens
+            self._session.input_tokens += input_tokens
         if output_tokens > 0:
-            self._session.output_tokens = output_tokens
+            self._session.output_tokens += output_tokens
 
     def add_cost(self, cost: float) -> None:
         """

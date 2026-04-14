@@ -28,14 +28,14 @@ class ModelConfig:
     def get_price_short(self) -> str:
         """
         解析价格为简短格式
-        'Input: 5$/1M Output: 25$/1M' -> '5/25'
+        'Input: $0.96/1M Output: $1.91/1M' -> '0.96/1.91'
         """
         if not self.price:
             return ""
 
         import re
-        # 匹配数字（包括小数）
-        numbers = re.findall(r'(\d+(?:\.\d+)?)\$', self.price)
+        # 匹配 $ 符号后的数字（包括小数）
+        numbers = re.findall(r'\$(\d+(?:\.\d+)?)', self.price)
         if len(numbers) >= 2:
             return f"{numbers[0]}/{numbers[1]}"
         return ""
@@ -43,7 +43,7 @@ class ModelConfig:
     def get_prices(self) -> tuple:
         """
         解析价格为数值
-        'Input: 5$/1M Output: 25$/1M' -> (5.0, 25.0)
+        'Input: $0.96/1M Output: $1.91/1M' -> (0.96, 1.91)
 
         Returns:
             (input_price, output_price) 或 (0, 0)
@@ -52,7 +52,8 @@ class ModelConfig:
             return (0.0, 0.0)
 
         import re
-        numbers = re.findall(r'(\d+(?:\.\d+)?)\$', self.price)
+        # 匹配 $ 符号后的数字（包括小数）
+        numbers = re.findall(r'\$(\d+(?:\.\d+)?)', self.price)
         if len(numbers) >= 2:
             return (float(numbers[0]), float(numbers[1]))
         return (0.0, 0.0)

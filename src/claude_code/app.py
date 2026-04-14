@@ -207,7 +207,7 @@ class Application:
                 insert_idx = 1 if messages and messages[0].get("role") == "system" else 0
                 messages.insert(insert_idx, {"role": "user", "content": file_context})
 
-            self.stats.update_input(messages)
+            # 不再估算输入 token，完全依赖 API 返回的真实 usage 累加
             response, has_tools = self._handle_response(messages)
 
             if not has_tools:
