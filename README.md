@@ -223,6 +223,8 @@ claude-code/
 *   ✅ 费用显示：累计总费用
 *   ✅ 等待响应时可中断：线程+队列+心跳模式，定期yield None检查
 *   ✅ 中断错误修复：`reentrant call` 和 `NoneType stream` 错误
+*   ✅ 中断误判修复：`_is_interrupted()` 改用布尔标志，不依赖时间差判断
+*   ✅ 中断/错误检测：从 `ExecutionReport` 结构化判断，不解析对话文本（避免历史残留误报）
 *   ✅ 全量测试通过：100 passed
 
 ### v2.8.15 (2026-04-15)

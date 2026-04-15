@@ -202,6 +202,7 @@ class APIClient:
         line_queue: queue.Queue = queue.Queue()
         stop_event = threading.Event()
         request_error: Optional[Exception] = None
+        read_thread: Optional[threading.Thread] = None
 
         def _read_lines(resp):
             """后台线程：读取响应行"""
@@ -264,7 +265,8 @@ class APIClient:
         finally:
             # 确保停止后台线程
             stop_event.set()
-            read_thread.join(timeout=0.5)
+            if read_thread is not None:
+                read_thread.join(timeout=0.5)
 
         # 如果有错误，在最后抛出
         if request_error:

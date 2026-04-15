@@ -92,8 +92,9 @@ class Application:
         os.makedirs(self.history_dir, exist_ok=True)
         os.makedirs(WORKPLACE_DIR, exist_ok=True)
         atexit.register(self._on_exit)
-        # CTRL+C 中断管理：记录上次信号时间，实现单击中断、双击退出
-        self._last_sigint: float = 0.0
+        # CTRL+C 中断管理：布尔标志 + 时间戳，实现单击中断、双击退出
+        self._interrupted: bool = False          # 是否有待处理的中断信号
+        self._last_sigint: float = 0.0          # 上次 SIGINT 时间戳（仅用于双击退出判定）
         self._sigint_double_threshold: float = 1.0  # 双击判定窗口（秒）
         signal.signal(signal.SIGINT, self._signal_handler)
 
@@ -178,12 +179,17 @@ class Application:
             sys.stdout.write(f"\n再见！\n")
             sys.stdout.flush()
             sys.exit(0)
-        # 单击：只设置标志，不打印（让主循环处理显示）
+        # 单击：设置布尔标志，让主循环处理显示
+        self._interrupted = True
         self._last_sigint = now
 
     def _is_interrupted(self) -> bool:
-        """检查是否有待处理的中断信号"""
-        return time.time() - self._last_sigint < self._sigint_double_threshold
+        """检查是否有待处理的中断信号，消费后重置"""
+        if self._interrupted:
+            # 消费中断信号，立即重置标志，避免后续误判
+            self._interrupted = False
+            return True
+        return False
 
     # ============================================================
     # 对话功能
@@ -211,37 +217,30 @@ class Application:
                 messages.insert(insert_idx, {"role": "user", "content": file_context})
 
             # 不再估算输入 token，完全依赖 API 返回的真实 usage 累加
-            response, has_tools = self._handle_response(messages)
+            response, has_tools, report = self._handle_response(messages)
 
             if not has_tools:
                 break
 
-            # 【修改点 3】：检查本轮是否有工具执行失败
-            # 注意：_handle_response 内部已经执行了工具并构建了 feedback
-            # 我们需要从 conversation 的最新消息中提取错误特征，或者更简单地：
-            # 在 _execute_tools 或 _build_tool_feedback 中记录状态。
-            # 为了简化，我们在 _handle_response 返回后，检查最后一条用户消息（即 feedback）
-            
-            last_msg = self.conversation.get_messages()[-1]
+            # 检查本轮工具执行是否有用户真实中断（Ctrl+C）
+            # 直接从 ExecutionReport 判断，不依赖文本内容（避免历史残留误判）
+            if report and report.has_interrupted:
+                console.print(f"\n[{COLORS['warning']}]{ICONS['warning']} 用户中断执行，停止当前任务[/]")
+                break
+
+            # 检查本轮是否有工具执行失败（从 report 结构化数据判断，不解析文本）
             is_error_round = False
-            is_interrupted = False
             current_error_sig = ""
 
-            if last_msg["role"] == "user" and "<tool_results>" in last_msg["content"]:
-                # 检查是否有用户中断
-                if 'status="interrupted"' in last_msg["content"] or "user_interrupt" in last_msg["content"]:
-                    is_interrupted = True
-                    console.print(f"\n[{COLORS['warning']}]{ICONS['warning']} 用户中断执行，停止当前任务[/]")
-                    break  # 直接退出循环，不再让模型重试
-
-                # 简单解析：如果反馈中包含多个 error 且没有 success，视为失败轮次
-                if '<status="error">' in last_msg["content"] and '<status="success">' not in last_msg["content"]:
+            if report:
+                # 本轮有失败且无成功，视为失败轮次
+                if report.failed_count > 0 and report.success_count == 0:
                     is_error_round = True
-                    # 提取第一个错误工具名作为签名
-                    import re
-                    match = re.search(r'tool="(.*?)"', last_msg["content"])
-                    if match:
-                        current_error_sig = match.group(1)
+                    # 取第一个失败的工具名作为签名
+                    for r in report.results:
+                        if not r.success and not r.skipped and not r.interrupted:
+                            current_error_sig = r.tool_call.name
+                            break
 
             if is_error_round:
                 if current_error_sig == last_error_signature:
@@ -280,7 +279,7 @@ class Application:
             messages: 消息列表
 
         Returns:
-            (响应文本, 是否有工具调用)
+            (响应文本, 是否有工具调用, ExecutionReport 或 None)
         """
         model_name = self.current_model.name if self.current_model else "AI"
 
@@ -294,7 +293,7 @@ class Application:
             )
 
             if not full_response.strip() and not native_tool_calls:
-                return "", False
+                return "", False, None
 
             # 处理响应（解析工具、渲染、保存）
             tool_calls = self._process_response(
@@ -308,24 +307,24 @@ class Application:
 
                 # 如果所有工具都被跳过（用户取消），停止循环
                 if report.skipped_count == report.total:
-                    return full_response, False
+                    return full_response, False, report
 
                 # 构建反馈消息
                 feedback = self._build_tool_feedback(report)
                 if feedback:
                     self.conversation.add_user_message(feedback)
 
-                return full_response, True
+                return full_response, True, report
 
-            return full_response, False
+            return full_response, False, None
 
         except Exception as e:
             # 区分用户中断和真正的错误
             if self._is_interrupted():
                 # 用户主动中断，不是错误
-                return "", False
+                return "", False, None
             console.error(f"生成失败: {e}")
-            return "", False
+            return "", False, None
 
     def _collect_streaming_response(
         self,
