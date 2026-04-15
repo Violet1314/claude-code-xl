@@ -9,9 +9,8 @@ import atexit
 import threading
 from typing import Optional, List
 from datetime import datetime
-from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn
+from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.text import Text
-from rich.table import Column
 
 
 class SafeTextColumn(TextColumn):
@@ -167,16 +166,20 @@ class Application:
         self.client.close()
 
     def _signal_handler(self, sig, frame) -> None:
-        """信号处理：单击中断当前操作，双击退出程序"""
+        """信号处理：单击中断当前操作，双击退出程序
+
+        注意：信号处理器中不直接调用 console.print()，
+        避免 reentrant call inside stdout 错误。
+        """
         now = time.time()
         if now - self._last_sigint < self._sigint_double_threshold:
-            # 双击：退出程序
+            # 双击：退出程序（直接用 sys.stdout.write，不用 Rich）
             self._on_exit()
-            console.print(f"\n[{COLORS['primary']}]{ICONS['claude']} 再见！[/]\n")
+            sys.stdout.write(f"\n再见！\n")
+            sys.stdout.flush()
             sys.exit(0)
-        # 单击：标记中断，不退出
+        # 单击：只设置标志，不打印（让主循环处理显示）
         self._last_sigint = now
-        console.print(f"\n[{COLORS['warning']}]{ICONS['warning']} 中断中...，再按一次退出[/]")
 
     def _is_interrupted(self) -> bool:
         """检查是否有待处理的中断信号"""
@@ -317,6 +320,10 @@ class Application:
             return full_response, False
 
         except Exception as e:
+            # 区分用户中断和真正的错误
+            if self._is_interrupted():
+                # 用户主动中断，不是错误
+                return "", False
             console.error(f"生成失败: {e}")
             return "", False
 
@@ -338,39 +345,43 @@ class Application:
             (响应文本, 原生工具调用列表, 真实 token 使用量, 耗时)
         """
         import threading
-        
+
         start_time = time.time()
         full_response = ""
         native_tool_calls = []
         real_usage = {"input": 0, "output": 0}
-        
+        streaming_tokens = 0  # 流式输出token计数
+
         # 【新增】用于控制后台线程停止的标志
         stop_timer_event = threading.Event()
 
-        # 思考状态：显示进度条
+        # 进度条前空行，与输入分隔
+        console.print()
+
+        # 思考状态：显示 Spinner（无进度条）
         with Progress(
             SpinnerColumn(spinner_name="dots", style=COLORS['primary']),
             SafeTextColumn(),  # 使用安全的 TextColumn，避免花括号格式化错误
-            BarColumn(bar_width=20, pulse_style=COLORS['primary']),
             console=console.get_console(),
             transient=True,
         ) as progress:
-            
+
             # 初始描述
             initial_desc = f"[bold {COLORS['primary']}]{model_name}[/] [dim]正在思考...[/]"
-            task = progress.add_task(initial_desc, total=None, completed=0)
+            task = progress.add_task(initial_desc, total=None)
 
             # 【新增】后台定时刷新线程：确保时间实时跳动，不依赖 API Chunk
             def _refresh_timer():
                 while not stop_timer_event.is_set():
                     elapsed = time.time() - start_time
-                    # 排版：将时间紧贴在“正在思考...”后面，无括号
-                    new_desc = f"[bold {COLORS['primary']}]{model_name}[/] [dim]正在思考... {elapsed:.1f}s[/]"
+                    # 排版：时间 + 实时输出token数
+                    tok_display = f"{streaming_tokens} tok" if streaming_tokens > 0 else ""
+                    new_desc = f"[bold {COLORS['primary']}]{model_name}[/] [dim]正在思考... {elapsed:.1f}s[/] [cyan]{tok_display}[/]"
                     try:
                         progress.update(task, description=new_desc)
                     except Exception:
-                        pass # 忽略进度条已结束时的异常
-                    stop_timer_event.wait(0.1) # 每 0.1s 刷新一次
+                        pass  # 忽略进度条已结束时的异常
+                    stop_timer_event.wait(0.1)  # 每 0.1s 刷新一次
 
             timer_thread = threading.Thread(target=_refresh_timer, daemon=True)
             timer_thread.start()
@@ -384,15 +395,17 @@ class Application:
                 ):
                     # 检查是否被中断（CTRL+C）
                     if self._is_interrupted():
-                        console.print(f"[{COLORS['warning']}]{ICONS['warning']} 已中断请求[/]")
                         break
+
+                    # None 是心跳，跳过处理
+                    if chunk is None:
+                        continue
 
                     # 提取文本内容
                     content = self.client.extract_content(chunk)
                     if content:
                         full_response += content
-                        # 更新 Token/字符计数
-                        progress.update(task, completed=len(full_response))
+                        streaming_tokens += 1  # 每收到内容就累加（简化计数）
 
                     # 提取原生工具调用（流式）
                     self._accumulate_native_tool_calls(chunk, native_tool_calls)
@@ -402,21 +415,27 @@ class Application:
                     if usage:
                         real_usage = usage
             finally:
-                # 【新增】确保退出循环时停止后台线程
+                # 确保退出循环时停止后台线程
                 stop_timer_event.set()
                 timer_thread.join(timeout=1.0)
+
+        # 在 Progress 上下文外安全显示中断消息
+        if self._is_interrupted():
+            console.print(f"[{COLORS['warning']}]{ICONS['warning']} 已中断请求[/]")
 
         duration = time.time() - start_time
         return full_response, native_tool_calls, real_usage, duration
 
-    def _accumulate_native_tool_calls(self, chunk: dict, native_tool_calls: list) -> None:
+    def _accumulate_native_tool_calls(self, chunk: Optional[dict], native_tool_calls: list) -> None:
         """
         累积原生工具调用（流式）
 
         Args:
-            chunk: API 响应块
+            chunk: API 响应块（None 时跳过）
             native_tool_calls: 工具调用累积列表（会被修改）
         """
+        if chunk is None:
+            return
         tool_chunks = self.client.extract_tool_calls(chunk)
         for tc in tool_chunks:
             idx = tc.get("index", 0)
@@ -464,9 +483,11 @@ class Application:
 
         # 保存 AI 响应：优先使用真实 token，否则回退到估算
         if real_usage["input"] > 0:
-            self.stats.set_real_usage(real_usage["input"], real_usage["output"])
-            # 计算并累加费用
-            cost = self._calculate_cost(real_usage["input"], real_usage["output"])
+            # 使用增量计算费用
+            input_diff, output_tokens = self.stats.set_real_usage(
+                real_usage["input"], real_usage["output"]
+            )
+            cost = self._calculate_cost(input_diff, output_tokens)
             self.stats.add_cost(cost)
         else:
             self.stats.update_output(full_response)

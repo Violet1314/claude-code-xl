@@ -129,6 +129,7 @@ def show_status_bar(
     # 输出为一行
     status_line = " │ ".join(status_parts)
     con.print(status_line)
+    con.print()  # 状态栏后空行，与输入分隔
 
 def _format_token_count(count: int) -> str:
     """格式化 token 数量显示"""

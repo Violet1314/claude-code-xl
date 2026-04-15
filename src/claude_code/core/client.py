@@ -2,7 +2,9 @@
 import json
 import random
 import time
-from typing import Generator, Optional, Dict, List, Any
+import queue
+import threading
+from typing import Generator, Optional, Dict, List, Any, Callable
 
 import httpx
 
@@ -83,8 +85,7 @@ class APIClient:
             self._client = None
 
     def _reset_client(self) -> None:
-        """重置客户端连接"""
-        console.warning("触发客户端重置，正在重建连接...")
+        """重置客户端连接（静默重置，避免与信号处理冲突）"""
         self._init_client()
 
     def send_message(
@@ -189,44 +190,100 @@ class APIClient:
         self,
         headers: Dict[str, str],
         payload: Dict[str, Any],
-    ) -> Generator[Dict[str, Any], None, None]:
-        """执行实际请求"""
+    ) -> Generator[Optional[Dict[str, Any]], None, None]:
+        """执行实际请求（支持中断的流式读取）
+
+        Yield None 作为心跳，让调用方有机会检查中断。
+        """
         # 编码时使用 replace 处理非法字符
         body = json.dumps(payload, ensure_ascii=False).encode('utf-8', errors='replace')
 
-        with self._client.stream("POST", self.endpoint, headers=headers, content=body) as resp:
-            if resp.status_code != 200:
-                err_msg = resp.read().decode('utf-8', errors='replace')
-                raise httpx.HTTPStatusError(
-                    err_msg,
-                    request=resp.request,
-                    response=resp,
-                )
+        # 使用线程 + 队列模式，实现可中断的流式读取
+        line_queue: queue.Queue = queue.Queue()
+        stop_event = threading.Event()
+        request_error: Optional[Exception] = None
 
-            for line in resp.iter_lines():
-                if not line or not line.startswith("data: "):
-                    continue
+        def _read_lines(resp):
+            """后台线程：读取响应行"""
+            try:
+                for line in resp.iter_lines():
+                    if stop_event.is_set():
+                        break
+                    line_queue.put(line)
+            except Exception as e:
+                line_queue.put(e)  # 把异常也放入队列
+            finally:
+                line_queue.put(None)  # 结束标记
 
-                raw = line[6:].strip()
-                if raw == "[DONE]":
-                    return
+        try:
+            with self._client.stream("POST", self.endpoint, headers=headers, content=body) as resp:
+                if resp.status_code != 200:
+                    err_msg = resp.read().decode('utf-8', errors='replace')
+                    raise httpx.HTTPStatusError(
+                        err_msg,
+                        request=resp.request,
+                        response=resp,
+                    )
 
-                try:
-                    yield json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
+                # 启动后台读取线程
+                read_thread = threading.Thread(target=_read_lines, args=(resp,), daemon=True)
+                read_thread.start()
+
+                # 从队列取出数据，定期 yield None 作为心跳
+                while True:
+                    try:
+                        # 使用 timeout 让检查中断的机会
+                        item = line_queue.get(timeout=0.1)
+                    except queue.Empty:
+                        # 队列空时 yield None（心跳），让调用方检查中断
+                        yield None
+                        continue
+
+                    # 结束标记
+                    if item is None:
+                        break
+
+                    # 异常传递
+                    if isinstance(item, Exception):
+                        request_error = item
+                        break
+
+                    line = item
+                    if not line or not line.startswith("data: "):
+                        continue
+
+                    raw = line[6:].strip()
+                    if raw == "[DONE]":
+                        break
+
+                    try:
+                        yield json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue
+
+        finally:
+            # 确保停止后台线程
+            stop_event.set()
+            read_thread.join(timeout=0.5)
+
+        # 如果有错误，在最后抛出
+        if request_error:
+            raise request_error
 
     @staticmethod
-    def extract_content(chunk: Dict[str, Any]) -> str:
+    def extract_content(chunk: Optional[Dict[str, Any]]) -> str:
         """
         从响应块中提取内容
 
         Args:
-            chunk: 响应数据块
+            chunk: 响应数据块（None 时返回空字符串）
 
         Returns:
             提取的文本内容
         """
+        if chunk is None:
+            return ""
+
         choices = chunk.get("choices", [])
         if not choices:
             return ""
@@ -235,16 +292,19 @@ class APIClient:
         return delta.get("content") or delta.get("text") or ""
 
     @staticmethod
-    def extract_tool_calls(chunk: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def extract_tool_calls(chunk: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         从响应块中提取工具调用（原生格式）
 
         Args:
-            chunk: 响应数据块
+            chunk: 响应数据块（None 时返回空列表）
 
         Returns:
             工具调用列表
         """
+        if chunk is None:
+            return []
+
         choices = chunk.get("choices", [])
         if not choices:
             return []
@@ -255,16 +315,19 @@ class APIClient:
         return tool_calls
 
     @staticmethod
-    def extract_usage(chunk: Dict[str, Any]) -> Optional[Dict[str, int]]:
+    def extract_usage(chunk: Optional[Dict[str, Any]]) -> Optional[Dict[str, int]]:
         """
         从响应块中提取 token 使用量
 
         Args:
-            chunk: 响应数据块
+            chunk: 响应数据块（None 时返回 None）
 
         Returns:
             使用量字典或 None
         """
+        if chunk is None:
+            return None
+
         usage = chunk.get("usage")
         if not usage:
             return None

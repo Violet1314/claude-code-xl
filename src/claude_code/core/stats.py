@@ -12,9 +12,9 @@ from claude_code.utils.tokens import estimate_tokens, estimate_messages_tokens
 @dataclass
 class SessionStats:
     """会话统计"""
-    input_tokens: int = 0
-    output_tokens: int = 0
-    cost: float = 0.0  # 累计费用（美元）
+    input_tokens: int = 0      # 最新一次 prompt_tokens（显示用，不累加）
+    output_tokens: int = 0     # 最新一次 completion_tokens（显示用，不累加）
+    cost: float = 0.0          # 累计费用（美元）
 
     @property
     def total_tokens(self) -> int:
@@ -30,20 +30,20 @@ class SessionStats:
 
 class StatsManager:
     """统计管理器"""
-    
+
     def __init__(self, stats_dir: str = "data/stats"):
         """
         初始化统计管理器
-        
+
         Args:
             stats_dir: 统计数据存储目录
         """
         self.stats_dir = stats_dir
         self.stats_file = os.path.join(stats_dir, "total_stats.json")
-        
+
         # 确保目录存在
         os.makedirs(stats_dir, exist_ok=True)
-        
+
         # 当前会话统计
         self._session = SessionStats()
         self._last_saved = SessionStats()
@@ -71,18 +71,28 @@ class StatsManager:
         """
         self._session.output_tokens += estimate_tokens(text)
 
-    def set_real_usage(self, input_tokens: int, output_tokens: int) -> None:
+    def set_real_usage(self, input_tokens: int, output_tokens: int) -> tuple:
         """
-        累加 API 返回的真实 token 使用量
+        更新 token 使用量，返回本次消耗用于费用计算
+
+        Token 显示：最新一次的真实消耗（不累加）
+        费用显示：累计总费用（每次费用累加）
 
         Args:
-            input_tokens: 本次请求输入 token 数
-            output_tokens: 本次请求输出 token 数
+            input_tokens: 本次请求的 prompt_tokens
+            output_tokens: 本次请求的 completion_tokens
+
+        Returns:
+            (input_tokens, output_tokens) 用于计算本次费用
         """
+        # Token 只记录最新一次（显示用）
         if input_tokens > 0:
-            self._session.input_tokens += input_tokens
+            self._session.input_tokens = input_tokens
         if output_tokens > 0:
-            self._session.output_tokens += output_tokens
+            self._session.output_tokens = output_tokens
+
+        # 返回本次消耗用于费用计算
+        return input_tokens, output_tokens
 
     def add_cost(self, cost: float) -> None:
         """

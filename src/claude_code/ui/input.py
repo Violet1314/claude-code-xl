@@ -110,16 +110,23 @@ class InputHandler:
 
     def _get_prompt(self):
         """获取主提示符"""
-        # 使用简单的文本和样式类
-        # 注意：这里不使用 Rich Markup，而是 Prompt Toolkit 的样式类
+        # 统一格式：固定3位宽度右对齐，无前缀
         return [
-            ('class:input-lead', f'{ICONS["user"]} '),
+            ('class:input-lead', '  1> '),
         ]
 
     def _get_continuation(self, width, line_number, is_soft_wrap):
-        """获取续行提示符 - 显示行号"""
-        # 显示续行标记和行号，更清晰的多行输入体验
-        return [('class:input-lead', f'… {line_number + 1}> ')]
+        """获取续行提示符 - 显示行号（固定3位宽度右对齐）"""
+        # line_number 从 1 开始，+1 得到实际行号
+        line_num = line_number + 1
+        # 固定宽度：1-9 加两空格，10-99 加一空格，100+ 不加
+        if line_num < 10:
+            display = f'  {line_num}> '
+        elif line_num < 100:
+            display = f' {line_num}> '
+        else:
+            display = f'{line_num}> '
+        return [('class:input-lead', display)]
 
     def update_state(self, model_name: str = None, file_count: int = None) -> None:
         if model_name is not None:
