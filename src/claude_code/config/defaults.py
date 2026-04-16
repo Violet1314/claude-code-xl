@@ -32,15 +32,30 @@ class UIDefaults:
     MIN_WIDTH: int = 40                       # 最小终端宽度
     MAX_WIDTH: int = 120                      # 最大终端宽度
 
+@dataclass(frozen=True)
+class ToolDefaults:
+    """工具执行相关配置"""
+    MAX_TOOL_ROUNDS: int = 80         # 最大循环轮次
+    MAX_TOOLS_PER_ROUND: int = 20     # 每轮最大工具数
+
+@dataclass(frozen=True)
+class PlanDefaults:
+    """计划模式相关配置"""
+    MAX_ITEMS: int = 20                       # 单个计划最大任务数
+    MIN_ITEMS: int = 1                        # 最小任务数
+    MAX_CONTENT_LEN: int = 200                # 任务描述最大长度
+
 # 全局单例
 FILE = FileDefaults()
 API = APIDefaults()
 CONVERSATION = ConversationDefaults()
 UI = UIDefaults()
+TOOL = ToolDefaults()
+PLAN = PlanDefaults()
 
 # Workplace 隔离目录
 WORKPLACE_DIR = "workplace"
 
 # 版本信息
-VERSION = "2.8.16 | Author: XieLong"
+VERSION = "2.8.17 | Author: XieLong"
 APP_NAME = "Claude Code Terminal"

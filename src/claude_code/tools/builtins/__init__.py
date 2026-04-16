@@ -6,6 +6,7 @@ from .write import WriteTool
 from .edit import EditTool
 from .bash import BashTool
 from .ask_user import AskUserQuestionTool
+from .todo import TodoCreateTool, TodoUpdateTool, TodoListTool
 
 # 导出所有工具类
 __all__ = [
@@ -16,6 +17,9 @@ __all__ = [
     "EditTool",
     "BashTool",
     "AskUserQuestionTool",
+    "TodoCreateTool",
+    "TodoUpdateTool",
+    "TodoListTool",
 ]
 
 def register_all_tools(registry):
@@ -27,3 +31,6 @@ def register_all_tools(registry):
     registry.register(EditTool())
     registry.register(BashTool())
     registry.register(AskUserQuestionTool())
+    registry.register(TodoCreateTool())
+    registry.register(TodoUpdateTool())
+    registry.register(TodoListTool())

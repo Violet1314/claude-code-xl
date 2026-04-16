@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple, Callable
 from ..base import Tool, ToolResult
 from ..file_cache import file_cache
 from ..syntax_checker import check_syntax
-from claude_code.utils.paths import resolve_workplace_path
+from claude_code.core.path_manager import get_path_manager
 from claude_code.ui.theme import COLORS, ICONS
 from rich.markup import escape
 
@@ -33,7 +33,8 @@ class EditTool(Tool):
         "2. 如果 old_string 在文件中出现多次，必须添加更多上下文使其唯一\n"
         "3. 操作前应先用 Read 工具查看文件内容，复制精确的原文\n"
         "\n"
-        "重要：建议使用绝对路径，如 file_path=\"E:\\项目目录\\src\\file.py\"\n"
+        "重要：必须使用绝对路径，如 file_path=\"E:\\项目目录\\src\\file.py\"\n"
+        "相对路径会自动基于操作根目录解析为绝对路径\n"
         "不要猜测或简化 old_string，必须从 Read 结果中精确复制。"
     )
 
@@ -44,7 +45,7 @@ class EditTool(Tool):
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "文件路径（建议使用绝对路径）"
+                    "description": "文件路径（必须使用绝对路径，相对路径基于操作根目录解析）"
                 },
                 "old_string": {
                     "type": "string",
@@ -73,7 +74,14 @@ class EditTool(Tool):
         old_string = parameters.get("old_string", "")
         new_string = parameters.get("new_string", "")
 
-        file_path = resolve_workplace_path(file_path)
+        # 使用 PathManager 统一路径解析（含安全边界校验）
+        pm = get_path_manager()
+        file_path, boundary_ok = pm.resolve_safe(file_path)
+        if not boundary_ok:
+            return ToolResult(
+                success=False, output="",
+                error=f"路径越界: {file_path} 不在操作根目录 {pm.active_path} 下，禁止访问"
+            )
 
         try:
             path = Path(file_path)
@@ -217,6 +225,7 @@ class EditTool(Tool):
             "   - 包含前后各 2-3 行上下文（确保唯一性）",
             "",
             "3. 使用复制的内容作为 old_string 参数",
+            "4. 可以尝试分段处理",
             "",
             "⚠️ 不要猜测或简化代码，必须精确复制原文！",
         ])

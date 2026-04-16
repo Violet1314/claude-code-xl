@@ -4,7 +4,7 @@ from typing import Any, Dict, Optional, Callable, Tuple
 
 from ..base import Tool, ToolResult
 from ..file_cache import file_cache
-from claude_code.utils.paths import resolve_path
+from claude_code.core.path_manager import get_path_manager
 from claude_code.ui import console
 from claude_code.ui.theme import COLORS, ICONS
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
@@ -18,7 +18,8 @@ class ReadTool(Tool):
         "读取用户本机文件内容。你可以直接访问用户提供的任何本地路径，无需用户手动粘贴内容。"
         "文件会被完整缓存，后续操作使用缓存引用节省 Token。"
         "读取后请直接执行任务，不要再次调用 Read。如需编辑，直接使用 Edit 工具。"
-        "\n重要：建议使用绝对路径，如 file_path=\"E:\\项目目录\\src\\file.py\""
+        "\n重要：必须使用绝对路径，如 file_path=\"E:\\项目目录\\src\\file.py\""
+        "\n相对路径会自动基于操作根目录解析为绝对路径"
     )
 
     # 文件大小限制 (1MB)
@@ -37,7 +38,7 @@ class ReadTool(Tool):
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "文件路径（建议使用绝对路径）"
+                    "description": "文件路径（必须使用绝对路径，相对路径基于操作根目录解析）"
                 },
                 "offset": {
                     "type": "integer",
@@ -68,7 +69,14 @@ class ReadTool(Tool):
         offset = int(parameters.get("offset", 1))
         limit = int(parameters.get("limit", self.DEFAULT_LIMIT))
 
-        file_path = resolve_path(file_path)
+        # 使用 PathManager 统一路径解析
+        pm = get_path_manager()
+        file_path, boundary_ok = pm.resolve_safe(file_path)
+        if not boundary_ok:
+            return ToolResult(
+                success=False, output="",
+                error=f"路径越界: {file_path} 不在操作根目录 {pm.active_path} 下，禁止访问"
+            )
 
         try:
             path = Path(file_path)

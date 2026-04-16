@@ -335,3 +335,75 @@ def show_tool_result_box(
         padding=(1, 2),
     )
     con.print(panel)
+
+
+# ============================================================
+# Todo 计划面板
+# ============================================================
+
+def show_todo_panel(todo_list) -> None:
+    """显示 TodoList 进度面板
+
+    Args:
+        todo_list: TodoList 实例
+    """
+    if not todo_list.items:
+        return
+
+    con = console.get_console()
+
+    # 构建面板内容
+    content_lines = []
+    for item in todo_list.items:
+        # 状态标记
+        if item.status == "completed":
+            status_icon = "✅"
+            style = "[dim]"
+            end_style = "[/]"
+        elif item.status == "in_progress":
+            status_icon = "🔄"
+            style = f"[bold {COLORS['primary']}]"
+            end_style = "[/]"
+        elif item.status == "failed":
+            status_icon = "❌"
+            style = f"[{COLORS['error']}]"
+            end_style = "[/]"
+        else:  # pending
+            status_icon = "⏳"
+            style = ""
+            end_style = ""
+
+        # 进行中标记
+        current_mark = " ← 进行中" if item.status == "in_progress" else ""
+
+        content_lines.append(
+            f"  {status_icon} {item.id}  {style}{item.content}{end_style}{current_mark}"
+        )
+
+    content = "\n".join(content_lines)
+
+    # 底部统计
+    stats_line = (
+        f"[dim]完成: {todo_list.completed_count} | "
+        f"失败: {todo_list.failed_count} | "
+        f"待处理: {todo_list.pending_count}[/]"
+    )
+
+    # 标题
+    title = f"📋 执行计划 [{todo_list.progress_text}]"
+
+    # 全部完成时边框变绿
+    if todo_list.is_all_done:
+        border_color = COLORS['success']
+    else:
+        border_color = COLORS['primary']
+
+    panel = Panel(
+        f"{content}\n\n{stats_line}",
+        title=title,
+        title_align="left",
+        border_style=border_color,
+        box=ROUNDED,
+        padding=(0, 2),
+    )
+    con.print(panel)

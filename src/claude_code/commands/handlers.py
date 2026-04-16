@@ -1,4 +1,5 @@
 """内置命令实现"""
+import os
 from typing import List, Optional
 
 from claude_code.commands.base import Command
@@ -139,6 +140,102 @@ class ToolsCommand(Command):
         if self.app:
             self.app.show_tools_history()
 
+class PlanCommand(Command):
+    """计划模式命令"""
+
+    name = "plan"
+    description = "进入计划模式，让模型自主规划并执行任务"
+    aliases = ["p"]
+
+    def execute(self, args: List[str]) -> None:
+        if not self.app:
+            return
+
+        from claude_code.ui.theme import COLORS, ICONS
+        from claude_code.tools.builtins.todo import get_todo_list, reset_todo_list
+
+        # /plan 无参数：显示当前计划
+        if not args:
+            todo = get_todo_list()
+            if not todo.items:
+                console.info("当前没有执行计划。用法: /plan <任务描述>")
+            else:
+                from claude_code.ui.components import show_todo_panel
+                show_todo_panel(todo)
+            return
+
+        # /plan <任务描述>：进入计划模式
+        task_description = " ".join(args)
+
+        # 重置旧计划
+        reset_todo_list()
+
+        console.print(f"\n[bold {COLORS['primary']}]📋 计划模式[/]")
+        console.print(f"[dim]任务目标: [/][bold]{task_description}[/]")
+        console.print(f"[dim]模型将自动规划步骤并逐步执行...[/]\n")
+
+        # 设置计划模式标志，让 chat() 知道这是计划模式
+        self.app._plan_mode = True
+        self.app._plan_task = task_description
+
+        # 直接调用 chat()，模型会通过 TodoCreate 工具创建计划
+        self.app.chat(task_description)
+
+class CdCommand(Command):
+    """切换工作目录命令"""
+
+    name = "cd"
+    description = "切换操作根目录（必须使用绝对路径）"
+    aliases = ["chdir"]
+
+    def execute(self, args: List[str]) -> None:
+        if not self.app:
+            return
+
+        from claude_code.ui.theme import COLORS, ICONS
+
+        # /cd 无参数：显示当前路径
+        if not args:
+            pm = self.app.path_manager
+            console.print(f"\n[bold {COLORS['info']}]📂 当前操作根目录[/]: {pm.active_path}")
+            if pm.is_workplace_mode:
+                console.print(f"[dim]（workplace 安全隔离模式，使用 /cd <绝对路径> 切换到项目目录）[/]")
+            return
+
+        # /cd <绝对路径>：切换目录
+        target_path = " ".join(args).strip().strip('"').strip("'")
+
+        if not os.path.isabs(target_path):
+            console.error(f"必须使用绝对路径，如: /cd E:\\你的项目目录")
+            return
+
+        pm = self.app.path_manager
+        if pm.set_active_path(target_path):
+            # 同步更新系统提示词（含新路径环境）
+            self.app._setup_system_prompt()
+            console.print(f"\n[bold {COLORS['success']}]{ICONS['success']} 操作根目录已切换[/]: {pm.active_path}")
+            console.print(f"[dim]后续所有文件操作将基于此目录进行[/]")
+        else:
+            console.error(f"路径无效: {target_path}")
+
+class PwdCommand(Command):
+    """显示当前路径命令"""
+
+    name = "pwd"
+    description = "显示当前操作根目录"
+    aliases = []
+
+    def execute(self, args: List[str]) -> None:
+        if not self.app:
+            return
+        pm = self.app.path_manager
+        from claude_code.ui.theme import COLORS
+        console.print(f"\n[bold {COLORS['info']}]📂 操作根目录[/]: {pm.active_path}")
+        console.print(f"[dim]Workplace 目录[/]: {pm.workplace}")
+        mode = "workplace 安全隔离" if pm.is_workplace_mode else "用户指定目录"
+        console.print(f"[dim]当前模式[/]: {mode}")
+
+
 # 所有内置命令
 BUILTIN_COMMANDS = [
     HelpCommand,
@@ -148,5 +245,8 @@ BUILTIN_COMMANDS = [
     SaveCommand,
     HistoryCommand,
     ToolsCommand,
+    PlanCommand,
+    CdCommand,
+    PwdCommand,
     QuitCommand,
 ]

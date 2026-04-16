@@ -3,7 +3,8 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Callable
 from ..base import Tool, ToolResult
-from claude_code.utils.paths import resolve_path, get_file_icon, EXCLUDED_DIRS
+from claude_code.core.path_manager import get_path_manager
+from claude_code.utils.paths import get_file_icon, EXCLUDED_DIRS
 from claude_code.ui.theme import COLORS, ICONS
 from rich.markup import escape
 
@@ -14,8 +15,8 @@ class GrepTool(Tool):
     description = (
         "在文件中搜索匹配正则表达式的内容。返回匹配的行及其上下文。\n"
         "重要：\n"
-        "- path 建议使用绝对路径，如 path=\"E:\\项目目录\\src\"\n"
-        "- 默认 path='.' 会搜索 workplace 目录（可能不是你想要的）\n"
+        "- path 必须使用绝对路径，如 path=\"E:\\项目目录\\src\"\n"
+        "- 默认使用操作根目录\n"
         "- 建议使用精确模式减少匹配数量"
     )
 
@@ -34,7 +35,7 @@ class GrepTool(Tool):
                 },
                 "path": {
                     "type": "string",
-                    "description": "搜索的文件或目录路径（建议使用绝对路径）",
+                    "description": "搜索的文件或目录路径（必须使用绝对路径，默认使用操作根目录）",
                     "default": "."
                 },
                 "type": {
@@ -72,7 +73,9 @@ class GrepTool(Tool):
         ignore_case = parameters.get("-i", False)
         output_mode = parameters.get("output_mode", "content")
 
-        search_path = resolve_path(search_path)
+        # 使用 PathManager 统一路径解析
+        pm = get_path_manager()
+        search_path, _ = pm.resolve_safe(search_path)
 
         try:
             flags = re.DOTALL

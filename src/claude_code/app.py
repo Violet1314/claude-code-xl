@@ -26,10 +26,11 @@ class SafeTextColumn(TextColumn):
             return Text.from_markup(task.description)
         return Text("")
 from claude_code.config.settings import Settings, load_settings
-from claude_code.config.defaults import VERSION, APP_NAME, WORKPLACE_DIR
+from claude_code.config.defaults import VERSION, APP_NAME, WORKPLACE_DIR, TOOL
 from claude_code.core.client import APIClient
 from claude_code.core.conversation import Conversation
 from claude_code.core.files import FileManager
+from claude_code.core.path_manager import PathManager, get_path_manager, init_path_manager
 from claude_code.core.stats import StatsManager
 from claude_code.commands import CommandRegistry, BUILTIN_COMMANDS
 from claude_code.ui import console
@@ -57,9 +58,9 @@ from claude_code.tools import (
 
 class Application:
     """Claude Code Terminal 主应用"""
-    # 工具执行限制
-    MAX_TOOL_ROUNDS = 15        # 最大循环轮次
-    MAX_TOOLS_PER_ROUND = 40   # 每轮最大工具数
+    # 工具执行限制（从 defaults 统一配置）
+    MAX_TOOL_ROUNDS = TOOL.MAX_TOOL_ROUNDS
+    MAX_TOOLS_PER_ROUND = TOOL.MAX_TOOLS_PER_ROUND
 
     def __init__(self, config_dir: str = "data/config"):
         """
@@ -82,6 +83,8 @@ class Application:
         register_builtin_tools()
         self.permission_manager = PermissionManager(project_dir=os.getcwd())
         self.tool_executor = ToolExecutor(registry, self.permission_manager)
+        # 路径管理器（统一所有工具的路径解析）
+        self.path_manager: PathManager = init_path_manager()
         self._setup_system_prompt()
         self.commands = CommandRegistry()
         for cmd_class in BUILTIN_COMMANDS:
@@ -92,11 +95,17 @@ class Application:
         os.makedirs(self.history_dir, exist_ok=True)
         os.makedirs(WORKPLACE_DIR, exist_ok=True)
         atexit.register(self._on_exit)
-        # CTRL+C 中断管理：布尔标志 + 时间戳，实现单击中断、双击退出
-        self._interrupted: bool = False          # 是否有待处理的中断信号
+        # CTRL+C 中断管理：统一标志 + 时间戳，实现单击中断、双击退出
+        # 核心原则：_interrupted 只设不清，直到用户下一轮输入时才重置
+        # 这样所有循环入口只需检查 self._interrupted，不会因某处消费而漏检
+        self._interrupted: bool = False          # 是否有待处理的中断信号（只读检查，不消费）
         self._last_sigint: float = 0.0          # 上次 SIGINT 时间戳（仅用于双击退出判定）
         self._sigint_double_threshold: float = 1.0  # 双击判定窗口（秒）
         signal.signal(signal.SIGINT, self._signal_handler)
+
+        # 计划模式状态
+        self._plan_mode: bool = False            # 是否处于计划模式
+        self._plan_task: str = ""                # 计划模式任务描述
 
 
     def _setup_system_prompt(self) -> None:
@@ -147,7 +156,10 @@ class Application:
             "不要中途放弃或等待用户干预，除非遇到无法解决的问题（如权限不足、路径不存在等）。"
         )
 
-        return f"## 环境信息\n{shell_info}\n\n{autonomy_info}"
+        # 路径环境（由 PathManager 动态生成，每轮对话均有效）
+        path_info = self.path_manager.get_environment_text()
+
+        return f"## 环境信息\n{shell_info}\n\n{autonomy_info}\n\n{path_info}"
 
     def _update_input_state(self) -> None:
         """更新输入处理器状态"""
@@ -184,22 +196,45 @@ class Application:
         self._last_sigint = now
 
     def _is_interrupted(self) -> bool:
-        """检查是否有待处理的中断信号，消费后重置"""
-        if self._interrupted:
-            # 消费中断信号，立即重置标志，避免后续误判
-            self._interrupted = False
-            return True
-        return False
+        """检查是否有待处理的中断信号（只读，不消费）"""
+        return self._interrupted
+
+    def _clear_interrupt(self) -> None:
+        """清除中断标志并重建客户端连接（仅在用户下一轮输入时调用）"""
+        self._interrupted = False
+        # 中断时 _close_client() 会将 _client 置为 None，这里需要重建
+        if self.client._client is None:
+            self.client._reset_client()
 
     # ============================================================
     # 对话功能
     # ============================================================
     def chat(self, user_input: str) -> None:
         """
-        处理用户对话 (新增连续错误熔断逻辑)
+        处理用户对话 (新增连续错误熔断逻辑 + 计划模式支持)
         """
         self.conversation.add_user_message(user_input)
         round_count = 0
+        
+        # 计划模式：注入任务规划提示
+        if self._plan_mode:
+            from claude_code.tools.builtins.todo import get_todo_list
+            todo = get_todo_list()
+            plan_prompt = (
+                "## 计划模式\n"
+                f"你正在计划模式下工作。当前任务清单：\n\n"
+                f"{todo.to_prompt_text()}\n\n"
+                "执行规则：\n"
+                "1. 如果还没有任务清单，先用 TodoCreate 创建完整的执行计划\n"
+                "2. 每开始一个任务，先调 TodoUpdate(id, \"in_progress\")\n"
+                "3. 完成后调 TodoUpdate(id, \"completed\")\n"
+                "4. 失败且无法恢复调 TodoUpdate(id, \"failed\")，继续下一个\n"
+                "5. 不要跳过任务，除非有明确依赖关系\n"
+                "6. 全部完成后，给出最终总结\n"
+                "7. **禁止提前停止**：只要还有未完成的任务，就必须继续调用工具执行，不允许只输出文字就停下\n\n"
+                f"进度：{todo.progress_text}"
+            )
+            self.conversation.add_user_message(plan_prompt)
         
         # 【修改点 2】：连续错误追踪状态
         consecutive_failures = 0
@@ -207,6 +242,12 @@ class Application:
 
         while round_count < self.MAX_TOOL_ROUNDS:
             round_count += 1
+
+            # 每轮注入路径环境提醒（确保长对话不遗忘路径）
+            path_reminder = (
+                f"[系统提醒] 当前操作根目录: {self.path_manager.active_path}，"
+                f"所有文件操作必须基于此路径。"
+            )
 
             context_limit = self.current_model.context_limit if self.current_model else 100000
             messages = self.conversation.get_optimized_messages(max_tokens=context_limit)
@@ -219,7 +260,43 @@ class Application:
             # 不再估算输入 token，完全依赖 API 返回的真实 usage 累加
             response, has_tools, report = self._handle_response(messages)
 
+            # 计划模式：工具执行后刷新 Todo 面板
+            if self._plan_mode and has_tools and report:
+                from claude_code.tools.builtins.todo import get_todo_list
+                from claude_code.ui.components import show_todo_panel
+                todo = get_todo_list()
+                if todo.items:
+                    console.print()
+                    show_todo_panel(todo)
+                    # 全部完成时退出计划模式
+                    if todo.is_all_done:
+                        console.print(f"\n[{COLORS['success']}]{ICONS['success']} 计划执行完成！[/]")
+                        self._plan_mode = False
+                        self._plan_task = ""
+                        break
+
+            # 检查是否被用户中断（Ctrl+C），中断后直接退出循环
+            if self._is_interrupted():
+                console.print(f"\n[{COLORS['warning']}]{ICONS['warning']} 已中断请求[/]")
+                break
+
             if not has_tools:
+                # 计划模式下，如果还有未完成任务，强制注入提醒让模型继续
+                if self._plan_mode:
+                    from claude_code.tools.builtins.todo import get_todo_list
+                    todo = get_todo_list()
+                    if todo.items and not todo.is_all_done:
+                        pending = todo.pending_count
+                        in_progress_count = sum(1 for item in todo.items if item.status == "in_progress")
+                        remind = (
+                            f"[系统提醒] 你当前处于计划模式，还有 {pending} 个任务未完成。"
+                            f"请不要停止，继续执行下一个任务。"
+                        )
+                        if in_progress_count > 0:
+                            remind += " 当前有任务标记为 in_progress，请先完成它。"
+                        self.conversation.add_user_message(remind)
+                        console.print(f"[dim]{ICONS['info']} 计划模式：检测到模型提前停止，已注入继续提醒 ({todo.progress_text})[/]")
+                        continue
                 break
 
             # 检查本轮工具执行是否有用户真实中断（Ctrl+C）
@@ -370,8 +447,16 @@ class Application:
             task = progress.add_task(initial_desc, total=None)
 
             # 【新增】后台定时刷新线程：确保时间实时跳动，不依赖 API Chunk
+            # 同时检测中断标志，强制关闭阻塞的 httpx 连接（解决等响应头时无法中断的问题）
             def _refresh_timer():
                 while not stop_timer_event.is_set():
+                    # 检测中断：如果用户按了 Ctrl+C，强制关闭底层连接让阻塞的请求立即退出
+                    if self._interrupted:
+                        try:
+                            self.client._close_client()
+                        except Exception:
+                            pass
+                        break
                     elapsed = time.time() - start_time
                     # 排版：时间 + 实时输出token数
                     tok_display = f"{streaming_tokens} tok" if streaming_tokens > 0 else ""
@@ -690,8 +775,17 @@ class Application:
         self.files.clear()
         self.permission_manager.clear_session()
         self.tool_executor.clear_history()
-        self._setup_system_prompt()  # 重新设置系统提示词
+        self._plan_mode = False
+        self._plan_task = ""
+        self._setup_system_prompt()  # 重新设置系统提示词（含路径环境）
         self._update_input_state()
+
+        # 重置 TodoList
+        from claude_code.tools.builtins.todo import reset_todo_list
+        reset_todo_list()
+
+        # 重置 PathManager（回到 workplace 模式）
+        self.path_manager = reset_path_manager()
 
         console.clear()
         show_welcome(self.current_model.name if self.current_model else "Claude")
@@ -874,6 +968,9 @@ class Application:
         try:
             while True:
                 try:
+                    # 在每次对话开始前，清除上一轮的中断标志
+                    self._clear_interrupt()
+
                     # 在每次对话开始前，显示紧凑的状态头
                     show_status_bar(
                         model_name=self.current_model.name if self.current_model else "Claude",

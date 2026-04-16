@@ -3,7 +3,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Callable
 from collections import Counter
 from ..base import Tool, ToolResult
-from claude_code.utils.paths import resolve_path, EXCLUDED_DIRS
+from claude_code.core.path_manager import get_path_manager
+from claude_code.utils.paths import EXCLUDED_DIRS
 from claude_code.ui.theme import COLORS, ICONS
 from rich.markup import escape
 
@@ -14,8 +15,8 @@ class GlobTool(Tool):
         "按文件名模式搜索文件。支持通配符：* 匹配任意字符，** 递归匹配目录。\n"
         "重要：\n"
         "- pattern 必须是相对模式（不能是绝对路径），如 **/*.py、src/**/*.js\n"
-        "- path 必须是绝对路径或明确的目录，默认 '.' 会搜索 workplace 目录\n"
-        "- 建议明确指定 path，如：path=\"E:\\项目目录\\src\""
+        "- path 必须是绝对路径，默认使用操作根目录\n"
+        "- 必须明确指定 path，如：path=\"E:\\项目目录\\src\""
     )
 
     MAX_RESULTS = 100
@@ -31,7 +32,7 @@ class GlobTool(Tool):
                 },
                 "path": {
                     "type": "string",
-                    "description": "搜索的起始目录（建议使用绝对路径），默认 workplace 目录",
+                    "description": "搜索的起始目录（必须使用绝对路径，默认使用操作根目录）",
                     "default": "."
                 }
             },
@@ -52,7 +53,9 @@ class GlobTool(Tool):
         pattern = parameters.get("pattern", "")
         search_path = parameters.get("path", ".")
 
-        search_path = resolve_path(search_path)
+        # 使用 PathManager 统一路径解析
+        pm = get_path_manager()
+        search_path, _ = pm.resolve_safe(search_path)
 
         try:
             base_path = Path(search_path)

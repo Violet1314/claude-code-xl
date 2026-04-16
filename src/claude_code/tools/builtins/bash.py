@@ -168,7 +168,7 @@ class BashTool(Tool):
                 },
                 "cwd": {
                     "type": "string",
-                    "description": "工作目录（建议使用绝对路径），默认 workplace 目录",
+                    "description": "工作目录（必须使用绝对路径，默认使用操作根目录）",
                     "default": "."
                 }
             },
@@ -437,17 +437,16 @@ class BashTool(Tool):
         if validation_error:
             return ToolResult(success=False, output="", error=validation_error)
 
-        from claude_code.config.defaults import WORKPLACE_DIR
-
         command = parameters.get("command", "").strip()
         timeout = min(int(parameters.get("timeout", 120)), self.MAX_EXECUTION_TIME)
 
-        # 路径隔离逻辑
+        # 使用 PathManager 统一路径解析
+        from claude_code.core.path_manager import get_path_manager
+        pm = get_path_manager()
         user_cwd = parameters.get("cwd", ".")
-        work_dir = Path(user_cwd).resolve()
-        if not Path(user_cwd).is_absolute():
-            work_dir = Path(WORKPLACE_DIR).resolve()
-            work_dir.mkdir(parents=True, exist_ok=True)
+        work_dir_str, _ = pm.resolve_safe(user_cwd)
+        work_dir = Path(work_dir_str)
+        work_dir.mkdir(parents=True, exist_ok=True)
 
         # 前置检查（危险命令、交互式命令、Unix 语法）
         pre_check_result = self._run_pre_checks(command)

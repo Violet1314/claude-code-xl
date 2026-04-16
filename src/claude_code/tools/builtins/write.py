@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Callable
 
 from ..base import Tool, ToolResult
-from claude_code.utils.paths import resolve_workplace_path, get_file_icon
+from claude_code.core.path_manager import get_path_manager
+from claude_code.utils.paths import get_file_icon
 from claude_code.ui.theme import COLORS, ICONS
 from rich.markup import escape
 
@@ -16,7 +17,8 @@ class WriteTool(Tool):
     name = "Write"
     description = (
         "创建新文件或覆盖文件。慎用，会覆盖已有内容。"
-        "\n重要：建议使用绝对路径，如 file_path=\"E:\\项目目录\\src\\file.py\""
+        "\n重要：必须使用绝对路径，如 file_path=\"E:\\项目目录\\src\\file.py\""
+        "\n相对路径会自动基于操作根目录解析为绝对路径"
     )
 
     def get_parameters_schema(self) -> Dict[str, Any]:
@@ -26,7 +28,7 @@ class WriteTool(Tool):
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "文件路径（建议使用绝对路径）"
+                    "description": "文件路径（必须使用绝对路径，相对路径基于操作根目录解析）"
                 },
                 "content": {
                     "type": "string",
@@ -50,7 +52,14 @@ class WriteTool(Tool):
         file_path = parameters.get("file_path", "")
         content = parameters.get("content", "")
 
-        file_path = resolve_workplace_path(file_path)
+        # 使用 PathManager 统一路径解析（含安全边界校验）
+        pm = get_path_manager()
+        file_path, boundary_ok = pm.resolve_safe(file_path)
+        if not boundary_ok:
+            return ToolResult(
+                success=False, output="",
+                error=f"路径越界: {file_path} 不在操作根目录 {pm.active_path} 下，禁止访问"
+            )
 
         try:
             path = Path(file_path)
