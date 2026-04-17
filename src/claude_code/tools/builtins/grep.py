@@ -53,7 +53,10 @@ class GrepTool(Tool):
                     "default": "content"
                 }
             },
-            "required": ["pattern"]
+            "required": ["pattern"],
+            "errorMessage": {
+                "pattern": "必须提供 pattern（正则表达式），如 pattern=\"def my_function\""
+            }
         }
 
     def execute(

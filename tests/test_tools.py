@@ -480,18 +480,23 @@ class TestBashToolBasics:
         assert "Hello World" in result.output
     
     def test_bash_dangerous_check_method(self):
-        """测试 Bash 工具的危险命令检测方法（单元测试）"""
+        """测试 CommandSafetyChecker 的危险命令检测"""
         from claude_code.tools.builtins import BashTool
-        tool = BashTool()
+        from claude_code.tools.command_safety import CommandSafetyChecker
+        checker = CommandSafetyChecker()
         
         # 1. 测试危险命令
-        is_dangerous, reason = tool._check_dangerous("rm -rf /")
+        is_dangerous, reason = checker.check_dangerous("rm -rf /")
         assert is_dangerous is True
         assert "危险" in reason or "损坏" in reason
         
         # 2. 测试安全命令
-        is_dangerous, reason = tool._check_dangerous("ls")
+        is_dangerous, reason = checker.check_dangerous("ls")
         assert is_dangerous is False
+        
+        # 3. 测试 BashTool 委托
+        tool = BashTool()
+        assert tool._safety_checker is checker or isinstance(tool._safety_checker, CommandSafetyChecker)
 
     def test_bash_security_context(self):
         """测试 Bash 工具的安全上下文"""

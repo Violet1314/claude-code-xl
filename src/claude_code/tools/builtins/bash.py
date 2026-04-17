@@ -1,12 +1,12 @@
 """Bash 工具 - 执行 shell 命令（支持流式输出 + 可中断）"""
 import os
-import re
 import subprocess
 import threading
 import queue
-from typing import Any, Dict, List, Optional, Tuple, Callable
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Callable
 from ..base import Tool, ToolResult
+from ..command_safety import CommandSafetyChecker
 from claude_code.ui.progress_display import BashStreamingDisplay
 
 
@@ -27,130 +27,9 @@ class BashTool(Tool):
     MAX_OUTPUT_LENGTH = 5000
     MAX_EXECUTION_TIME = 120  # 秒
 
-    # 危险命令黑名单（完全拒绝）
-    DANGEROUS_PATTERNS = [
-        r'^rm\s+(-[rf]+\s+)*/\s*$',           # rm -rf /
-        r'^rm\s+(-[rf]+\s+)*/\*',              # rm -rf /*
-        r'^sudo\s+rm\s+(-[rf]+)*',             # sudo rm -rf
-        r'^mkfs',                              # 格式化磁盘
-        r'^fdisk',                              # 分区操作
-        r'^dd\s+.*of=/dev/',                   # dd 写入设备
-        r'^:\(\)\s*\{\s*:\|: &\s*\}\s*;',      # fork bomb
-        r'^chmod\s+(-R\s+)?777\s+/',           # chmod 777 /
-        r'^chown\s+(-R\s+)?\S+\s+/',           # chown root /
-        r'^>\s*/dev/sd[a-z]',                  # 写入磁盘设备
-        r'^curl\s+.*\|\s*(bash|sh)',           # curl | bash
-        r'^wget\s+.*\|\s*(bash|sh)',           # wget | sh
-        r'^eval\s+.*\$\(',                      # eval 命令注入
-        r'^exec\s+>',                          # exec 重定向
-        r'^shutdown',                          # 关机
-        r'^reboot',                            # 重启
-        r'^halt',                              # 停机
-        r'^poweroff',                          # 关机
-        r'^init\s+[06]',                       # 切换运行级别
-    ]
+    # 安全检查器（独立模块）
+    _safety_checker = CommandSafetyChecker()
 
-    # 敏感命令（需要每次确认，不缓存权限）
-    SENSITIVE_PATTERNS = [
-        r'^rm\s',
-        r'^mv\s',
-        r'^cp\s',
-        r'^del\s',
-        r'^erase\s',
-        r'^move\s',
-        r'^copy\s',
-        r'^rd\s',
-        r'^rmdir\s',
-        r'^Remove-Item',
-        r'^ri\s',
-        r'^Move-Item',
-        r'^mi\s',
-        r'^Copy-Item',
-        r'^ci\s',
-        r'^Clear-Content',
-        r'^sudo\s',
-        r'^runas\s',
-        r'^chmod\s',
-        r'^chown\s',
-        r'^icacls\s',
-        r'^kill\s',
-        r'^pkill\s',
-        r'^killall\s',
-        r'^taskkill\s',
-        r'^Stop-Process',
-        r'^apt\s+',
-        r'^yum\s+',
-        r'^dnf\s+',
-        r'^pip\s+install',
-        r'^npm\s+install',
-        r'^winget\s+',
-        r'^choco\s+',
-        r'^git\s+push',
-        r'^git\s+reset\s+--hard',
-        r'^git\s+clean\s+-',
-        r'^git\s+checkout\s+--',
-        r'^format\s',
-    ]
-
-    # 需要路径范围检查的命令（文件系统操作）
-    PATH_SCOPE_PATTERNS = [
-        r'^rm\s',
-        r'^del\s',
-        r'^erase\s',
-        r'^rd\s',
-        r'^rmdir\s',
-        r'^Remove-Item',
-        r'^mv\s',
-        r'^cp\s',
-        r'^move\s',
-        r'^copy\s',
-        r'^Move-Item',
-        r'^Copy-Item',
-        r'^git\s+checkout\s+--',
-        r'^git\s+reset\s+--',
-        r'^git\s+clean',
-    ]
-
-    # 交互式命令模式（会等待用户输入导致卡住）
-    INTERACTIVE_PATTERNS = [
-        r'\bpython\b.*\binput\s*\(',       # python input()
-        r'\bpython\b.*\drawinput\s*\(',    # python raw_input()
-        r'\bnode\b.*\breadline\s*\(',      # node readline
-        r'\bpython\b.*-i\b',               # python -i (交互模式)
-        r'\bnode\b.*-i\b',                 # node -i (交互模式)
-        r'\bipython\b',                    # ipython
-        r'\bpsql\b',                       # postgres interactive
-        r'\bmysql\b(?!.*-e)',              # mysql (无 -e 参数)
-        r'\bmongo\b',                      # mongodb shell
-        r'\bredis-cli\b(?!.*-.*\b)',       # redis-cli (无命令参数)
-        r'\bvim?\b\s+',                    # vim/vi
-        r'\bnano\b',                       # nano
-        r'\bless\b',                       # less
-        r'\bmore\b',                       # more
-        r'\btop\b',                        # top
-        r'\bhtop\b',                       # htop
-        r'\bgit\s+commit\b(?!.*-m)',       # git commit (无 -m 参数)
-        r'\bgit\s+rebase\s+-i\b',          # git rebase -i
-        r'\bsftp\b',                       # sftp
-        r'\bftp\b',                        # ftp
-        r'\btelnet\b',                     # telnet
-        r'\bssh\b(?!.*@.*".*")',           # ssh (无命令参数)
-    ]
-
-    # Unix 语法检查模式
-    UNIX_SYNTAX_PATTERNS = [
-        (r'mkdir\s+-p\s+', "PowerShell 不支持 -p 参数。\n正确语法：mkdir dir1, dir2（多个目录用逗号分隔）"),
-        (r'ls\s+-[la]+\b', "PowerShell 的 ls 不支持 -l/-a/-la 参数。\n正确语法：Get-ChildItem（显示详细信息）或 ls（简单列表）"),
-        (r'rm\s+-[rf]+\b', "PowerShell 的 rm 不支持 -r/-f 参数。\n正确语法：Remove-Item -Recurse -Force path"),
-        (r'cp\s+-r\b', "PowerShell 的 cp 不支持 -r 参数。\n正确语法：Copy-Item -Recurse src dst"),
-        (r'cat\s+-n\b', "PowerShell 的 cat 不支持 -n 参数。\n正确语法：Get-Content path"),
-        (r'^touch\s+', "PowerShell 没有 touch 命令。\n正确语法：New-Item -Type File -Path name -Force"),
-        (r'^which\s+', "PowerShell 没有 which 命令。\n正确语法：Get-Command name"),
-        (r'^find\s+', "PowerShell 没有 Unix find 命令。\n正确语法：Get-ChildItem -Recurse -Filter pattern"),
-        (r'^grep\s+', "PowerShell 没有 grep 命令。\n正确语法：Select-String -Pattern regex -Path file"),
-        (r'^chmod\s+', "PowerShell 没有 chmod 命令。\n正确语法：icacls 或 Set-Acl"),
-        (r'^chown\s+', "PowerShell 没有 chown 命令。\n正确语法：icacls 或 Set-Acl"),
-    ]
 
     def get_parameters_schema(self) -> Dict[str, Any]:
         """参数定义"""
@@ -172,49 +51,29 @@ class BashTool(Tool):
                     "default": "."
                 }
             },
-            "required": ["command"]
+            "required": ["command"],
+            "errorMessage": {
+                "command": "必须提供 command（要执行的 shell 命令），如 command=\"Get-ChildItem\""
+            }
         }
-
-    def _check_dangerous(self, command: str) -> Tuple[bool, str]:
-        """检查命令是否危险"""
-        cmd = command.strip().lower()
-        for pattern in self.DANGEROUS_PATTERNS:
-            if re.search(pattern, cmd, re.IGNORECASE):
-                return True, "此命令可能导致系统损坏或数据丢失"
-        return False, ""
-
-    def _check_interactive(self, command: str) -> Tuple[bool, str]:
-        """检查命令是否为交互式命令（会导致卡住）"""
-        for pattern in self.INTERACTIVE_PATTERNS:
-            if re.search(pattern, command, re.IGNORECASE):
-                return True, "此命令需要交互式输入，会卡住直到超时。请使用非交互式替代方案（如 -e 参数、-m 参数、管道输入等）"
-        return False, ""
-
-    def _check_unix_syntax(self, command: str) -> Optional[str]:
-        """检查 Windows PowerShell 不兼容的 Unix 语法"""
-        cmd_lower = command.lower()
-        for pattern, message in self.UNIX_SYNTAX_PATTERNS:
-            if re.search(pattern, cmd_lower, re.IGNORECASE):
-                return message
-        return None
 
     def _run_pre_checks(self, command: str) -> Optional[ToolResult]:
         """
         执行前置检查，返回拦截结果或 None（通过）
         """
         # 1. 危险命令
-        is_dangerous, reason = self._check_dangerous(command)
+        is_dangerous, reason = self._safety_checker.check_dangerous(command)
         if is_dangerous:
             return ToolResult(success=False, output="", error=f"危险命令已拦截: {reason}")
 
         # 2. 交互式命令
-        is_interactive, reason = self._check_interactive(command)
+        is_interactive, reason = self._safety_checker.check_interactive(command)
         if is_interactive:
             return ToolResult(success=False, output="", error=f"交互式命令已拦截: {reason}")
 
         # 3. Unix 语法检查 (Windows)
         if os.name == 'nt':
-            unix_error = self._check_unix_syntax(command)
+            unix_error = self._safety_checker.check_unix_syntax(command)
             if unix_error:
                 return ToolResult(success=False, output="", error=unix_error)
 
@@ -509,62 +368,15 @@ class BashTool(Tool):
 
     def is_sensitive(self, command: str) -> bool:
         """检查命令是否敏感"""
-        cmd = command.strip().lower()
-        for pattern in self.SENSITIVE_PATTERNS:
-            if re.search(pattern, cmd, re.IGNORECASE):
-                return True
-        return False
+        return self._safety_checker.is_sensitive(command)
 
     def needs_path_scope_check(self, command: str) -> bool:
         """检查命令是否需要路径范围验证"""
-        cmd = command.strip().lower()
-        for pattern in self.PATH_SCOPE_PATTERNS:
-            if re.search(pattern, cmd, re.IGNORECASE):
-                return True
-        return False
+        return self._safety_checker.needs_path_scope_check(command)
 
     def check_path_scope(self, command: str, project_dir: Path) -> Dict[str, Any]:
         """检查命令中的路径是否在项目目录范围内"""
-        outside_paths = []
-        paths = self._extract_paths_from_command(command)
-        for path_str in paths:
-            try:
-                path = Path(path_str)
-                if not path.is_absolute():
-                    path = Path.cwd() / path
-                path = path.resolve()
-                try:
-                    path.relative_to(project_dir)
-                except ValueError:
-                    outside_paths.append(str(path))
-            except Exception:
-                pass
-        return {
-            "in_scope": len(outside_paths) == 0,
-            "outside_paths": outside_paths,
-            "project_dir": str(project_dir)
-        }
-
-    def _extract_paths_from_command(self, command: str) -> List[str]:
-        """从命令中提取路径参数"""
-        paths = []
-        quoted_pattern = r'["\']([^"\']+)["\']'
-        for match in re.finditer(quoted_pattern, command):
-            paths.append(match.group(1))
-        remaining = re.sub(quoted_pattern, '', command)
-        tokens = remaining.split()
-        for token in tokens:
-            if token.startswith('-'):
-                continue
-            if token.lower() in ['rm', 'del', 'erase', 'rd', 'rmdir', 'mv', 'cp', 'move', 'copy', 'git']:
-                continue
-            if token.lower() in ['checkout', 'reset', 'clean', 'push', 'pull', 'add', 'commit']:
-                continue
-            if token in ['--', '.', '..']:
-                continue
-            if token and not token.startswith('<') and not token.startswith('>'):
-                paths.append(token)
-        return paths
+        return self._safety_checker.check_path_scope(command, project_dir)
 
     def is_read_only(self) -> bool:
         """Bash 不是只读操作"""

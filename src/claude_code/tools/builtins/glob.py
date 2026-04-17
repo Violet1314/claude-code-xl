@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Callable
 from collections import Counter
 from ..base import Tool, ToolResult
 from claude_code.core.path_manager import get_path_manager
-from claude_code.utils.paths import EXCLUDED_DIRS
+from claude_code.utils.paths import EXCLUDED_DIRS, format_size
 from claude_code.ui.theme import COLORS, ICONS
 from rich.markup import escape
 
@@ -36,7 +36,10 @@ class GlobTool(Tool):
                     "default": "."
                 }
             },
-            "required": ["pattern"]
+            "required": ["pattern"],
+            "errorMessage": {
+                "pattern": "必须提供 pattern（glob 搜索模式），如 pattern=\"**/*.py\""
+            }
         }
 
     def execute(
@@ -155,7 +158,7 @@ class GlobTool(Tool):
             else:
                 try:
                     size = match.stat().st_size
-                    parts.append(f"  {rel_path}  ({self._format_size(size)})")
+                    parts.append(f"  {rel_path}  ({format_size(size)})")
                 except Exception:
                     parts.append(f"  {rel_path}")
 
@@ -200,15 +203,6 @@ class GlobTool(Tool):
             if part in EXCLUDED_DIRS or part.endswith('.egg-info'):
                 return True
         return False
-
-    def _format_size(self, size: int) -> str:
-        """格式化文件大小"""
-        if size < 1024:
-            return f"{size}B"
-        elif size < 1024 * 1024:
-            return f"{size / 1024:.1f}KB"
-        else:
-            return f"{size / 1024 / 1024:.1f}MB"
 
     def is_read_only(self) -> bool:
         return True

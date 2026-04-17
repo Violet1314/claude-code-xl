@@ -72,8 +72,11 @@ class Tool(ABC):
     # 工具元信息
     name: str = ""
     description: str = ""
-    # 当前执行的参数（在 execute 前设置，供 get_security_context 使用）
-    parameters: Dict[str, Any] = {}
+
+    def __init__(self):
+        # 当前执行的参数（在 execute 前由 executor 设置，供 get_security_context 使用）
+        # 必须是实例变量，避免多工具实例共享同一 dict 导致状态污染
+        self.parameters: Dict[str, Any] = {}
 
     @abstractmethod
     def get_parameters_schema(self) -> Dict[str, Any]:

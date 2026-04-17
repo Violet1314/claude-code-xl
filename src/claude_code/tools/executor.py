@@ -7,19 +7,43 @@ from .base import Tool, ToolCall, ToolResult, ToolRegistry, PermissionLevel
 from .permission import PermissionManager, PermissionDecision
 from .permission_ui import PermissionUI
 from .file_cache import file_cache
-from claude_code.utils.paths import resolve_path
+from claude_code.ui.theme import COLORS, ICONS
+from claude_code.ui.safe_markup import safe_print
 
 @dataclass
 class ExecutionResult:
-    """执行结果"""
+    """执行结果 — 组合持有 ToolResult，消除字段重叠
+    
+    独有字段：tool_call, skipped, permission_denied, duration_ms, display_shown
+    代理字段（来自 tool_result）：success, output, error, interrupted, display_output
+    """
     tool_call: ToolCall
-    success: bool
-    output: str
-    error: Optional[str] = None
+    tool_result: Optional[ToolResult] = None  # 组合持有，替代重复字段
     skipped: bool = False           # 是否被跳过（用户拒绝或取消）
     permission_denied: bool = False  # 是否因权限拒绝
-    interrupted: bool = False       # 是否因用户 CTRL+C 中断
     duration_ms: int = 0
+    display_shown: bool = False     # 是否已在 execute_single 中直接打印摘要
+
+    # --- 向后兼容属性代理（委托给 tool_result）---
+    @property
+    def success(self) -> bool:
+        return self.tool_result.success if self.tool_result else False
+
+    @property
+    def output(self) -> str:
+        return self.tool_result.output if self.tool_result else ""
+
+    @property
+    def error(self) -> Optional[str]:
+        return self.tool_result.error if self.tool_result else None
+
+    @property
+    def interrupted(self) -> bool:
+        return self.tool_result.interrupted if self.tool_result else False
+
+    @property
+    def display_output(self) -> Optional[str]:
+        return self.tool_result.display_output if self.tool_result else None
 
 @dataclass
 class ExecutionReport:
@@ -83,6 +107,8 @@ class ToolExecutor:
 
         # 执行历史
         self.execution_history: List[dict] = []
+        # 上一轮显示的工具名（用于跨轮次连续同类工具紧凑排列）
+        self._last_displayed_tool: Optional[str] = None
 
     def execute_single(
         self,
@@ -106,19 +132,20 @@ class ToolExecutor:
         if not tool:
             return ExecutionResult(
                 tool_call=tool_call,
-                success=False,
-                output="",
-                error=f"未知工具: {tool_call.name}"
+                tool_result=ToolResult(success=False, output="", error=f"未知工具: {tool_call.name}")
             )
+
+        # 1.5 设置当前参数（供 get_security_context 等方法使用）
+        tool.parameters = tool_call.parameters
 
         # 2. 验证参数
         validation_error = tool.validate_parameters(tool_call.parameters)
         if validation_error:
+            # 生成友好的纠正性提示，帮助 AI 快速修正参数
+            hint = self._build_validation_hint(tool, validation_error)
             return ExecutionResult(
                 tool_call=tool_call,
-                success=False,
-                output="",
-                error=f"参数错误: {validation_error}"
+                tool_result=ToolResult(success=False, output="", error=f"参数错误: {validation_error}\n{hint}")
             )
 
         # 3. 预处理：安全检查与重复检测
@@ -129,9 +156,9 @@ class ToolExecutor:
         # 4. 权限确认
         decision = self._request_permission(tool_call, tool)
         if decision is None:
-            return ExecutionResult(tool_call=tool_call, success=False, output="", skipped=True)
+            return ExecutionResult(tool_call=tool_call, tool_result=ToolResult(success=False, output=""), skipped=True)
         if not decision.allowed:
-            return ExecutionResult(tool_call=tool_call, success=False, output="", skipped=True, permission_denied=True)
+            return ExecutionResult(tool_call=tool_call, tool_result=ToolResult(success=False, output=""), skipped=True, permission_denied=True)
 
         # 5. 执行工具
         PermissionUI.show_tool_start(tool.name, str(tool_call))
@@ -145,25 +172,33 @@ class ToolExecutor:
             # 6. 后处理：记录与显示
             self._post_execute_handling(tool_call, tool, result, duration_ms)
 
+            # 非自有显示的工具：执行完成后直接打印摘要行
+            skip_display_tools = {"Bash", "AskUserQuestion"}
+            display_shown = False
+            if tool_call.name not in skip_display_tools:
+                if result.success and result.display_output:
+                    from claude_code.ui import console as app_console
+                    safe_print(app_console, result.display_output)
+                    display_shown = True
+                elif not result.success:
+                    from claude_code.ui import console as app_console
+                    safe_print(app_console, f"  [{COLORS['error']}]{ICONS['error']} {tool_call.name} 失败:[/] {result.error or '执行失败'}")
+                    display_shown = True
+
             return ExecutionResult(
                 tool_call=tool_call,
-                success=result.success,
-                output=result.output,
-                error=result.error,
-                interrupted=result.interrupted,
-                duration_ms=duration_ms
+                tool_result=result,
+                duration_ms=duration_ms,
+                display_shown=display_shown,  # 标记已直接打印摘要
             )
 
         except Exception as e:
             duration_ms = int((time.time() - start_time) * 1000)
             error_msg = f"执行异常: {str(e)}"
-            PermissionUI.show_tool_result(tool.name, False, error_msg)
             return ExecutionResult(
                 tool_call=tool_call,
-                success=False,
-                output="",
-                error=error_msg,
-                duration_ms=duration_ms
+                tool_result=ToolResult(success=False, output="", error=error_msg),
+                duration_ms=duration_ms,
             )
 
     def _pre_execute_checks(self, tool_call: ToolCall, tool: Tool) -> Optional[ExecutionResult]:
@@ -172,16 +207,14 @@ class ToolExecutor:
         """
         # A. Read 工具不再限制读取次数，移除拦截逻辑
 
-        # B. 危险命令拦截 (利用工具自身的钩子)
-        if hasattr(tool, '_check_dangerous'):
+        # B. 危险命令拦截 (使用 CommandSafetyChecker)
+        if hasattr(tool, '_safety_checker'):
             command = tool_call.parameters.get("command", "")
-            is_dangerous, danger_reason = tool._check_dangerous(command)
+            is_dangerous, danger_reason = tool._safety_checker.check_dangerous(command)
             if is_dangerous:
                 return ExecutionResult(
                     tool_call=tool_call,
-                    success=False,
-                    output="",
-                    error=f"🚫 危险命令已拦截: {danger_reason}"
+                    tool_result=ToolResult(success=False, output="", error=f"🚫 危险命令已拦截: {danger_reason}")
                 )
         
         return None
@@ -198,32 +231,9 @@ class ToolExecutor:
 
     def _post_execute_handling(self, tool_call: ToolCall, tool: Tool, result: ToolResult, duration_ms: int):
         """
-        执行后的处理：显示结果、记录历史、更新缓存
+        执行后的处理：记录历史、更新缓存（显示由 execute_batch 统一组打印）
         """
-        # A. 显示结果
-        # Bash 已有流式卡片，跳过重复显示
-        # AskUserQuestion 用户已在交互中看到输入，跳过重复显示
-        if tool.name not in ("Bash", "AskUserQuestion"):
-            # 确定要显示的内容
-            display_content = ""
-            if result.success:
-                # 优先使用结构化 display_output (含 Rich Markup)
-                if result.display_output:
-                    display_content = result.display_output
-                else:
-                    display_content = result.output
-            else:
-                display_content = result.error or "执行失败"
-
-            # 关键修复：直接使用 app_console 打印，并开启 markup=True
-            # 这样 Glob/Grep/Read 的 [dim]...[/] 标签会被正确渲染
-            if display_content:
-                from claude_code.ui import console as app_console
-                # 使用 print 而不是 PermissionUI，确保 Markup 被解析
-                # end="" 避免多余换行，因为 display_content 通常已包含结尾格式
-                app_console.print(display_content, markup=True, highlight=False)
-
-        # C. 记录历史
+        # 记录历史
         self._record_execution(tool_call, result, duration_ms)
 
     def execute_batch(
@@ -245,6 +255,10 @@ class ToolExecutor:
         if len(tool_calls) > self.MAX_TOOLS_PER_TURN:
             tool_calls = tool_calls[:self.MAX_TOOLS_PER_TURN]
 
+        # 参数错误计数：连续参数错误过多时降级提示
+        consecutive_param_errors = 0
+        MAX_CONSECUTIVE_PARAM_ERRORS = 3
+
         for i, tool_call in enumerate(tool_calls, 1):
             # 检查是否被中断
             if interrupt_check and interrupt_check():
@@ -258,10 +272,127 @@ class ToolExecutor:
             result = self.execute_single(tool_call, on_progress, interrupt_check)
             report.add(result)
 
+            # 参数验证失败：跳过该工具，继续执行其余工具（降级串行）
+            if not result.success and result.error and result.error.startswith("参数错误"):
+                consecutive_param_errors += 1
+                if consecutive_param_errors >= MAX_CONSECUTIVE_PARAM_ERRORS:
+                    from claude_code.ui import console
+                    console.print(
+                        f"\n[{COLORS['warning']}]⚠ 连续 {MAX_CONSECUTIVE_PARAM_ERRORS} 个工具参数错误，"
+                        f"终止本批次剩余 {len(tool_calls) - i} 个工具[/]"
+                    )
+                    break
+                continue
+            else:
+                consecutive_param_errors = 0  # 重置计数
+
             if result.skipped and not result.permission_denied:
                 break
 
+        # 批量执行完成后，分组显示结果
+        self._display_grouped_results(report)
+
         return report
+
+    def _display_grouped_results(self, report: ExecutionReport) -> None:
+        """
+        分组显示工具执行结果（仅显示未在 execute_single 中直接打印的结果）
+        
+        规则：
+        - display_shown=True 的结果已在 execute_single 中直接打印，跳过
+        - Bash/AskUserQuestion 跳过（它们有自己的显示）
+        - 连续同类工具紧凑排列，不同工具间空行分隔
+        """
+        from claude_code.ui import console as app_console
+
+        # 跳过自有显示的工具 + 已直接打印的结果
+        skip_tools = {"Bash", "AskUserQuestion"}
+
+        # 按连续同名工具分组
+        groups: List[List[ExecutionResult]] = []
+        for result in report.results:
+            if result.tool_call.name in skip_tools:
+                groups.append([result])
+                continue
+            # 已在 execute_single 中直接打印的结果，单独成组（后续跳过打印）
+            if result.display_shown:
+                groups.append([result])
+                continue
+            if groups and groups[-1] and groups[-1][-1].tool_call.name == result.tool_call.name and groups[-1][0].tool_call.name not in skip_tools and not groups[-1][0].display_shown:
+                groups[-1].append(result)
+            else:
+                groups.append([result])
+
+        # 逐组打印
+        last_tool = self._last_displayed_tool
+        for group in groups:
+            tool_name = group[0].tool_call.name
+            # 跳过自有显示的工具
+            if tool_name in skip_tools:
+                continue
+            # 跳过已在 execute_single 中直接打印的结果
+            if group[0].display_shown:
+                last_tool = tool_name  # 仍然更新追踪，保持间距逻辑
+                continue
+
+            # 与上一轮不同工具时，组前空行
+            if tool_name != last_tool:
+                app_console.print()
+
+            for result in group:
+                # 确定显示内容
+                display_content = ""
+                if result.success:
+                    if result.display_output:
+                        display_content = result.display_output
+                    else:
+                        display_content = result.output
+                else:
+                    display_content = result.error or "执行失败"
+
+                if display_content:
+                    safe_print(app_console, display_content)
+
+            last_tool = tool_name
+
+        # 更新跨轮次追踪
+        if any(g[0].tool_call.name not in skip_tools for g in groups):
+            self._last_displayed_tool = last_tool
+
+    def _build_validation_hint(self, tool: Tool, error_msg: str) -> str:
+        """
+        根据工具的参数 Schema 生成友好的纠正性提示
+
+        当参数验证失败时，从 Schema 中提取必填参数及其描述，
+        帮助 AI 快速理解正确的参数格式，避免盲目重试。
+        """
+        schema = tool.get_parameters_schema()
+        required = schema.get("required", [])
+        properties = schema.get("properties", {})
+
+        if not required:
+            return ""
+
+        # 检查是否缺少必填参数（错误消息中包含"缺少"关键字）
+        missing_params = []
+        for param_name in required:
+            if f"缺少 {param_name}" in error_msg or f"缺少{param_name}" in error_msg:
+                param_schema = properties.get(param_name, {})
+                desc = param_schema.get("description", "")
+                param_type = param_schema.get("type", "string")
+                missing_params.append(f"  - {param_name} ({param_type}): {desc}")
+
+        if not missing_params:
+            # 不是缺少参数的错误，提供通用的参数格式提示
+            hints = []
+            for param_name in required:
+                param_schema = properties.get(param_name, {})
+                desc = param_schema.get("description", "")
+                param_type = param_schema.get("type", "string")
+                hints.append(f"  - {param_name} ({param_type}): {desc}")
+            return f"提示: {tool.name} 要求以下必填参数:\n" + "\n".join(hints)
+
+        return f"提示: 请补充以下必填参数:\n" + "\n".join(missing_params)
 
     def _record_execution(
         self,

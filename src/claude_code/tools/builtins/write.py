@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional, Callable
 
 from ..base import Tool, ToolResult
 from claude_code.core.path_manager import get_path_manager
-from claude_code.utils.paths import get_file_icon
+from claude_code.utils.paths import get_file_icon, format_size
 from claude_code.ui.theme import COLORS, ICONS
 from rich.markup import escape
 
@@ -35,7 +35,11 @@ class WriteTool(Tool):
                     "description": "文件内容"
                 }
             },
-            "required": ["file_path", "content"]
+            "required": ["file_path", "content"],
+            "errorMessage": {
+                "file_path": "必须提供 file_path，如 file_path=\"E:\\项目目录\\src\\file.py\"",
+                "content": "必须提供 content（文件内容字符串）"
+            }
         }
 
     def execute(
@@ -122,7 +126,7 @@ class WriteTool(Tool):
 
         # 文件信息
         lines = content.count('\n') + 1
-        size_str = self._format_size(len(content))
+        size_str = format_size(len(content))
         file_icon = get_file_icon(str(path))
 
         parts = []
@@ -153,15 +157,6 @@ class WriteTool(Tool):
             parts.append(f"[yellow]⚠ 语法警告:[/] [dim]{escape(syntax_warning[:80])}[/]")
 
         return '\n'.join(parts)
-
-    def _format_size(self, size: int) -> str:
-        """格式化文件大小"""
-        if size < 1024:
-            return f"{size}B"
-        elif size < 1024 * 1024:
-            return f"{size / 1024:.1f}KB"
-        else:
-            return f"{size / (1024 * 1024):.1f}MB"
 
     def get_security_context(self) -> Dict[str, Any]:
         """返回安全上下文"""

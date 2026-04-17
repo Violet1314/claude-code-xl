@@ -1,13 +1,11 @@
-"""Read 工具 - 读取文件内容（集成缓存 + 进度显示）"""
+"""Read 工具 - 读取文件内容（集成缓存）"""
 from pathlib import Path
-from typing import Any, Dict, Optional, Callable, Tuple
+from typing import Any, Dict, Optional, Callable
 
 from ..base import Tool, ToolResult
 from ..file_cache import file_cache
 from claude_code.core.path_manager import get_path_manager
-from claude_code.ui import console
-from claude_code.ui.theme import COLORS, ICONS
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+from claude_code.ui.theme import COLORS
 from rich.markup import escape
 
 class ReadTool(Tool):
@@ -51,7 +49,10 @@ class ReadTool(Tool):
                     "default": self.DEFAULT_LIMIT
                 }
             },
-            "required": ["file_path"]
+            "required": ["file_path"],
+            "errorMessage": {
+                "file_path": "必须提供 file_path，如 file_path=\"E:\\项目目录\\src\\file.py\""
+            }
         }
 
     def execute(
@@ -92,35 +93,8 @@ class ReadTool(Tool):
                     error=f"文件过大 ({file_size / 1024:.1f}KB)，超过 1MB 限制"
                 )
 
-            # 大文件显示进度
-            show_progress = file_size > 50 * 1024
-            if show_progress:
-                display_name = path.name
-                if len(display_name) > 35:
-                    display_name = display_name[:32] + "..."
-                with Progress(
-                    SpinnerColumn(spinner_name="dots", style=COLORS['primary']),
-                    TextColumn(f"[bold]{ICONS.get('file', '📄')} Read[/] [cyan]{display_name}[/] "),
-                    BarColumn(bar_width=20, complete_style=COLORS['success']),
-                    TextColumn("[dim]读取中[/] "),
-                    TimeElapsedColumn(),
-                    console=console.get_console(),
-                    transient=True,
-                ) as progress_bar:
-                    task = progress_bar.add_task("", total=100)
-                    content, interrupted = self._read_file_with_progress(
-                        path, progress_bar, task, interrupt_check
-                    )
-                    if interrupted:
-                        return ToolResult(
-                            success=False,
-                            output="",
-                            error="用户中断执行",
-                            interrupted=True
-                        )
-                console.print(f"  [{COLORS['success']}]{ICONS['success']}[/] [dim]读取完成[/] ")
-            else:
-                content = self._read_file(path)
+            # 统一由 executor 的 Spinner 显示进度，工具内部不再显示
+            content = self._read_file(path)
 
             # 使用 splitlines() 计算实际行数，但保留原始内容用于精确匹配
             # splitlines() 不保留末尾空行，更符合"行数"概念
@@ -219,57 +193,14 @@ class ReadTool(Tool):
     def _build_terminal_display(
         self, path, lines, total_lines, size_kb, reference, version, was_cached
     ) -> str:
-        """构建给终端的统一格式显示
-
-        短文件（< TERMINAL_DISPLAY_THRESHOLD 行）：完整显示
-        长文件（≥ TERMINAL_DISPLAY_THRESHOLD 行）：头 + 尾
-        """
-        # 缓存状态：显示版本号
-        cache_status = f"[v{version}]" + (" cached" if was_cached else "")
-
+        """构建给终端的摘要行（文件内容通过 output 传给模型，终端只显示摘要）"""
         # 格式化大小
         if size_kb < 1024:
             size_str = f"{size_kb:.1f}KB"
         else:
             size_str = f"{size_kb / 1024:.1f}MB"
 
-        parts = []
-        # 开头空行，与其他工具分隔
-        parts.append("")
-        # 标题行：📖 Read: 文件名 [v0] (N lines, X KB)
-        parts.append(f"[bold]{ICONS.get('read', '📖')} Read:[/] [cyan]{escape(path.name)}[/] [dim]{cache_status} ({total_lines} lines, {size_str})[/]")
-        # 分隔线
-        parts.append(f"[dim]{'─' * 50}[/]")
-
-        # 终端显示使用省略模式
-        if total_lines < self.TERMINAL_DISPLAY_THRESHOLD:
-            # 短文件：完整显示
-            for i, line in enumerate(lines, 1):
-                display_line = line.rstrip()[:120] if len(line.rstrip()) > 120 else line.rstrip()
-                parts.append(f"[dim]{i:>5}[/]  {escape(display_line)}")
-        else:
-            # 长文件：头 + 尾
-            # 显示头部
-            for i in range(self.TERMINAL_HEAD_LINES):
-                if i >= total_lines:
-                    break
-                line = lines[i].rstrip()
-                display_line = line[:120] if len(line) > 120 else line
-                parts.append(f"[dim]{i+1:>5}[/]  {escape(display_line)}")
-
-            # 省略提示
-            omitted_lines = total_lines - self.TERMINAL_HEAD_LINES - self.TERMINAL_TAIL_LINES
-            if omitted_lines > 0:
-                parts.append(f"[dim]       ... (省略 {omitted_lines} 行) ...[/]")
-
-            # 显示尾部
-            tail_start = total_lines - self.TERMINAL_TAIL_LINES
-            for i in range(tail_start, total_lines):
-                line = lines[i].rstrip()
-                display_line = line[:120] if len(line) > 120 else line
-                parts.append(f"[dim]{i+1:>5}[/]  {escape(display_line)}")
-
-        return '\n'.join(parts)
+        return f"  📖 Read [cyan]{escape(path.name)}[/]  [dim]{total_lines} lines · {size_str}[/]"
 
     # ============================================================
     # 文件读取
@@ -283,45 +214,6 @@ class ReadTool(Tool):
         except UnicodeDecodeError:
             with open(path, 'r', encoding='gbk') as f:
                 return f.read()
-
-    def _read_file_with_progress(
-        self,
-        path: Path,
-        progress_bar,
-        task,
-        interrupt_check: Optional[Callable[[], bool]] = None
-    ) -> Tuple[str, bool]:
-        """
-        读取文件内容（带进度显示 + 中断检查）
-
-        Returns:
-            (内容, 是否被中断)
-        """
-        content_chunks = []
-        file_size = path.stat().st_size
-        read_bytes = 0
-        chunk_size = 8192
-
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                while True:
-                    # 检查中断
-                    if interrupt_check and interrupt_check():
-                        return '', True  # 用户中断
-
-                    chunk = f.read(chunk_size)
-                    if not chunk:
-                        break
-                    content_chunks.append(chunk)
-                    read_bytes += len(chunk.encode('utf-8'))
-                    progress = min(100, int(read_bytes / file_size * 100))
-                    progress_bar.update(task, completed=progress)
-
-            return ''.join(content_chunks), False
-
-        except UnicodeDecodeError:
-            with open(path, 'r', encoding='gbk') as f:
-                return f.read(), False
 
     # ============================================================
     # 工具属性

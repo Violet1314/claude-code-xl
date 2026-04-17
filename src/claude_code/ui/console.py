@@ -20,9 +20,41 @@ if sys.platform == 'win32':
         pass
 
 # ============================================================
-# 全局 Console 实例
+# 全局 Console 实例 + Markup 安全防护
 # ============================================================
 _console = RichConsole()
+
+# 保存原始 print 方法
+_original_console_print = _console.print
+
+def _safe_console_print(*args, **kwargs):
+    """安全版 Console.print — Markup 解析失败时自动修复而非回退纯文本
+    
+    策略：
+    1. 正常 Markup → 直接打印（最快路径）
+    2. MarkupError → 用 safe_markup() 自动修复后重试（保留样式）
+    3. 修复后仍失败 → 回退为纯文本（最后防线）
+    """
+    markup = kwargs.get('markup', True)
+    if markup and args and isinstance(args[0], str):
+        try:
+            _original_console_print(*args, **kwargs)
+        except Exception:
+            # MarkupError → 尝试用 safe_markup 修复后重试
+            try:
+                from claude_code.ui.safe_markup import safe_markup
+                fixed_args = (safe_markup(args[0]),) + args[1:]
+                _original_console_print(*fixed_args, **kwargs)
+            except Exception:
+                # 修复也失败 → 纯文本回退（最后防线）
+                kwargs['markup'] = False
+                kwargs.setdefault('highlight', False)
+                _original_console_print(*args, **kwargs)
+    else:
+        _original_console_print(*args, **kwargs)
+
+# 猴子补丁：替换 _console.print 为安全版本
+_console.print = _safe_console_print
 
 def get_console() -> RichConsole:
     """获取全局 Console 实例"""
@@ -177,10 +209,15 @@ def clear() -> None:
     _console.clear()
 
 # ============================================================
-# 原始输出 (兼容旧代码)
+# 原始输出 (兼容旧代码 + Markup 安全防护)
 # ============================================================
 def print(msg: str = "", **kwargs) -> None:
-    """原始打印 (支持 Rich 标记)"""
+    """安全打印 — Markup 解析失败时自动修复而非回退纯文本
+    
+    策略同猴子补丁：正常 → 修复 → 纯文本回退
+    """
+    markup = kwargs.pop('markup', True)
+    kwargs['markup'] = markup
     _console.print(msg, **kwargs)
 
 def print_raw(msg: str) -> None:

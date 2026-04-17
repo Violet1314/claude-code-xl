@@ -56,7 +56,12 @@ class EditTool(Tool):
                     "description": "替换后的新内容"
                 }
             },
-            "required": ["file_path", "old_string", "new_string"]
+            "required": ["file_path", "old_string", "new_string"],
+            "errorMessage": {
+                "file_path": "必须提供 file_path，如 file_path=\"E:\\项目目录\\src\\file.py\"",
+                "old_string": "必须提供 old_string（要替换的原文，从 Read 结果中精确复制）",
+                "new_string": "必须提供 new_string（替换后的新内容，可为空字符串表示删除）"
+            }
         }
 
     def execute(

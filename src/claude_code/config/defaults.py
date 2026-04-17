@@ -36,7 +36,7 @@ class UIDefaults:
 class ToolDefaults:
     """工具执行相关配置"""
     MAX_TOOL_ROUNDS: int = 80         # 最大循环轮次
-    MAX_TOOLS_PER_ROUND: int = 20     # 每轮最大工具数
+    MAX_TOOLS_PER_ROUND: int = 50     # 每轮最大工具数
 
 @dataclass(frozen=True)
 class PlanDefaults:
@@ -57,5 +57,5 @@ PLAN = PlanDefaults()
 WORKPLACE_DIR = "workplace"
 
 # 版本信息
-VERSION = "2.8.17 | Author: XieLong"
+VERSION = "2.8.20 | Author: XieLong"
 APP_NAME = "Claude Code Terminal"

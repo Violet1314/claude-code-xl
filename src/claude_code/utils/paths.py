@@ -45,6 +45,10 @@ def resolve_path(path: str) -> str:
     """
     解析路径：相对路径转绝对路径，规范化
 
+    注意：此函数不做安全边界校验（不检查是否越界操作根目录）。
+    工具执行场景应使用 PathManager.resolve()，它会进行越界保护。
+    此函数仅适用于用户主动操作（如文件挂载）等不需要安全边界的场景。
+
     Args:
         path: 输入路径（可能带引号）
 
@@ -208,3 +212,21 @@ def get_file_icon(file_ext: str) -> str:
         '.scss': ICONS.get('file_css', '📄'),
     }
     return icons.get(file_ext, ICONS.get('file_default', '📄'))
+
+
+def format_size(size: int) -> str:
+    """
+    格式化文件大小为人类可读字符串
+
+    Args:
+        size: 文件大小（字节数）
+
+    Returns:
+        格式化后的字符串，如 "1.5KB", "2.3MB"
+    """
+    if size < 1024:
+        return f"{size}B"
+    elif size < 1024 * 1024:
+        return f"{size / 1024:.1f}KB"
+    else:
+        return f"{size / (1024 * 1024):.1f}MB"

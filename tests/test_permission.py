@@ -117,8 +117,7 @@ class TestExecutionResult:
         """测试成功结果"""
         result = ExecutionResult(
             tool_call=ToolCall(name="read", parameters={}),
-            success=True,
-            output="test output",
+            tool_result=ToolResult(success=True, output="test output"),
             skipped=False
         )
         assert result.success is True
@@ -128,9 +127,7 @@ class TestExecutionResult:
         """测试失败结果"""
         result = ExecutionResult(
             tool_call=ToolCall(name="read", parameters={}),
-            success=False,
-            output="",
-            error="test error",
+            tool_result=ToolResult(success=False, output="", error="test error"),
             skipped=False
         )
         assert result.success is False
@@ -152,15 +149,12 @@ class TestExecutionReport:
         results = [
             ExecutionResult(
                 tool_call=ToolCall(name="read", parameters={}),
-                success=True,
-                output="test",
+                tool_result=ToolResult(success=True, output="test"),
                 skipped=False
             ),
             ExecutionResult(
                 tool_call=ToolCall(name="write", parameters={}),
-                success=False,
-                output="",
-                error="failed",
+                tool_result=ToolResult(success=False, output="", error="failed"),
                 skipped=False
             )
         ]

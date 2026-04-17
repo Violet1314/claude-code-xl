@@ -54,6 +54,7 @@ from claude_code.tools import (
     ExecutionReport,
     PermissionManager,
     tool_calling_manager,
+    tool_context,
 )
 
 class Application:
@@ -85,6 +86,11 @@ class Application:
         self.tool_executor = ToolExecutor(registry, self.permission_manager)
         # 路径管理器（统一所有工具的路径解析）
         self.path_manager: PathManager = init_path_manager()
+        # 统一注册到 ToolContext，便于测试时替换和生命周期管理
+        tool_context.register("registry", registry)
+        tool_context.register("permission_manager", self.permission_manager)
+        tool_context.register("tool_executor", self.tool_executor)
+        tool_context.register("path_manager", self.path_manager)
         self._setup_system_prompt()
         self.commands = CommandRegistry()
         for cmd_class in BUILTIN_COMMANDS:
@@ -177,6 +183,8 @@ class Application:
                 finalize=True,
             )
         self.client.close()
+        # 统一清理 ToolContext 中的所有单例
+        tool_context.clear()
 
     def _signal_handler(self, sig, frame) -> None:
         """信号处理：单击中断当前操作，双击退出程序
@@ -215,6 +223,9 @@ class Application:
         """
         self.conversation.add_user_message(user_input)
         round_count = 0
+        
+        # 新一轮用户输入，重置工具显示追踪
+        self.tool_executor._last_displayed_tool = None
         
         # 计划模式：注入任务规划提示
         if self._plan_mode:
@@ -340,7 +351,7 @@ class Application:
                 consecutive_failures = 0
                 last_error_signature = ""
 
-            console.print(f"\n[{COLORS['info']}]{ICONS['info']} 继续处理...[/]")
+
 
         # 保存统计
         self.stats.save_session(
@@ -379,7 +390,6 @@ class Application:
 
             # 执行工具调用
             if tool_calls:
-                console.print()  # 空行
                 report = self._execute_tools(tool_calls)
 
                 # 如果所有工具都被跳过（用户取消），停止循环
@@ -563,7 +573,9 @@ class Application:
 
         # 渲染响应（完成后一次性渲染）
         if full_response.strip():
-            render_response(full_response, model_name, duration, real_usage)
+            render_response(full_response, model_name, duration, real_usage, has_tools=bool(tool_calls))
+            # AI Panel 打印后重置工具追踪，确保下一个工具摘要前有间距
+            self.tool_executor._last_displayed_tool = None
 
         # 保存 AI 响应：优先使用真实 token，否则回退到估算
         if real_usage["input"] > 0:

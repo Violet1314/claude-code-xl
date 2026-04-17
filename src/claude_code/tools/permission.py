@@ -228,7 +228,7 @@ class PermissionManager:
             是否敏感
         """
         # 使用工具的安全上下文获取敏感度信息（统一接口）
-        tool.parameters = tool_call.parameters  # 设置参数供 get_security_context 使用
+        # 注意：tool.parameters 已在 executor.execute_single 中设置，此处无需重复赋值
         security_context = tool.get_security_context()
         return security_context.get("is_sensitive", False)
 

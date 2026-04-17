@@ -6,7 +6,7 @@ from rich.box import ROUNDED
 from claude_code.ui import console
 from claude_code.ui.theme import COLORS, ICONS
 
-def render_response(content: str, model_name: str, duration: float, tokens: dict = None) -> None:
+def render_response(content: str, model_name: str, duration: float, tokens: dict = None, has_tools: bool = False) -> None:
     """
     渲染 AI 响应 (使用统一 Panel 风格)
     
@@ -15,6 +15,7 @@ def render_response(content: str, model_name: str, duration: float, tokens: dict
         model_name: 模型名称
         duration: 耗时（秒）
         tokens: token 使用量 { "input": int, "output": int}
+        has_tools: 是否有工具调用（有则不打后空行，由分组打印控制间距）
     """
     con = console.get_console()
     
@@ -49,9 +50,11 @@ def render_response(content: str, model_name: str, duration: float, tokens: dict
         padding=(1, 2),  # 上下1行，左右2列留白
     )
     
-    con.print() # 顶部空行，增加呼吸感
+    if not has_tools:
+        con.print() # 顶部空行（无工具时增加呼吸感；有工具时紧贴工具摘要）
     con.print(panel)
-    con.print() # 底部空行
+    if not has_tools:
+        con.print() # 底部空行（无工具时由 Panel 自带间距；有工具时由分组打印控制）
 
 def render_response_simple(content: str, model_name: str, duration: float) -> None:
     """

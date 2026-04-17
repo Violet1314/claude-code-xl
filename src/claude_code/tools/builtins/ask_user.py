@@ -57,7 +57,10 @@ class AskUserQuestionTool(Tool):
                     "description": "默认值（用于自由输入模式）"
                 }
             },
-            "required": ["question"]
+            "required": ["question"],
+            "errorMessage": {
+                "question": "必须提供 question（要询问用户的问题文本）"
+            }
         }
 
     def execute(

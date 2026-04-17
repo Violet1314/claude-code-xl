@@ -12,6 +12,7 @@ from .permission_ui import PermissionUI
 from .executor import ToolExecutor, ExecutionResult, ExecutionReport, create_executor
 from .tool_calling import ToolCallingManager, tool_calling_manager
 from .file_cache import FileCacheManager, file_cache
+from .context import ToolContext, tool_context
 
 # 便捷函数
 def register_builtin_tools() -> None:
@@ -44,6 +45,9 @@ __all__ = [
     "file_cache",
     # 全局注册表
     "registry",
+    # 全局上下文
+    "ToolContext",
+    "tool_context",
     # 便捷函数
     "register_builtin_tools",
 ]

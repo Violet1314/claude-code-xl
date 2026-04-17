@@ -60,6 +60,9 @@ class TodoCreateTool(Tool):
                 },
             },
             "required": ["items"],
+            "errorMessage": {
+                "items": "必须提供 items（任务列表数组），每项包含 content 字段，如 items=[{\"content\": \"任务描述\"}]"
+            },
         }
 
     def execute(self, parameters: Dict[str, Any], interrupt_check: Callable[[], bool] = None) -> ToolResult:
@@ -132,6 +135,10 @@ class TodoUpdateTool(Tool):
                 },
             },
             "required": ["id", "status"],
+            "errorMessage": {
+                "id": "必须提供 id（任务ID），如 id=\"t1\"",
+                "status": "必须提供 status（新状态），可选值：pending / in_progress / completed / failed"
+            },
         }
 
     def execute(self, parameters: Dict[str, Any], interrupt_check: Callable[[], bool] = None) -> ToolResult:
