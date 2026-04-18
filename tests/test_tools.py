@@ -319,6 +319,157 @@ class TestEditTool:
         finally:
             os.unlink(temp_path)
 
+    def test_edit_line_range_basic(self):
+        """测试行号范围模式：替换指定行"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("alpha\nbeta\ngamma\ndelta\nepsilon\n")
+            f.flush()
+            temp_path = f.name
+
+        try:
+            tool = EditTool()
+            result = tool.execute({
+                "file_path": temp_path,
+                "start_line": 2,
+                "end_line": 3,
+                "new_string": "BETA\nGAMMA"
+            })
+
+            assert result.success
+
+            with open(temp_path, 'r') as f:
+                content = f.read()
+            assert "BETA" in content
+            assert "GAMMA" in content
+            assert "alpha" in content
+            assert "delta" in content
+            assert "epsilon" in content
+            assert "beta" not in content
+            assert "gamma" not in content
+        finally:
+            os.unlink(temp_path)
+
+    def test_edit_line_range_single_line(self):
+        """测试行号范围模式：替换单行"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("def hello():\n    pass\n\ndef world():\n    pass\n")
+            f.flush()
+            temp_path = f.name
+
+        try:
+            tool = EditTool()
+            result = tool.execute({
+                "file_path": temp_path,
+                "start_line": 2,
+                "end_line": 2,
+                "new_string": "    return True"
+            })
+
+            assert result.success
+
+            with open(temp_path, 'r') as f:
+                content = f.read()
+            assert "return True" in content
+            # 第2行的 pass 被替换了，但第5行 world() 的 pass 仍在
+            lines = content.splitlines()
+            assert lines[1] == "    return True"  # 第2行被替换
+            assert "def world" in content  # 其他部分不受影响
+        finally:
+            os.unlink(temp_path)
+
+    def test_edit_line_range_returns_replaced_content(self):
+        """测试行号范围模式：返回被替换的原始内容供确认"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("old1\nold2\nold3\n")
+            f.flush()
+            temp_path = f.name
+
+        try:
+            tool = EditTool()
+            result = tool.execute({
+                "file_path": temp_path,
+                "start_line": 1,
+                "end_line": 2,
+                "new_string": "new1\nnew2"
+            })
+
+            assert result.success
+            # 输出中应包含被替换的原始内容
+            assert "old1" in result.output
+            assert "old2" in result.output
+            assert "new1" in result.output
+        finally:
+            os.unlink(temp_path)
+
+    def test_edit_line_range_out_of_bounds(self):
+        """测试行号范围模式：end_line 超出文件行数时自动截断"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("line1\nline2\n")
+            f.flush()
+            temp_path = f.name
+
+        try:
+            tool = EditTool()
+            result = tool.execute({
+                "file_path": temp_path,
+                "start_line": 2,
+                "end_line": 999,
+                "new_string": "replaced"
+            })
+
+            assert result.success
+
+            with open(temp_path, 'r') as f:
+                content = f.read()
+            assert "line1" in content
+            assert "replaced" in content
+            assert "line2" not in content
+        finally:
+            os.unlink(temp_path)
+
+    def test_edit_line_range_invalid_params(self):
+        """测试行号范围模式：参数验证"""
+        tool = EditTool()
+
+        # 只提供 start_line 没有 end_line
+        result = tool.validate_parameters({
+            "file_path": "/tmp/test.py",
+            "start_line": 1,
+            "new_string": "hello"
+        })
+        assert result is not None
+        assert "同时提供" in result
+
+        # start_line < 1
+        result = tool.validate_parameters({
+            "file_path": "/tmp/test.py",
+            "start_line": 0,
+            "end_line": 5,
+            "new_string": "hello"
+        })
+        assert result is not None
+        assert ">=" in result
+
+        # end_line < start_line
+        result = tool.validate_parameters({
+            "file_path": "/tmp/test.py",
+            "start_line": 5,
+            "end_line": 3,
+            "new_string": "hello"
+        })
+        assert result is not None
+        assert ">=" in result
+
+    def test_edit_no_old_string_no_line_range(self):
+        """测试既没有 old_string 也没有 start_line/end_line 时报错"""
+        tool = EditTool()
+        result = tool.validate_parameters({
+            "file_path": "/tmp/test.py",
+            "new_string": "hello"
+        })
+        assert result is not None
+        assert "old_string" in result or "start_line" in result
+
 
 class TestGlobTool:
     """Glob 工具测试"""

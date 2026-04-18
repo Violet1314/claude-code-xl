@@ -94,6 +94,9 @@ class ToolExecutor:
     MAX_TOOLS_PER_TURN = 40    # 单轮最大工具数
     MAX_EXECUTION_TIME = 120    # 单个工具最大执行时间（秒）
 
+    # 路径类参数名（用于动态注入路径示例）
+    PATH_PARAM_NAMES = {"file_path", "path", "cwd", "directory", "dir"}
+
     def __init__(self, registry: ToolRegistry, permission_manager: PermissionManager):
         """
         初始化执行器
@@ -359,12 +362,16 @@ class ToolExecutor:
         if any(g[0].tool_call.name not in skip_tools for g in groups):
             self._last_displayed_tool = last_tool
 
+    # 路径类参数名集合：这些参数需要动态注入当前操作根目录的路径示例
+    PATH_PARAM_NAMES = {"file_path", "path", "cwd", "directory", "dir", "target_path"}
+
     def _build_validation_hint(self, tool: Tool, error_msg: str) -> str:
         """
         根据工具的参数 Schema 生成友好的纠正性提示
 
         当参数验证失败时，从 Schema 中提取必填参数及其描述，
         帮助 AI 快速理解正确的参数格式，避免盲目重试。
+        对路径类参数，动态注入 PathManager 当前操作根目录的路径示例。
         """
         schema = tool.get_parameters_schema()
         required = schema.get("required", [])
@@ -373,26 +380,64 @@ class ToolExecutor:
         if not required:
             return ""
 
+        # 尝试获取 PathManager 实例（用于动态生成路径示例）
+        pm = self._get_path_manager()
+
         # 检查是否缺少必填参数（错误消息中包含"缺少"关键字）
         missing_params = []
         for param_name in required:
             if f"缺少 {param_name}" in error_msg or f"缺少{param_name}" in error_msg:
                 param_schema = properties.get(param_name, {})
-                desc = param_schema.get("description", "")
-                param_type = param_schema.get("type", "string")
-                missing_params.append(f"  - {param_name} ({param_type}): {desc}")
+                hint_line = self._format_param_hint(param_name, param_schema, pm)
+                missing_params.append(hint_line)
 
         if not missing_params:
             # 不是缺少参数的错误，提供通用的参数格式提示
             hints = []
             for param_name in required:
                 param_schema = properties.get(param_name, {})
-                desc = param_schema.get("description", "")
-                param_type = param_schema.get("type", "string")
-                hints.append(f"  - {param_name} ({param_type}): {desc}")
+                hint_line = self._format_param_hint(param_name, param_schema, pm)
+                hints.append(hint_line)
             return f"提示: {tool.name} 要求以下必填参数:\n" + "\n".join(hints)
 
         return f"提示: 请补充以下必填参数:\n" + "\n".join(missing_params)
+
+    def _format_param_hint(self, param_name: str, param_schema: dict, pm) -> str:
+        """
+        格式化单个参数的提示行
+
+        对路径类参数，动态注入当前操作根目录的路径示例，
+        帮助 AI 理解绝对路径的具体格式。
+
+        Args:
+            param_name: 参数名
+            param_schema: 参数的 Schema 定义
+            pm: PathManager 实例（可能为 None）
+
+        Returns:
+            格式化的提示行
+        """
+        desc = param_schema.get("description", "")
+        param_type = param_schema.get("type", "string")
+        line = f"  - {param_name} ({param_type}): {desc}"
+
+        # 路径类参数：动态注入当前操作根目录的路径示例
+        if param_name in self.PATH_PARAM_NAMES and pm is not None:
+            active = pm.active_path.replace("\\", "\\\\")
+            if param_name in ("cwd", "directory", "dir"):
+                line += f"\n    示例: {param_name}=\"{active}\""
+            else:
+                line += f"\n    示例: {param_name}=\"{active}\\\\src\\\\app.py\""
+
+        return line
+
+    def _get_path_manager(self):
+        """安全获取 PathManager 实例"""
+        try:
+            from claude_code.core.path_manager import get_path_manager
+            return get_path_manager()
+        except Exception:
+            return None
 
     def _record_execution(
         self,

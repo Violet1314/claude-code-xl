@@ -1,4 +1,4 @@
-"""Read 工具 - 读取文件内容（集成缓存）"""
+"""Read 工具 - 读取文件内容（集成缓存 + 文件不存在时自动搜索回退）"""
 from pathlib import Path
 from typing import Any, Dict, Optional, Callable
 
@@ -28,6 +28,8 @@ class ReadTool(Tool):
     TERMINAL_DISPLAY_THRESHOLD = 80
     TERMINAL_HEAD_LINES = 30
     TERMINAL_TAIL_LINES = 20
+    # 搜索回退结果上限
+    MAX_SEARCH_RESULTS = 10
 
     def get_parameters_schema(self) -> Dict[str, Any]:
         """参数定义"""
@@ -45,8 +47,8 @@ class ReadTool(Tool):
                 },
                 "limit": {
                     "type": "integer",
-                    "description": f"读取的最大行数，默认 {self.DEFAULT_LIMIT} 行。大文件建议分段读取。",
-                    "default": self.DEFAULT_LIMIT
+                    "description": "读取的最大行数，默认 1500 行。大文件建议分段读取。",
+                    "default": 1500
                 }
             },
             "required": ["file_path"],
@@ -82,7 +84,8 @@ class ReadTool(Tool):
         try:
             path = Path(file_path)
             if not path.exists():
-                return ToolResult(success=False, output="", error=f"文件不存在: {file_path}")
+                # 文件不存在时，自动回退到 Glob 搜索同名文件
+                return self._handle_file_not_found(file_path, pm)
             if not path.is_file():
                 return ToolResult(success=False, output="", error=f"不是文件: {file_path}")
 
@@ -148,14 +151,6 @@ class ReadTool(Tool):
         except Exception as e:
             return ToolResult(success=False, output="", error=f"读取失败: {str(e)}")
 
-    def get_security_context(self) -> Dict[str, Any]:
-        """返回安全上下文（只读工具通常不敏感）"""
-        return {
-            "is_sensitive": False,
-            "paths": [self.parameters.get("file_path", "")],
-            "command_preview": ""
-        }
-
     # ============================================================
     # 模型输出（纯文本，无 Rich markup）
     # ============================================================
@@ -174,7 +169,7 @@ class ReadTool(Tool):
 
         # 计算读取范围
         start_line = max(1, offset)
-        end_line = min(total_lines, start_line + limit - 1)
+        end_line = min(total_lines, start_line + limit)
 
         parts.append(f"Content (lines {start_line}-{end_line}):")
         for i in range(start_line - 1, end_line):
@@ -182,7 +177,7 @@ class ReadTool(Tool):
             parts.append(f"{i+1:5d} | {lines[i]}")
 
         if end_line < total_lines:
-            parts.append(f"  ... ({total_lines - end_line} more lines, use offset to continue)")
+            parts.append(f"  ... ({total_lines - end_line} more lines)")
 
         return '\n'.join(parts)
 
@@ -214,6 +209,16 @@ class ReadTool(Tool):
         except UnicodeDecodeError:
             with open(path, 'r', encoding='gbk') as f:
                 return f.read()
+
+    # ============================================================
+    # 文件不存在时的自动搜索回退
+    # ============================================================
+
+    def _handle_file_not_found(self, file_path: str, pm) -> ToolResult:
+        """文件不存在时的处理：自动搜索同名文件并给出精确路径建议"""
+        from claude_code.utils.paths import format_file_not_found_error
+        error_msg = format_file_not_found_error(file_path, pm.active_path, self.MAX_SEARCH_RESULTS)
+        return ToolResult(success=False, output="", error=error_msg)
 
     # ============================================================
     # 工具属性

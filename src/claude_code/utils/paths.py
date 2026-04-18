@@ -230,3 +230,103 @@ def format_size(size: int) -> str:
         return f"{size / 1024:.1f}KB"
     else:
         return f"{size / (1024 * 1024):.1f}MB"
+
+
+def search_file_in_project(file_path: str, base_path: str, max_results: int = 10) -> List[str]:
+    """
+    在项目目录下递归搜索同名文件
+
+    当工具收到不存在的文件路径时，提取文件名在操作根目录下搜索，
+    返回候选路径列表，帮助模型快速定位正确路径。
+
+    Args:
+        file_path: 原始请求路径（从中提取文件名）
+        base_path: 搜索根目录（通常是操作根目录）
+        max_results: 最大返回结果数
+
+    Returns:
+        匹配的绝对路径列表（按路径深度排序，浅层优先）
+    """
+    target_name = Path(file_path).name
+    if not target_name or target_name in ('.', '..'):
+        return []
+
+    base = Path(base_path)
+    if not base.is_dir():
+        return []
+
+    matches = []
+    try:
+        for match in base.rglob(target_name):
+            # 排除无关目录
+            if _should_exclude_path(match, base):
+                continue
+            # 只匹配文件，不匹配目录
+            if match.is_file():
+                matches.append(str(match))
+                if len(matches) >= max_results:
+                    break
+    except (PermissionError, OSError):
+        pass
+
+    # 按路径深度排序（浅层优先）
+    matches.sort(key=lambda p: len(Path(p).relative_to(base).parts))
+    return matches
+
+
+def format_file_not_found_error(file_path: str, base_path: str, max_results: int = 10) -> str:
+    """
+    文件不存在时的统一错误格式化：自动搜索同名文件并给出精确路径建议
+
+    供 Read/Edit 等工具共用，避免重复代码。
+
+    策略：
+    1. 提取文件名（如 app.py）
+    2. 在 base_path 下递归搜索同名文件（排除无关目录）
+    3. 唯一匹配时直接给出精确路径，多匹配时列出候选
+    4. 返回格式化的错误信息字符串，调用方包装为 ToolResult 即可
+
+    Args:
+        file_path: 原始请求路径
+        base_path: 搜索根目录（通常是操作根目录）
+        max_results: 最大搜索结果数
+
+    Returns:
+        格式化的错误信息字符串
+    """
+    matches = search_file_in_project(file_path, base_path, max_results)
+
+    if not matches:
+        return f"文件不存在: {file_path}\n在项目中也未找到同名文件，请确认路径是否正确。"
+
+    # 唯一匹配：直接给出精确路径
+    if len(matches) == 1:
+        exact_path = matches[0]
+        return (
+            f"文件不存在: {file_path}\n"
+            f"💡 找到唯一匹配，请使用精确路径重试:\n"
+            f"  file_path=\"{exact_path}\""
+        )
+
+    # 多个匹配：列出候选路径
+    lines = [f"文件不存在: {file_path}"]
+    lines.append(f"💡 在项目中找到 {len(matches)} 个同名文件:")
+    for i, match in enumerate(matches[:max_results], 1):
+        lines.append(f"  {i}. {match}")
+    if len(matches) > max_results:
+        lines.append(f"  ... 还有 {len(matches) - max_results} 个")
+    lines.append(f"请使用完整路径重试，如: file_path=\"{matches[0]}\"")
+
+    return '\n'.join(lines)
+
+
+def _should_exclude_path(path: Path, base: Path) -> bool:
+    """检查路径是否在排除目录下"""
+    try:
+        rel = path.relative_to(base)
+    except ValueError:
+        rel = path
+    for part in rel.parts:
+        if part in EXCLUDED_DIRS or part.endswith('.egg-info'):
+            return True
+    return False

@@ -48,7 +48,12 @@ class CommandCompleter(Completer):
         if not text.startswith('/'):
             return
         
-        word = text.split()[0] if text else ''
+        # 只在输入命令名阶段补全（没有空格或换行时）
+        # 一旦输入了空格/换行，说明命令名已完成，不再补全
+        if ' ' in text or '\n' in text:
+            return
+        
+        word = text
         
         for cmd in self.commands:
             name = f"/{cmd['name']}"
@@ -89,11 +94,18 @@ class InputHandler:
         
         @kb.add('enter')
         def _(event):
-            """Enter 键处理：命令直接发送，对话换行"""
+            """Enter 键处理：多行命令换行，单行命令直接发送，对话换行"""
             text = event.current_buffer.text.strip()
             if text.startswith('/'):
-                # 命令模式：直接发送
-                event.current_buffer.validate_and_handle()
+                # 提取命令名（取第一个词）
+                cmd_name = text.split()[0] if text else ''
+                # 需要多行输入的命令：Enter 换行（和对话模式一致）
+                multiline_commands = {'/plan', '/p'}
+                if cmd_name in multiline_commands:
+                    event.current_buffer.insert_text('\n')
+                else:
+                    # 单行命令：直接发送
+                    event.current_buffer.validate_and_handle()
             else:
                 # 对话模式：插入换行
                 event.current_buffer.insert_text('\n')

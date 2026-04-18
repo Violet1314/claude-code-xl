@@ -88,7 +88,14 @@ class GrepTool(Tool):
 
             base_path = Path(search_path)
             if not base_path.exists():
-                return ToolResult(success=False, output="", error=f"路径不存在: {search_path}")
+                return ToolResult(
+                    success=False, output="",
+                    error=(
+                        f"路径不存在: {search_path}\n"
+                        f"💡 当前操作根目录: {pm.active_path}\n"
+                        f"请确保路径在操作根目录下，如: path=\"{pm.active_path}\\src\""
+                    )
+                )
 
             # 收集文件时检查中断
             files_to_search = self._collect_files(base_path, file_type, interrupt_check)
