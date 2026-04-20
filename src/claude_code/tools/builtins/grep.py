@@ -31,7 +31,8 @@ class GrepTool(Tool):
             "properties": {
                 "pattern": {
                     "type": "string",
-                    "description": "正则表达式模式"
+                    "description": "正则表达式模式",
+                    "example": "def my_function"
                 },
                 "path": {
                     "type": "string",

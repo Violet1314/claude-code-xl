@@ -38,7 +38,8 @@ class BashTool(Tool):
             "properties": {
                 "command": {
                     "type": "string",
-                    "description": "要执行的 shell 命令"
+                    "description": "要执行的 shell 命令",
+                    "example": "Get-ChildItem"
                 },
                 "timeout": {
                     "type": "integer",

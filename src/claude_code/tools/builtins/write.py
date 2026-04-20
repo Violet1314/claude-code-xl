@@ -28,11 +28,13 @@ class WriteTool(Tool):
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "文件路径（必须使用绝对路径，相对路径基于操作根目录解析）"
+                    "description": "文件路径（必须使用绝对路径，相对路径基于操作根目录解析）",
+                    "example": "E:\\项目目录\\src\\file.py"
                 },
                 "content": {
                     "type": "string",
-                    "description": "文件内容"
+                    "description": "文件内容",
+                    "example": "# Hello World\nprint('hello')\n"
                 }
             },
             "required": ["file_path", "content"],

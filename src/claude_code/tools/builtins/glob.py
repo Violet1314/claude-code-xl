@@ -28,7 +28,8 @@ class GlobTool(Tool):
             "properties": {
                 "pattern": {
                     "type": "string",
-                    "description": "glob 模式（相对模式，不能含绝对路径），如 **/*.py, src/**/*.js"
+                    "description": "glob 模式（相对模式，不能含绝对路径），如 **/*.py, src/**/*.js",
+                    "example": "**/*.py"
                 },
                 "path": {
                     "type": "string",

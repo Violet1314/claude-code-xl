@@ -2,7 +2,7 @@
 
 仿照官方 Claude Code 风格构建的 CLI AI 编程助手，支持 AI 驱动的文件操作和命令执行。
 
-**版本：v2.8.21**
+**版本：v2.8.22**
 
 ## 功能特性
 
@@ -225,6 +225,13 @@ claude-code/
 
 ## 更新日志
 
+### v2.8.22 (2026-04-22)
+**参数验证提示增强 + 根治模型连续参数错误触发熔断**
+*   ✅ 验证提示增加完整调用示例：`_build_validation_hint()` 新增 `_build_call_example()` 生成 `Tool(param="value")` 格式调用示例，模型一次即可纠正
+*   ✅ 智能示例值推断：`_get_example_value()` 优先使用 Schema `example` 字段，其次路径参数动态注入，再次参数名/类型推断
+*   ✅ 8个工具 Schema 添加 `example` 字段：Grep、Glob、Bash、Read、Write、Edit、AskUserQuestion 的必填参数均添加示例值
+*   ✅ 全量测试通过：184 passed
+
 ### v2.8.21 (2026-04-21)
 **路径容错 + Edit 行号范围模式 + 计划模式交互优化**
 *   ✅ Read/Edit 文件不存在自动搜索回退：自动在操作根目录下递归搜索同名文件，返回候选路径，一次错误即可修正
@@ -241,13 +248,6 @@ claude-code/
 *   ✅ CommandSafetyChecker 提取：BashTool 的危险/敏感/交互式/Unix语法检查提取为独立模块
 *   ✅ ToolContext 统一单例管理：全局单例统一注册到 ToolContext，退出时一键清理
 *   ✅ Rich Markup 安全防护：猴子补丁 `_console.print` + `safe_print()`，MarkupError 自动回退纯文本，**彻底根治 `[/]` 崩溃**
-*   ✅ 全量测试通过：178 passed
-
-### v2.8.19 (2026-04-19)
-**参数验证友好化 & 批量执行降级**
-*   ✅ 参数验证友好提示：`_build_validation_hint()` 从 Schema 提取必填参数描述，生成纠正性提示
-*   ✅ 批量执行降级：参数错误的工具跳过继续执行，连续3次参数错误才终止批次
-*   ✅ Schema errorMessage：8个工具的 JSON Schema 添加 `errorMessage` 字段
 *   ✅ 全量测试通过：178 passed
 ## Windows PowerShell 注意事项
 

@@ -372,6 +372,7 @@ class ToolExecutor:
         当参数验证失败时，从 Schema 中提取必填参数及其描述，
         帮助 AI 快速理解正确的参数格式，避免盲目重试。
         对路径类参数，动态注入 PathManager 当前操作根目录的路径示例。
+        同时生成完整的调用示例，让 AI 一次就能纠正。
         """
         schema = tool.get_parameters_schema()
         required = schema.get("required", [])
@@ -384,23 +385,91 @@ class ToolExecutor:
         pm = self._get_path_manager()
 
         # 检查是否缺少必填参数（错误消息中包含"缺少"关键字）
+        is_missing = "缺少" in error_msg
         missing_params = []
+        all_hints = []
         for param_name in required:
-            if f"缺少 {param_name}" in error_msg or f"缺少{param_name}" in error_msg:
-                param_schema = properties.get(param_name, {})
-                hint_line = self._format_param_hint(param_name, param_schema, pm)
+            param_schema = properties.get(param_name, {})
+            hint_line = self._format_param_hint(param_name, param_schema, pm)
+            all_hints.append(hint_line)
+            if is_missing and (f"缺少 {param_name}" in error_msg or f"缺少{param_name}" in error_msg):
                 missing_params.append(hint_line)
 
-        if not missing_params:
-            # 不是缺少参数的错误，提供通用的参数格式提示
-            hints = []
-            for param_name in required:
-                param_schema = properties.get(param_name, {})
-                hint_line = self._format_param_hint(param_name, param_schema, pm)
-                hints.append(hint_line)
-            return f"提示: {tool.name} 要求以下必填参数:\n" + "\n".join(hints)
+        # 参数描述列表
+        if is_missing and missing_params:
+            param_section = f"提示: 请补充以下必填参数:\n" + "\n".join(missing_params)
+        else:
+            param_section = f"提示: {tool.name} 要求以下必填参数:\n" + "\n".join(all_hints)
 
-        return f"提示: 请补充以下必填参数:\n" + "\n".join(missing_params)
+        # 生成完整调用示例
+        call_example = self._build_call_example(tool, required, properties, pm)
+
+        return f"{param_section}\n\n{call_example}"
+
+    def _build_call_example(self, tool: Tool, required: list, properties: dict, pm) -> str:
+        """
+        生成完整的调用示例，格式如：
+        Grep(pattern="正则表达式", path="E:\\项目目录\\src")
+        让 AI 直接看到正确的调用格式，一次即可纠正。
+        """
+        example_parts = []
+        for param_name in required:
+            param_schema = properties.get(param_name, {})
+            example_value = self._get_example_value(param_name, param_schema, pm)
+            example_parts.append(f'{param_name}="{example_value}"')
+
+        return f"正确调用示例: {tool.name}({', '.join(example_parts)})"
+
+    def _get_example_value(self, param_name: str, param_schema: dict, pm) -> str:
+        """
+        根据参数名和 Schema 推断示例值
+
+        优先使用 schema 中的 example 字段，其次根据参数名/类型推断。
+        """
+        # 1. 优先使用 schema 中定义的 example
+        if "example" in param_schema:
+            return str(param_schema["example"])
+
+        # 2. 路径类参数：动态注入 PathManager 当前操作根目录
+        if param_name in self.PATH_PARAM_NAMES and pm is not None:
+            active = pm.active_path.replace("\\", "/")
+            if param_name in ("cwd", "directory", "dir"):
+                return active
+            else:
+                return f"{active}/src/app.py"
+
+        # 3. 根据参数名推断常见模式
+        param_lower = param_name.lower()
+        if param_lower == "pattern":
+            return "搜索关键词"
+        elif param_lower == "command":
+            return "python main.py"
+        elif param_lower == "content":
+            return "文件内容"
+        elif param_lower == "new_string":
+            return "替换后的新内容"
+        elif param_lower == "question":
+            return "要询问的问题"
+        elif param_lower == "items":
+            return '[{"content": "任务描述"}]'
+        elif param_lower == "id":
+            return "t1"
+        elif param_lower == "status":
+            return "in_progress"
+        elif param_lower == "label":
+            return "选项文本"
+        elif param_lower == "value":
+            return "选项值"
+
+        # 4. 根据 type 推断
+        param_type = param_schema.get("type", "string")
+        if param_type == "integer":
+            return "1"
+        elif param_type == "boolean":
+            return "true"
+
+        # 5. 兜底
+        return f"<{param_name}>"
 
     def _format_param_hint(self, param_name: str, param_schema: dict, pm) -> str:
         """

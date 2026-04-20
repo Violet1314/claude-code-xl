@@ -24,7 +24,8 @@ class AskUserQuestionTool(Tool):
             "properties": {
                 "question": {
                     "type": "string",
-                    "description": "要询问的问题"
+                    "description": "要询问的问题",
+                    "example": "选择哪种实现方案？"
                 },
                 "options": {
                     "type": "array",

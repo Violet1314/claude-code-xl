@@ -50,23 +50,28 @@ class EditTool(Tool):
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "文件路径（必须使用绝对路径，相对路径基于操作根目录解析）"
+                    "description": "文件路径（必须使用绝对路径，相对路径基于操作根目录解析）",
+                    "example": "E:\\项目目录\\src\\file.py"
                 },
                 "old_string": {
                     "type": "string",
-                    "description": "要替换的原文（精确匹配模式）。从 Read 结果中精确复制，包括缩进、空格、换行"
+                    "description": "要替换的原文（精确匹配模式）。从 Read 结果中精确复制，包括缩进、空格、换行",
+                    "example": "print('hello')"
                 },
                 "new_string": {
                     "type": "string",
-                    "description": "替换后的新内容"
+                    "description": "替换后的新内容",
+                    "example": "print('world')"
                 },
                 "start_line": {
                     "type": "integer",
-                    "description": "行号范围模式：起始行号（从 1 开始，含）。与 end_line 一起使用，替代 old_string"
+                    "description": "行号范围模式：起始行号（从 1 开始，含）。与 end_line 一起使用，替代 old_string",
+                    "example": 10
                 },
                 "end_line": {
                     "type": "integer",
-                    "description": "行号范围模式：结束行号（含）。与 start_line 一起使用，替代 old_string"
+                    "description": "行号范围模式：结束行号（含）。与 start_line 一起使用，替代 old_string",
+                    "example": 15
                 }
             },
             "required": ["file_path", "new_string"],
