@@ -154,6 +154,17 @@ class PlanCommand(Command):
         from claude_code.ui.theme import COLORS, ICONS
         from claude_code.tools.builtins.todo import get_todo_list, reset_todo_list
 
+        # /plan stop：主动退出计划模式
+        if args and args[0].lower() == "stop":
+            if not self.app._plan_mode:
+                console.info("当前不在计划模式中")
+            else:
+                self.app._plan_mode = False
+                self.app._plan_task = ""
+                self.app._plan_reminder_count = 0
+                console.print(f"\n[{COLORS['warning']}]■ 已退出计划模式[/]")
+            return
+
         # /plan 无参数：显示当前计划
         if not args:
             todo = get_todo_list()
@@ -170,9 +181,18 @@ class PlanCommand(Command):
         # 重置旧计划
         reset_todo_list()
 
-        console.print(f"\n[bold {COLORS['primary']}]📋 计划模式[/]")
-        console.print(f"[dim]任务目标: [/][bold]{task_description}[/]")
-        console.print(f"[dim]模型将自动规划步骤并逐步执行...[/]\n")
+        from rich.panel import Panel
+        from rich.box import ROUNDED
+        console.print()
+        console.print(Panel(
+            f"[bold]{task_description}[/]\n[dim]模型将自动规划步骤并逐步执行[/]",
+            title=f"[{COLORS['primary']}]● 计划模式[/]",
+            title_align="left",
+            border_style=COLORS['primary'],
+            box=ROUNDED,
+            padding=(0, 2),
+        ))
+        console.print()
 
         # 设置计划模式标志，让 chat() 知道这是计划模式
         self.app._plan_mode = True

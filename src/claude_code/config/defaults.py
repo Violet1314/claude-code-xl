@@ -44,6 +44,8 @@ class PlanDefaults:
     MAX_ITEMS: int = 20                       # 单个计划最大任务数
     MIN_ITEMS: int = 1                        # 最小任务数
     MAX_CONTENT_LEN: int = 200                # 任务描述最大长度
+    REMINDER_MAX: int = 3                     # 计划模式最大连续提醒次数（熔断阈值）
+    NO_TOOL_ROUNDS_MAX: int = 2               # 连续无工具调用轮次阈值
 
 # 全局单例
 FILE = FileDefaults()
@@ -57,5 +59,5 @@ PLAN = PlanDefaults()
 WORKPLACE_DIR = "workplace"
 
 # 版本信息
-VERSION = "2.8.22 | Author: XieLong"
+VERSION = "2.8.25 | Author: XieLong"
 APP_NAME = "Claude Code Terminal"

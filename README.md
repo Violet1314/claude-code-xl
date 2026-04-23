@@ -2,7 +2,7 @@
 
 仿照官方 Claude Code 风格构建的 CLI AI 编程助手，支持 AI 驱动的文件操作和命令执行。
 
-**版本：v2.8.22**
+**版本：v2.8.25**
 
 ## 功能特性
 
@@ -27,7 +27,7 @@
 *   **路径范围检查** - Bash 文件操作检测是否在项目目录外
 
 ### 交互体验
-*   **计划模式** - `/plan <任务>` 让模型自主规划并逐步执行，未完成时强制继续，实时进度面板；Enter 换行支持多行描述
+*   **计划模式** - `/plan <任务>` 让模型自主规划并逐步执行，`/plan stop` 主动退出；Unicode 图标 + 进度条 + 完成仪式面板；Enter 换行支持多行描述
 *   **CTRL+C 中断** - 单击中断当前操作，双击退出程序
 *   **主动交互** - AI 可向用户询问选择，澄清需求
 *   **卡片式输出** - 工具结果美化显示，边框+图标+颜色
@@ -219,36 +219,39 @@ claude-code/
 | Grep | 🔍 | Yes | No | 正则搜索（≤30匹配） |
 | Glob | 📁 | Yes | No | 文件名搜索（≤100结果） |
 | AskUserQuestion | ❓ | Yes | No | 向用户询问 |
-| TodoCreate | 📋 | No | No | 创建任务计划（计划模式） |
-| TodoUpdate | 🔄 | No | No | 更新任务状态（计划模式） |
-| TodoList | 📋 | Yes | No | 查看当前计划（计划模式） |
+| TodoCreate | ● | No | No | 创建任务计划（计划模式） |
+| TodoUpdate | ● | No | No | 更新任务状态（计划模式） |
+| TodoList | ● | Yes | No | 查看当前计划（计划模式） |
 
 ## 更新日志
 
-### v2.8.22 (2026-04-22)
-**参数验证提示增强 + 根治模型连续参数错误触发熔断**
-*   ✅ 验证提示增加完整调用示例：`_build_validation_hint()` 新增 `_build_call_example()` 生成 `Tool(param="value")` 格式调用示例，模型一次即可纠正
-*   ✅ 智能示例值推断：`_get_example_value()` 优先使用 Schema `example` 字段，其次路径参数动态注入，再次参数名/类型推断
-*   ✅ 8个工具 Schema 添加 `example` 字段：Grep、Glob、Bash、Read、Write、Edit、AskUserQuestion 的必填参数均添加示例值
-*   ✅ 全量测试通过：184 passed
+### v2.8.25 (2026-04-24)
+**计划模式 UI 品质重构 + `/plan stop` 命令**
+*   ✅ 图标语言统一：Emoji（✅❌⏳🔄）→ Unicode（✓✗○●），与全局主题系统一致
+*   ✅ 删除冗余"← 进行中"标记，图标+颜色已足够表达
+*   ✅ 极简进度条：`████████░░░░░░░` 品牌色填充，一目了然
+*   ✅ 任务 ID 右对齐：t9→t10 不再错位
+*   ✅ 计划完成仪式感：Rule 分隔线 + 绿色总结面板
+*   ✅ `/plan` 入口 Panel 视觉框架，风格统一
+*   ✅ 统计行精简：`完成:3 | 失败:0 | 待处理:4` → `✓3  ✗0  ○4`
+*   ✅ `/plan stop` 主动退出计划模式，不清空会话
+*   ✅ 全量测试通过：185 passed
 
-### v2.8.21 (2026-04-21)
-**路径容错 + Edit 行号范围模式 + 计划模式交互优化**
-*   ✅ Read/Edit 文件不存在自动搜索回退：自动在操作根目录下递归搜索同名文件，返回候选路径，一次错误即可修正
-*   ✅ Edit 行号范围替换模式：新增 `start_line`/`end_line` 参数，无需精确复制 `old_string`，替换后返回被替换的原始内容供确认
-*   ✅ 参数验证动态路径示例：`_build_validation_hint()` 对路径类参数动态注入 PathManager 当前操作根目录示例
-*   ✅ Grep/Glob 目录不存在增强提示：提示当前操作根目录和正确路径格式
-*   ✅ 计划模式 Enter 换行：`/plan` 和 `/p` 命令 Enter 键改为换行（Esc+Enter 发送），支持多行任务描述
-*   ✅ 命令补全防覆盖：补全器只在命令名输入阶段触发，输入空格后不再补全
-*   ✅ 全量测试通过：184 passed
+### v2.8.24 (2026-04-24)
+**计划模式提醒重构：具体行动指令 + 熔断机制 + 无工具调用检测**
+*   ✅ 提醒注入具体行动指令：从"还有 N 个任务未完成"改为 `TodoUpdate(id="t3", status="completed")` 格式，模型可直接执行
+*   ✅ 提醒熔断机制：连续提醒超过 3 次未响应自动退出计划模式，防止无限循环浪费 token
+*   ✅ 连续无工具调用加强警告：连续 ≥2 轮未调用工具时追加 ⚠ 警告
+*   ✅ 提醒中注入完整任务状态列表：减少模型遗忘/猜测
+*   ✅ `PlanDefaults` 新增 `REMINDER_MAX`、`NO_TOOL_ROUNDS_MAX` 配置项
+*   ✅ 全量测试通过：185 passed
 
-### v2.8.20 (2026-04-20)
-**工具层重构 + Rich Markup 安全防护**
-*   ✅ ExecutionResult 组合持有 ToolResult：消除5个重复字段，`@property` 代理保持向后兼容
-*   ✅ CommandSafetyChecker 提取：BashTool 的危险/敏感/交互式/Unix语法检查提取为独立模块
-*   ✅ ToolContext 统一单例管理：全局单例统一注册到 ToolContext，退出时一键清理
-*   ✅ Rich Markup 安全防护：猴子补丁 `_console.print` + `safe_print()`，MarkupError 自动回退纯文本，**彻底根治 `[/]` 崩溃**
-*   ✅ 全量测试通过：178 passed
+### v2.8.23 (2026-04-23)
+**Plan 模式状态机强约束：TodoUpdate 非法状态转换拦截**
+*   ✅ Todo 状态机强校验：`pending → in_progress → completed/failed`，禁止跳步
+*   ✅ `VALID_TRANSITIONS` 状态转换表 + `update_status()` 返回详细错误
+*   ✅ TodoUpdate 工具描述增强 + 执行层接入状态机错误
+*   ✅ 全量测试通过：185 passed
 ## Windows PowerShell 注意事项
 
 ```powershell

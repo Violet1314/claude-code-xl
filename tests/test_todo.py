@@ -59,10 +59,10 @@ class TestTodoItem:
 
     def test_icons(self):
         """测试各状态图标"""
-        assert TodoItem(id="t1", content="", status="pending").icon == "⏳"
-        assert TodoItem(id="t1", content="", status="in_progress").icon == "🔄"
-        assert TodoItem(id="t1", content="", status="completed").icon == "✅"
-        assert TodoItem(id="t1", content="", status="failed").icon == "❌"
+        assert TodoItem(id="t1", content="", status="pending").icon == "○"
+        assert TodoItem(id="t1", content="", status="in_progress").icon == "●"
+        assert TodoItem(id="t1", content="", status="completed").icon == "✓"
+        assert TodoItem(id="t1", content="", status="failed").icon == "✗"
 
 
 class TestTodoList:
@@ -119,23 +119,49 @@ class TestTodoList:
         assert result is None
 
     def test_update_status(self):
-        """测试更新任务状态"""
+        """测试更新任务状态（合法转换: pending → in_progress）"""
         todo = self._make_list(3)
-        result = todo.update_status("t2", "in_progress")
+        result, error = todo.update_status("t2", "in_progress")
         assert result is True
-        assert todo.items[1].status == "in_progress"
+        assert error == ""
+        assert todo.get_item("t2").status == "in_progress"
 
     def test_update_status_not_found(self):
         """测试更新不存在的任务"""
         todo = self._make_list(3)
-        result = todo.update_status("t99", "completed")
+        result, error = todo.update_status("t99", "in_progress")
         assert result is False
+        assert "未找到任务" in error
 
     def test_update_status_invalid(self):
         """测试更新为无效状态"""
         todo = self._make_list(3)
-        result = todo.update_status("t1", "running")
+        result, error = todo.update_status("t1", "running")
         assert result is False
+        assert "无效状态" in error
+
+    def test_update_status_invalid_transition(self):
+        """测试非法状态转换"""
+        todo = self._make_list(3)
+        # pending → completed 被禁止
+        result, error = todo.update_status("t1", "completed")
+        assert result is False
+        assert "尚未开始" in error or "pending" in error
+
+        # pending → failed 被禁止
+        result, error = todo.update_status("t2", "failed")
+        assert result is False
+
+        # 正确流程: pending → in_progress → completed
+        result, error = todo.update_status("t1", "in_progress")
+        assert result is True
+        result, error = todo.update_status("t1", "completed")
+        assert result is True
+
+        # 已完成不可变更
+        result, error = todo.update_status("t1", "in_progress")
+        assert result is False
+        assert "已完成" in error
 
     def test_get_item(self):
         """测试按 ID 获取任务"""
@@ -143,7 +169,6 @@ class TestTodoList:
         item = todo.get_item("t2")
         assert item is not None
         assert item.content == "任务2"
-
     def test_get_item_not_found(self):
         """测试获取不存在的任务"""
         todo = self._make_list(3)
@@ -160,6 +185,7 @@ class TestTodoList:
     def test_get_next_pending_skip_done(self):
         """测试跳过已完成的任务"""
         todo = self._make_list(3)
+        todo.update_status("t1", "in_progress")
         todo.update_status("t1", "completed")
         next_item = todo.get_next_pending()
         assert next_item.id == "t2"
@@ -167,7 +193,9 @@ class TestTodoList:
     def test_get_next_pending_all_done(self):
         """测试全部完成时返回 None"""
         todo = self._make_list(2)
+        todo.update_status("t1", "in_progress")
         todo.update_status("t1", "completed")
+        todo.update_status("t2", "in_progress")
         todo.update_status("t2", "completed")
         assert todo.get_next_pending() is None
 
@@ -181,7 +209,9 @@ class TestTodoList:
     def test_counts(self):
         """测试各种计数"""
         todo = self._make_list(4)
+        todo.update_status("t1", "in_progress")
         todo.update_status("t1", "completed")
+        todo.update_status("t2", "in_progress")
         todo.update_status("t2", "failed")
         todo.update_status("t3", "in_progress")
         # t1=completed, t2=failed, t3=in_progress, t4=pending
@@ -196,8 +226,10 @@ class TestTodoList:
         """测试全部完成判定"""
         todo = self._make_list(2)
         assert todo.is_all_done is False
+        todo.update_status("t1", "in_progress")
         todo.update_status("t1", "completed")
         assert todo.is_all_done is False
+        todo.update_status("t2", "in_progress")
         todo.update_status("t2", "failed")
         assert todo.is_all_done is True  # failed 也算结束
 
@@ -210,6 +242,7 @@ class TestTodoList:
         """测试进度文本"""
         todo = self._make_list(3)
         assert todo.progress_text == "0/3"
+        todo.update_status("t1", "in_progress")
         todo.update_status("t1", "completed")
         assert todo.progress_text == "1/3"
 
@@ -338,9 +371,16 @@ class TestTodoUpdateTool:
         assert todo.items[0].status == "in_progress"
 
     def test_update_to_completed(self):
-        """测试更新为完成"""
+        """测试更新为完成（需要先 in_progress）"""
         from claude_code.tools.builtins.todo import TodoUpdateTool, get_todo_list
         tool = TodoUpdateTool()
+        # 直接 pending → completed 会被拒绝
+        result = tool.execute({"id": "t1", "status": "completed"})
+        assert result.success is False
+
+        # 正确流程：pending → in_progress → completed
+        result = tool.execute({"id": "t1", "status": "in_progress"})
+        assert result.success is True
         result = tool.execute({"id": "t1", "status": "completed"})
         assert result.success is True
         todo = get_todo_list()
@@ -350,7 +390,7 @@ class TestTodoUpdateTool:
         """测试更新不存在的任务"""
         from claude_code.tools.builtins.todo import TodoUpdateTool
         tool = TodoUpdateTool()
-        result = tool.execute({"id": "t99", "status": "completed"})
+        result = tool.execute({"id": "t99", "status": "in_progress"})
         assert result.success is False
 
     def test_update_invalid_status(self):
@@ -472,6 +512,7 @@ class TestTodoIntegration:
 
         # 第一轮
         create_tool.execute({"items": [{"content": "旧任务1"}, {"content": "旧任务2"}]})
+        update_tool.execute({"id": "t1", "status": "in_progress"})
         update_tool.execute({"id": "t1", "status": "completed"})
 
         # 第二轮（覆盖）
@@ -527,14 +568,15 @@ class TestTodoIntegration:
             {"content": "进行中任务"},
             {"content": "待处理任务"},
         ]})
+        update_tool.execute({"id": "t1", "status": "in_progress"})
         update_tool.execute({"id": "t1", "status": "completed"})
         update_tool.execute({"id": "t2", "status": "in_progress"})
 
         todo = get_todo_list()
         text = todo.to_prompt_text()
-        assert "✅" in text
-        assert "🔄" in text
-        assert "⏳" in text
+        assert "✓" in text
+        assert "●" in text
+        assert "○" in text
 
     def test_reset_clears_everything(self):
         """测试重置清空所有状态"""

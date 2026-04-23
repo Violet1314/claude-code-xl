@@ -26,7 +26,7 @@ class SafeTextColumn(TextColumn):
             return Text.from_markup(task.description)
         return Text("")
 from claude_code.config.settings import Settings, load_settings
-from claude_code.config.defaults import VERSION, APP_NAME, WORKPLACE_DIR, TOOL
+from claude_code.config.defaults import VERSION, APP_NAME, WORKPLACE_DIR, TOOL, PLAN
 from claude_code.core.client import APIClient
 from claude_code.core.conversation import Conversation
 from claude_code.core.files import FileManager
@@ -112,6 +112,7 @@ class Application:
         # 计划模式状态
         self._plan_mode: bool = False            # 是否处于计划模式
         self._plan_task: str = ""                # 计划模式任务描述
+        self._plan_reminder_count: int = 0       # 计划模式连续提醒计数（熔断用）
 
 
     def _setup_system_prompt(self) -> None:
@@ -276,12 +277,16 @@ class Application:
                 from claude_code.tools.builtins.todo import get_todo_list
                 from claude_code.ui.components import show_todo_panel
                 todo = get_todo_list()
+                # 有工具执行，说明模型在推进，重置提醒计数
+                self._plan_reminder_count = 0
                 if todo.items:
                     console.print()
                     show_todo_panel(todo)
                     # 全部完成时退出计划模式
                     if todo.is_all_done:
-                        console.print(f"\n[{COLORS['success']}]{ICONS['success']} 计划执行完成！[/]")
+                        from claude_code.ui.components import show_plan_complete
+                        console.print()
+                        show_plan_complete(todo)
                         self._plan_mode = False
                         self._plan_task = ""
                         break
@@ -297,16 +302,55 @@ class Application:
                     from claude_code.tools.builtins.todo import get_todo_list
                     todo = get_todo_list()
                     if todo.items and not todo.is_all_done:
-                        pending = todo.pending_count
-                        in_progress_count = sum(1 for item in todo.items if item.status == "in_progress")
+                        # 熔断检查：连续提醒超过上限则退出计划模式
+                        self._plan_reminder_count += 1
+                        if self._plan_reminder_count > PLAN.REMINDER_MAX:
+                            console.print(
+                                f"\n[{COLORS['warning']}]{ICONS['warning']} "
+                                f"计划模式连续 {PLAN.REMINDER_MAX} 次提醒未响应，自动退出计划模式[/]"
+                            )
+                            self._plan_mode = False
+                            self._plan_task = ""
+                            self._plan_reminder_count = 0
+                            break
+
+                        # 构建具体行动指令：告诉模型该调什么工具、传什么参数
+                        in_progress_items = [t for t in todo.items if t.status == "in_progress"]
+                        pending_items = [t for t in todo.items if t.status == "pending"]
+
+                        if in_progress_items:
+                            task = in_progress_items[0]
+                            action_hint = (
+                                f"请立即调用 TodoUpdate(id=\"{task.id}\", status=\"completed\") "
+                                f"标记当前任务为完成，然后继续执行下一个任务。"
+                            )
+                        elif pending_items:
+                            task = pending_items[0]
+                            action_hint = (
+                                f"请调用 TodoUpdate(id=\"{task.id}\", status=\"in_progress\") "
+                                f"开始下一个任务，然后执行实际工作。"
+                            )
+                        else:
+                            action_hint = "请检查任务状态并继续执行。"
+
+                        # 连续无工具调用加强警告
+                        no_tool_warning = ""
+                        if self._plan_reminder_count >= PLAN.NO_TOOL_ROUNDS_MAX:
+                            no_tool_warning = (
+                                f"\n⚠ 你已连续 {self._plan_reminder_count} 轮未调用任何工具！"
+                                f"计划模式下必须通过工具调用来推进任务，请立即执行上述行动。"
+                            )
+
                         remind = (
-                            f"[系统提醒] 你当前处于计划模式，还有 {pending} 个任务未完成。"
-                            f"请不要停止，继续执行下一个任务。"
+                            f"[系统提醒] 你当前处于计划模式，进度：{todo.progress_text}\n"
+                            f"当前任务状态：\n{todo.to_prompt_text()}\n\n"
+                            f"行动：{action_hint}\n\n"
+                            f"注意：你必须调用工具来推进任务，不允许只输出文字。"
+                            f"（提醒 {self._plan_reminder_count}/{PLAN.REMINDER_MAX}）"
+                            f"{no_tool_warning}"
                         )
-                        if in_progress_count > 0:
-                            remind += " 当前有任务标记为 in_progress，请先完成它。"
                         self.conversation.add_user_message(remind)
-                        console.print(f"[dim]{ICONS['info']} 计划模式：检测到模型提前停止，已注入继续提醒 ({todo.progress_text})[/]")
+                        console.print(f"[dim]{ICONS['info']} 计划模式：检测到模型提前停止，已注入行动提醒 ({todo.progress_text}) [{self._plan_reminder_count}/{PLAN.REMINDER_MAX}][/]")
                         continue
                 break
 
@@ -789,6 +833,7 @@ class Application:
         self.tool_executor.clear_history()
         self._plan_mode = False
         self._plan_task = ""
+        self._plan_reminder_count = 0
         self._setup_system_prompt()  # 重新设置系统提示词（含路径环境）
         self._update_input_state()
 

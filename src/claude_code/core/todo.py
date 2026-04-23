@@ -17,6 +17,18 @@ class TodoItem:
     VALID_STATUSES = ("pending", "in_progress", "completed", "failed")
     VALID_PRIORITIES = ("high", "medium", "low")
 
+    # 合法状态转换规则（状态机）
+    # pending → in_progress ✅ 开始任务
+    # in_progress → completed ✅ 完成任务
+    # in_progress → failed ✅ 任务失败
+    # 其他转换 ❌ 禁止
+    VALID_TRANSITIONS = {
+        "pending": ("in_progress",),           # pending 只能转到 in_progress
+        "in_progress": ("completed", "failed"), # in_progress 可以完成或失败
+        "completed": (),                        # 已完成不可变更
+        "failed": (),                           # 已失败不可变更
+    }
+
     def __post_init__(self):
         """校验参数"""
         if self.status not in self.VALID_STATUSES:
@@ -33,10 +45,10 @@ class TodoItem:
     def icon(self) -> str:
         """状态图标"""
         icons = {
-            "pending": "⏳",
-            "in_progress": "🔄",
-            "completed": "✅",
-            "failed": "❌",
+            "pending": "○",
+            "in_progress": "●",
+            "completed": "✓",
+            "failed": "✗",
         }
         return icons.get(self.status, "⏳")
 
@@ -77,25 +89,37 @@ class TodoList:
         self.items.append(item)
         return item
 
-    def update_status(self, item_id: str, status: str) -> bool:
+    def update_status(self, item_id: str, status: str) -> tuple[bool, str]:
         """
-        更新任务状态
+        更新任务状态（带状态机验证）
 
         Args:
             item_id: 任务ID
             status: 新状态
 
         Returns:
-            成功返回 True，未找到或状态无效返回 False
+            (成功与否, 错误信息) 元组
+            成功返回 (True, "")，失败返回 (False, "错误原因")
         """
         if status not in TodoItem.VALID_STATUSES:
-            return False
+            return False, f"无效状态: {status}，合法值: {TodoItem.VALID_STATUSES}"
 
         for item in self.items:
             if item.id == item_id:
+                # 状态机验证：检查转换是否合法
+                if status not in TodoItem.VALID_TRANSITIONS.get(item.status, ()):
+                    if item.status == "completed":
+                        return False, f"任务 {item_id} 已完成，不可变更状态"
+                    elif item.status == "failed":
+                        return False, f"任务 {item_id} 已失败，不可变更状态"
+                    elif item.status == "pending" and status in ("completed", "failed"):
+                        return False, f"任务 {item_id} 尚未开始（pending），请先调用 TodoUpdate(id, 'in_progress') 标记为进行中，完成实际工作后再标记为 {status}"
+                    else:
+                        return False, f"任务 {item_id} 不允许从 [{item.status}] 转换到 [{status}]"
+
                 item.status = status
-                return True
-        return False
+                return True, ""
+        return False, f"未找到任务: {item_id}"
 
     def get_item(self, item_id: str) -> Optional[TodoItem]:
         """根据 ID 获取任务项"""

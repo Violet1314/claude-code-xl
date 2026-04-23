@@ -93,9 +93,8 @@ class TodoCreateTool(Tool):
             success=True,
             output="\n".join(output_lines),
             summary=f"创建计划：{todo.total_count} 个任务",
-            display_output=f"[bold green]📋 计划已创建[/] 共 {todo.total_count} 个任务",
+            display_output=f"[bold green]● 计划已创建[/] 共 {todo.total_count} 个任务",
         )
-
     def is_read_only(self) -> bool:
         return False
 
@@ -117,7 +116,18 @@ class TodoUpdateTool(Tool):
     description = (
         "更新任务状态。模型执行任务时使用此工具标记进度。\n"
         "状态值：pending（待处理）→ in_progress（进行中）→ completed（已完成）/ failed（失败）\n"
-        "建议：开始执行任务时标记为 in_progress，完成后标记为 completed"
+        "\n"
+        "⚠️ 状态转换规则（强制约束）：\n"
+        "- pending → in_progress：开始执行任务时调用\n"
+        "- in_progress → completed：完成实际工作后调用\n"
+        "- in_progress → failed：任务失败时调用\n"
+        "\n"
+        "❌ 禁止的转换：\n"
+        "- pending → completed：必须先标记 in_progress，执行实际工作后再标记 completed\n"
+        "- pending → failed：必须先标记 in_progress\n"
+        "- completed/failed → 任意状态：已结束的任务不可变更\n"
+        "\n"
+        "正确示例：TodoUpdate(id=\"t1\", status=\"in_progress\") → 执行工作 → TodoUpdate(id=\"t1\", status=\"completed\")"
     )
 
     def get_parameters_schema(self) -> Dict[str, Any]:
@@ -166,12 +176,13 @@ class TodoUpdateTool(Tool):
         # 记录旧状态
         old_status = item.status
 
-        # 更新状态
-        if not todo.update_status(item_id, status):
+        # 更新状态（带状态机验证）
+        success, error_msg = todo.update_status(item_id, status)
+        if not success:
             return ToolResult(
                 success=False,
                 output="",
-                error=f"无效状态: {status}",
+                error=error_msg,
             )
 
         # 构建输出
@@ -226,20 +237,20 @@ class TodoListTool(Tool):
 
         # 构建输出
         output_lines = [
-            f"📋 执行计划 [{todo.progress_text}]",
+            f"执行计划 [{todo.progress_text}]",
             "",
         ]
         for item in todo.items:
             output_lines.append(f"  {item.icon} {item.id}  {item.content}  [{item.status}]")
 
         output_lines.append("")
-        output_lines.append(f"完成: {todo.completed_count} | 失败: {todo.failed_count} | 待处理: {todo.pending_count}")
+        output_lines.append(f"✓{todo.completed_count}  ✗{todo.failed_count}  ○{todo.pending_count}")
 
         return ToolResult(
             success=True,
             output="\n".join(output_lines),
             summary=f"计划进度: {todo.progress_text}",
-            display_output=f"[bold]📋 执行计划[/] [{todo.progress_text}]",
+            display_output=f"[bold]● 执行计划[/] [{todo.progress_text}]",
         )
 
     def is_read_only(self) -> bool:
