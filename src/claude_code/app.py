@@ -305,9 +305,10 @@ class Application:
                         # 熔断检查：连续提醒超过上限则退出计划模式
                         self._plan_reminder_count += 1
                         if self._plan_reminder_count > PLAN.REMINDER_MAX:
-                            console.print(
-                                f"\n[{COLORS['warning']}]{ICONS['warning']} "
-                                f"计划模式连续 {PLAN.REMINDER_MAX} 次提醒未响应，自动退出计划模式[/]"
+                            from claude_code.ui.components import show_plan_aborted
+                            show_plan_aborted(
+                                f"模型连续 {PLAN.REMINDER_MAX} 次未按计划调用工具推进任务",
+                                todo,
                             )
                             self._plan_mode = False
                             self._plan_task = ""

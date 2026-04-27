@@ -156,23 +156,25 @@ class PlanCommand(Command):
 
         # /plan stop：主动退出计划模式
         if args and args[0].lower() == "stop":
+            todo = get_todo_list()
             if not self.app._plan_mode:
                 console.info("当前不在计划模式中")
+                if todo.items:
+                    from claude_code.ui.components import show_plan_status
+                    show_plan_status(todo, active=False)
             else:
                 self.app._plan_mode = False
                 self.app._plan_task = ""
                 self.app._plan_reminder_count = 0
-                console.print(f"\n[{COLORS['warning']}]■ 已退出计划模式[/]")
+                from claude_code.ui.components import show_plan_stopped
+                show_plan_stopped(todo)
             return
 
-        # /plan 无参数：显示当前计划
-        if not args:
+        # /plan status 或 /plan 无参数：显示当前计划
+        if not args or args[0].lower() == "status":
             todo = get_todo_list()
-            if not todo.items:
-                console.info("当前没有执行计划。用法: /plan <任务描述>")
-            else:
-                from claude_code.ui.components import show_todo_panel
-                show_todo_panel(todo)
+            from claude_code.ui.components import show_plan_status
+            show_plan_status(todo, active=self.app._plan_mode)
             return
 
         # /plan <任务描述>：进入计划模式
@@ -192,11 +194,10 @@ class PlanCommand(Command):
             box=ROUNDED,
             padding=(0, 2),
         ))
-        console.print()
-
         # 设置计划模式标志，让 chat() 知道这是计划模式
         self.app._plan_mode = True
         self.app._plan_task = task_description
+        self.app._plan_reminder_count = 0
 
         # 直接调用 chat()，模型会通过 TodoCreate 工具创建计划
         self.app.chat(task_description)

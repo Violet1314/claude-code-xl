@@ -596,5 +596,118 @@ class TestTodoIntegration:
         assert todo.items == []
 
 
+
+class TestTodoImprovements:
+    """计划模式增强行为测试"""
+
+    def setup_method(self):
+        from claude_code.tools.builtins.todo import reset_todo_list
+        reset_todo_list()
+
+    def test_only_one_in_progress_allowed(self):
+        """同一时间只允许一个任务处于 in_progress"""
+        todo = TodoList.create_from_dicts([
+            {"content": "任务1"},
+            {"content": "任务2"},
+        ])
+
+        result, error = todo.update_status("t1", "in_progress")
+        assert result is True
+        assert error == ""
+
+        result, error = todo.update_status("t2", "in_progress")
+        assert result is False
+        assert "已有任务 t1 正在进行中" in error
+        assert "TodoUpdate" in error
+        assert todo.get_item("t2").status == "pending"
+
+    def test_get_in_progress_item(self):
+        """可获取当前进行中任务"""
+        todo = TodoList.create_from_dicts([
+            {"content": "任务1"},
+            {"content": "任务2"},
+        ])
+        assert todo.get_in_progress_item() is None
+
+        todo.update_status("t2", "in_progress")
+        active = todo.get_in_progress_item()
+        assert active is not None
+        assert active.id == "t2"
+
+    def test_create_tool_reports_skipped_items(self):
+        """TodoCreate 对超上限/空内容忽略项给出明确提示"""
+        from claude_code.tools.builtins.todo import TodoCreateTool, get_todo_list
+
+        tool = TodoCreateTool()
+        items = [{"content": f"任务{i}"} for i in range(PLAN.MAX_ITEMS + 2)]
+        items.append({"content": "   "})
+
+        result = tool.execute({"items": items})
+
+        assert result.success is True
+        assert get_todo_list().total_count == PLAN.MAX_ITEMS
+        assert "忽略" in result.output
+        assert "上限" in result.output
+        assert "忽略" in result.summary
+        assert "忽略" in result.display_output
+
+
+class TestPlanCommandImprovements:
+    """/plan 命令增强行为测试"""
+
+    class DummyApp:
+        def __init__(self):
+            self._plan_mode = False
+            self._plan_task = ""
+            self._plan_reminder_count = 0
+            self.chat_called_with = None
+
+        def chat(self, task_description):
+            self.chat_called_with = task_description
+
+    def setup_method(self):
+        from claude_code.tools.builtins.todo import reset_todo_list
+        reset_todo_list()
+
+    def test_plan_status_does_not_start_chat(self, monkeypatch):
+        """/plan status 只展示状态，不启动 chat"""
+        from claude_code.commands.handlers import PlanCommand
+        from claude_code.tools.builtins.todo import TodoCreateTool
+        from claude_code.ui import components
+
+        TodoCreateTool().execute({"items": [{"content": "任务1"}]})
+        calls = []
+        monkeypatch.setattr(components, "show_plan_status", lambda todo, active=False: calls.append((todo.total_count, active)))
+
+        app = self.DummyApp()
+        app._plan_mode = True
+        PlanCommand(app).execute(["status"])
+
+        assert app.chat_called_with is None
+        assert calls == [(1, True)]
+
+    def test_plan_stop_shows_summary_and_resets_state(self, monkeypatch):
+        """/plan stop 主动退出并展示摘要"""
+        from claude_code.commands.handlers import PlanCommand
+        from claude_code.tools.builtins.todo import TodoCreateTool
+        from claude_code.ui import components
+
+        TodoCreateTool().execute({"items": [{"content": "任务1"}]})
+        calls = []
+        monkeypatch.setattr(components, "show_plan_stopped", lambda todo: calls.append(todo.total_count))
+
+        app = self.DummyApp()
+        app._plan_mode = True
+        app._plan_task = "旧任务"
+        app._plan_reminder_count = 2
+
+        PlanCommand(app).execute(["stop"])
+
+        assert app._plan_mode is False
+        assert app._plan_task == ""
+        assert app._plan_reminder_count == 0
+        assert calls == [1]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

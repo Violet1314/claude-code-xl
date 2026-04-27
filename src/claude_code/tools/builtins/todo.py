@@ -85,15 +85,25 @@ class TodoCreateTool(Tool):
         _todo_list = todo
 
         # 构建输出
+        input_count = len(items_data)
+        skipped_count = max(0, input_count - todo.total_count)
         output_lines = [f"已创建 {todo.total_count} 个任务："]
+        if skipped_count > 0:
+            output_lines.append(
+                f"⚠ 另有 {skipped_count} 个任务因超过上限或内容为空被忽略（上限 {PLAN.MAX_ITEMS} 个）"
+            )
         for item in todo.items:
             output_lines.append(f"  {item.icon} {item.id}  {item.content}  [{item.priority}]")
+
+        display_output = f"[bold green]● 计划已创建[/] 共 {todo.total_count} 个任务"
+        if skipped_count > 0:
+            display_output += f" [yellow](忽略 {skipped_count} 个)[/]"
 
         return ToolResult(
             success=True,
             output="\n".join(output_lines),
-            summary=f"创建计划：{todo.total_count} 个任务",
-            display_output=f"[bold green]● 计划已创建[/] 共 {todo.total_count} 个任务",
+            summary=f"创建计划：{todo.total_count} 个任务" + (f"，忽略 {skipped_count} 个" if skipped_count else ""),
+            display_output=display_output,
         )
     def is_read_only(self) -> bool:
         return False

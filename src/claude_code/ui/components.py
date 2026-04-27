@@ -415,6 +415,17 @@ def show_todo_panel(todo_list) -> None:
     con.print(panel)
 
 
+def _format_plan_stats(todo_list) -> str:
+    """格式化计划统计行。"""
+    return (
+        f"总任务：{todo_list.total_count}  "
+        f"✓ 完成：{todo_list.completed_count}  "
+        f"✗ 失败：{todo_list.failed_count}  "
+        f"● 进行中：{todo_list.in_progress_count}  "
+        f"○ 待处理：{todo_list.pending_count}"
+    )
+
+
 def show_plan_complete(todo_list) -> None:
     """显示计划完成仪式
 
@@ -422,22 +433,21 @@ def show_plan_complete(todo_list) -> None:
         todo_list: TodoList 实例
     """
     con = console.get_console()
-
-    # 分隔线
     con.print(Rule(style=COLORS['success']))
 
-    # 完成面板
-    completed = todo_list.completed_count
-    failed = todo_list.failed_count
-    total = todo_list.total_count
-
-    summary_parts = [f"✓ {completed} 完成"]
-    if failed > 0:
-        summary_parts.append(f"✗ {failed} 失败")
-    summary = "  ".join(summary_parts)
+    failed_items = [item for item in todo_list.items if item.status == "failed"]
+    lines = [
+        f"[{COLORS['success']}]计划已结束[/]  [dim]{todo_list.progress_text}[/]",
+        f"[dim]{_format_plan_stats(todo_list)}[/]",
+    ]
+    if failed_items:
+        lines.append("")
+        lines.append(f"[{COLORS['error']}]失败任务[/]")
+        for item in failed_items:
+            lines.append(f"  ✗ {item.id}  {item.content}")
 
     panel = Panel(
-        f"[{COLORS['success']}]{summary}[/]  [dim]{completed}/{total}[/]",
+        "\n".join(lines),
         title=f"[{COLORS['success']}]✓ 执行完成[/]",
         title_align="left",
         border_style=COLORS['success'],
@@ -445,3 +455,52 @@ def show_plan_complete(todo_list) -> None:
         padding=(0, 2),
     )
     con.print(panel)
+
+
+def show_plan_status(todo_list, active: bool = False) -> None:
+    """显示当前计划状态。"""
+    if not todo_list.items:
+        show_message_box("计划状态", "当前没有执行计划。用法: /plan <任务描述>", level="info")
+        return
+
+    show_todo_panel(todo_list)
+    mode_text = "运行中" if active else "未运行"
+    hint = "/plan stop 退出计划模式" if active else "/plan <任务描述> 开始新计划"
+    show_message_box(
+        "计划状态",
+        f"状态：{mode_text}\n{_format_plan_stats(todo_list)}\n操作：{hint}",
+        level="info",
+        icon="●" if active else "○",
+    )
+
+
+def show_plan_stopped(todo_list) -> None:
+    """显示主动退出计划模式摘要。"""
+    if not todo_list.items:
+        show_message_box("已退出计划模式", "当前没有执行计划。", level="warning", icon="■")
+        return
+
+    unfinished = [item for item in todo_list.items if not item.is_done]
+    lines = [
+        f"进度：{todo_list.progress_text}",
+        f"[dim]{_format_plan_stats(todo_list)}[/]",
+    ]
+    if unfinished:
+        lines.append("")
+        lines.append("未完成任务：")
+        for item in unfinished:
+            lines.append(f"  {item.icon} {item.id}  {item.content}")
+    else:
+        lines.append("所有任务均已结束。")
+
+    show_message_box("已退出计划模式", "\n".join(lines), level="warning", icon="■")
+
+
+def show_plan_aborted(reason: str, todo_list=None) -> None:
+    """显示计划模式自动退出原因。"""
+    lines = [f"原因：{reason}"]
+    if todo_list is not None and todo_list.items:
+        lines.append(f"进度：{todo_list.progress_text}")
+        lines.append(f"[dim]{_format_plan_stats(todo_list)}[/]")
+    lines.append("建议：重新执行 /plan <任务>，或手动继续当前任务。")
+    show_message_box("计划模式已自动退出", "\n".join(lines), level="warning", icon="⚠")

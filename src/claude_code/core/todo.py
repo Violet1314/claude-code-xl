@@ -104,22 +104,37 @@ class TodoList:
         if status not in TodoItem.VALID_STATUSES:
             return False, f"无效状态: {status}，合法值: {TodoItem.VALID_STATUSES}"
 
-        for item in self.items:
-            if item.id == item_id:
-                # 状态机验证：检查转换是否合法
-                if status not in TodoItem.VALID_TRANSITIONS.get(item.status, ()):
-                    if item.status == "completed":
-                        return False, f"任务 {item_id} 已完成，不可变更状态"
-                    elif item.status == "failed":
-                        return False, f"任务 {item_id} 已失败，不可变更状态"
-                    elif item.status == "pending" and status in ("completed", "failed"):
-                        return False, f"任务 {item_id} 尚未开始（pending），请先调用 TodoUpdate(id, 'in_progress') 标记为进行中，完成实际工作后再标记为 {status}"
-                    else:
-                        return False, f"任务 {item_id} 不允许从 [{item.status}] 转换到 [{status}]"
+        target = self.get_item(item_id)
+        if target is None:
+            return False, f"未找到任务: {item_id}"
 
-                item.status = status
-                return True, ""
-        return False, f"未找到任务: {item_id}"
+        # 同一时间只允许一个任务处于 in_progress，避免计划模式并行漂移。
+        if status == "in_progress":
+            active = self.get_in_progress_item()
+            if active is not None and active.id != item_id:
+                return False, (
+                    f"已有任务 {active.id} 正在进行中，请先调用 "
+                    f"TodoUpdate(id=\"{active.id}\", status=\"completed\") 或 "
+                    f"TodoUpdate(id=\"{active.id}\", status=\"failed\") 结束当前任务"
+                )
+
+        # 状态机验证：检查转换是否合法
+        if status not in TodoItem.VALID_TRANSITIONS.get(target.status, ()):
+            if target.status == "completed":
+                return False, f"任务 {item_id} 已完成，不可变更状态"
+            elif target.status == "failed":
+                return False, f"任务 {item_id} 已失败，不可变更状态"
+            elif target.status == "pending" and status in ("completed", "failed"):
+                return False, (
+                    f"任务 {item_id} 尚未开始（pending），不能直接标记为 {status}。"
+                    f"下一步：请先调用 TodoUpdate(id=\"{item_id}\", status=\"in_progress\")，"
+                    f"完成实际工作后再标记为 {status}"
+                )
+            else:
+                return False, f"任务 {item_id} 不允许从 [{target.status}] 转换到 [{status}]"
+
+        target.status = status
+        return True, ""
 
     def get_item(self, item_id: str) -> Optional[TodoItem]:
         """根据 ID 获取任务项"""
@@ -128,6 +143,12 @@ class TodoList:
                 return item
         return None
 
+    def get_in_progress_item(self) -> Optional[TodoItem]:
+        """获取当前进行中的任务（计划模式约束：最多一个）"""
+        for item in self.items:
+            if item.status == "in_progress":
+                return item
+        return None
     def get_next_pending(self) -> Optional[TodoItem]:
         """获取下一个待执行的任务"""
         for item in self.items:
