@@ -29,7 +29,7 @@ class ToolResult:
         if self.success:
             return f"✓ {self.summary or self.output[:50]}"
         if self.interrupted:
-            return f"⚡ {self.error or '用户中断'}"
+            return f"⚠ {self.error or '用户中断'}"
         return f"✗ {self.error or self.output}"
 
 

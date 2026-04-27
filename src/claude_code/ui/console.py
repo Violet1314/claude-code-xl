@@ -126,7 +126,7 @@ def _show_panel_box(
         lines.append(content)
     
     if suggestion:
-        lines.append(f"\n[dim]💡 建议: {suggestion}[/]")
+        lines.append(f"\n[dim]{ICONS['info']} 建议: {suggestion}[/]")
         
     final_content = "\n".join(lines) if lines else ""
 
@@ -197,7 +197,7 @@ def code(content: str, language: str = "python") -> None:
 # ============================================================
 def rule(style: str = None) -> None:
     """显示分割线"""
-    _console.print(Rule(style=style or COLORS['border_subtle']))
+    _console.print(Rule(style=style or COLORS['border']))
 
 def blank(count: int = 1) -> None:
     """显示空行"""

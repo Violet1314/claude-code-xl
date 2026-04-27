@@ -18,10 +18,10 @@ class TodoItem:
     VALID_PRIORITIES = ("high", "medium", "low")
 
     # 合法状态转换规则（状态机）
-    # pending → in_progress ✅ 开始任务
-    # in_progress → completed ✅ 完成任务
-    # in_progress → failed ✅ 任务失败
-    # 其他转换 ❌ 禁止
+    # pending → in_progress ✓ 开始任务
+    # in_progress → completed ✓ 完成任务
+    # in_progress → failed ✓ 任务失败
+    # 其他转换 ✗ 禁止
     VALID_TRANSITIONS = {
         "pending": ("in_progress",),           # pending 只能转到 in_progress
         "in_progress": ("completed", "failed"), # in_progress 可以完成或失败

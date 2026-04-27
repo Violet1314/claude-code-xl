@@ -4,6 +4,7 @@ from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 
 from claude_code.config.defaults import FILE
+from claude_code.ui.theme import ICONS
 from claude_code.utils.tokens import estimate_tokens
 from claude_code.utils.paths import (
     resolve_path,
@@ -269,7 +270,7 @@ class FileManager:
         if self.is_empty:
             return None
         
-        parts = [f"[📎 已挂载 {self.count} 个文件]\n"]
+        parts = [f"[{ICONS['file']} 已挂载 {self.count} 个文件]\n"]
         
         for path, file in self._files.items():
             ext = get_extension(path)

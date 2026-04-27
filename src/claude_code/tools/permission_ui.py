@@ -65,7 +65,7 @@ class PermissionUI:
             content_text,
             title=title_text,
             title_align="left",
-            border_style=COLORS['border_default'],
+            border_style=COLORS['border'],
             box=ROUNDED,
             padding=(1, 2),
         )
@@ -101,15 +101,15 @@ class PermissionUI:
     def _get_tool_icon(tool_name: str) -> str:
         """获取工具图标"""
         icons = {
-            "Read": ICONS.get('read', '📄'),
-            "Write": ICONS.get('write', '✎'),
-            "Edit": ICONS.get('edit', '✐'),
-            "Bash": ICONS.get('bash', '⚡'),
-            "Grep": ICONS.get('grep', '🔍'),
-            "Glob": ICONS.get('glob', '📂'),
-            "AskUserQuestion": ICONS.get('ask', '💬'),
+            "Read": ICONS.get('read', '◇'),
+            "Write": ICONS.get('write', '▼'),
+            "Edit": ICONS.get('edit', '✎'),
+            "Bash": ICONS.get('bash', '▶'),
+            "Grep": ICONS.get('grep', '◆'),
+            "Glob": ICONS.get('glob', '◎'),
+            "AskUserQuestion": ICONS.get('ask', '◈'),
         }
-        return icons.get(tool_name, ICONS.get('file', '📄'))
+        return icons.get(tool_name, ICONS.get('file', '○'))
 
     @staticmethod
     def show_result(allowed: bool, level: PermissionLevel) -> None:

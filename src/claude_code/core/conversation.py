@@ -280,15 +280,15 @@ class Conversation:
         
         for tool_name, status in matches:
             if status == "success":
-                summaries.append(f"✅ {tool_name}")
+                summaries.append(f"✓ {tool_name}")
             elif status == "error":
-                summaries.append(f"❌ {tool_name}")
+                summaries.append(f"✗ {tool_name}")
             elif status == "skipped":
-                summaries.append(f"⏭️ {tool_name}")
+                summaries.append(f"○ {tool_name}")
             elif status == "interrupted":
-                summaries.append(f"⚡ {tool_name}")
+                summaries.append(f"⚠ {tool_name}")
             else:
-                summaries.append(f"❓ {tool_name}({status})")
+                summaries.append(f"? {tool_name}({status})")
         
         if summaries:
             summary_text = ", ".join(summaries)

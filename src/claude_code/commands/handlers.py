@@ -16,7 +16,7 @@ class HelpCommand(Command):
         from claude_code.ui.theme import COLORS, ICONS
 
         console.blank()
-        console.print(f"[bold {COLORS['primary']}]📖 可用命令[/]")
+        console.print(f"[bold {COLORS['primary']}]{ICONS['info']} 可用命令[/]")
         console.rule()
 
         if self.app and hasattr(self.app, 'commands'):
@@ -28,7 +28,7 @@ class HelpCommand(Command):
                 console.print(f"  [bold {COLORS['success']}]/{name:<10}[/] {desc}{alias_str}")
 
         console.blank()
-        console.print(f"[bold {COLORS['info']}]💡 输入技巧[/]")
+        console.print(f"[bold {COLORS['info']}]{ICONS['info']} 输入技巧[/]")
         console.print("  • [dim]Enter[/] = 换行（对话模式）")
         console.print("  • [dim]Enter[/] = 直接发送（命令模式，如 /help）")
         console.print("  • [dim]Esc + Enter[/] = 发送消息")
@@ -38,7 +38,7 @@ class HelpCommand(Command):
         console.print("  • [dim]Esc 或 q[/] = 取消菜单")
 
         console.blank()
-        console.print(f"[bold {COLORS['info']}]📝 常用命令示例[/]")
+        console.print(f"[bold {COLORS['info']}]{ICONS['edit']} 常用命令示例[/]")
         console.print("  • [dim]/new[/]     → 开始新会话，清空历史")
         console.print("  • [dim]/save[/]    → 保存会话到 data/history/")
         console.print("  • [dim]/history[/] → 加载历史会话")
@@ -46,7 +46,7 @@ class HelpCommand(Command):
         console.print("  • [dim]/tools[/]   → 查看工具执行历史")
 
         console.blank()
-        console.print(f"[bold {COLORS['info']}]🔧 工具系统[/]")
+        console.print(f"[bold {COLORS['info']}]{ICONS['bash']} 工具系统[/]")
         console.print(f"  {ICONS['read']} [dim]Read[/]    → 读取文件内容（≤1MB）")
         console.print(f"  {ICONS['write']} [dim]Write[/]   → 创建/覆盖文件，自动语法检查")
         console.print(f"  {ICONS['edit']} [dim]Edit[/]    → 精确匹配替换，需先 Read")
@@ -56,7 +56,7 @@ class HelpCommand(Command):
         console.print(f"  {ICONS['ask']} [dim]Ask[/]     → 交互式询问用户")
 
         console.blank()
-        console.print(f"[bold {COLORS['info']}]🔒 权限确认[/]")
+        console.print(f"[bold {COLORS['info']}]{ICONS['lock']} 权限确认[/]")
         console.print("  • [dim]允许 (本次)[/] → 仅本次通过，后续需再确认")
         console.print("  • [dim]允许 (会话)[/] → 本次会话同类操作自动通过")
         console.print("  • [dim]拒绝[/]       → 仅本次拒绝")
@@ -217,7 +217,7 @@ class CdCommand(Command):
         # /cd 无参数：显示当前路径
         if not args:
             pm = self.app.path_manager
-            console.print(f"\n[bold {COLORS['info']}]📂 当前操作根目录[/]: {pm.active_path}")
+            console.print(f"\n[bold {COLORS['info']}]{ICONS['folder']} 当前操作根目录[/]: {pm.active_path}")
             if pm.is_workplace_mode:
                 console.print(f"[dim]（workplace 安全隔离模式，使用 /cd <绝对路径> 切换到项目目录）[/]")
             return
@@ -249,8 +249,8 @@ class PwdCommand(Command):
         if not self.app:
             return
         pm = self.app.path_manager
-        from claude_code.ui.theme import COLORS
-        console.print(f"\n[bold {COLORS['info']}]📂 操作根目录[/]: {pm.active_path}")
+        from claude_code.ui.theme import COLORS, ICONS
+        console.print(f"\n[bold {COLORS['info']}]{ICONS['folder']} 操作根目录[/]: {pm.active_path}")
         console.print(f"[dim]Workplace 目录[/]: {pm.workplace}")
         mode = "workplace 安全隔离" if pm.is_workplace_mode else "用户指定目录"
         console.print(f"[dim]当前模式[/]: {mode}")

@@ -197,21 +197,21 @@ def get_file_icon(file_ext: str) -> str:
     from claude_code.ui.theme import ICONS
 
     icons = {
-        '.py': ICONS.get('file_py', '📄'),
-        '.js': ICONS.get('file_js', '📄'),
-        '.ts': ICONS.get('file_ts', '📄'),
-        '.jsx': ICONS.get('file_js', '📄'),
-        '.tsx': ICONS.get('file_ts', '📄'),
-        '.json': ICONS.get('file_json', '📄'),
-        '.md': ICONS.get('file_md', '📄'),
-        '.txt': ICONS.get('file_txt', '📄'),
-        '.yaml': ICONS.get('file_yaml', '📄'),
-        '.yml': ICONS.get('file_yaml', '📄'),
-        '.html': ICONS.get('file_html', '📄'),
-        '.css': ICONS.get('file_css', '📄'),
-        '.scss': ICONS.get('file_css', '📄'),
+        '.py': ICONS.get('file_py', '▹'),
+        '.js': ICONS.get('file_js', '▹'),
+        '.ts': ICONS.get('file_ts', '▹'),
+        '.jsx': ICONS.get('file_js', '▹'),
+        '.tsx': ICONS.get('file_ts', '▹'),
+        '.json': ICONS.get('file_json', '▹'),
+        '.md': ICONS.get('file_md', '▹'),
+        '.txt': ICONS.get('file_txt', '▹'),
+        '.yaml': ICONS.get('file_yaml', '▹'),
+        '.yml': ICONS.get('file_yaml', '▹'),
+        '.html': ICONS.get('file_html', '▹'),
+        '.css': ICONS.get('file_css', '▹'),
+        '.scss': ICONS.get('file_css', '▹'),
     }
-    return icons.get(file_ext, ICONS.get('file_default', '📄'))
+    return icons.get(file_ext, ICONS.get('file_default', '▹'))
 
 
 def format_size(size: int) -> str:
@@ -304,13 +304,13 @@ def format_file_not_found_error(file_path: str, base_path: str, max_results: int
         exact_path = matches[0]
         return (
             f"文件不存在: {file_path}\n"
-            f"💡 找到唯一匹配，请使用精确路径重试:\n"
+            f"ℹ 找到唯一匹配，请使用精确路径重试:\n"
             f"  file_path=\"{exact_path}\""
         )
 
     # 多个匹配：列出候选路径
     lines = [f"文件不存在: {file_path}"]
-    lines.append(f"💡 在项目中找到 {len(matches)} 个同名文件:")
+    lines.append(f"ℹ 在项目中找到 {len(matches)} 个同名文件:")
     for i, match in enumerate(matches[:max_results], 1):
         lines.append(f"  {i}. {match}")
     if len(matches) > max_results:

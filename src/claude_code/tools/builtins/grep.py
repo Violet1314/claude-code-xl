@@ -93,7 +93,7 @@ class GrepTool(Tool):
                     success=False, output="",
                     error=(
                         f"路径不存在: {search_path}\n"
-                        f"💡 当前操作根目录: {pm.active_path}\n"
+                        f"ℹ 当前操作根目录: {pm.active_path}\n"
                         f"请确保路径在操作根目录下，如: path=\"{pm.active_path}\\src\""
                     )
                 )
@@ -141,7 +141,7 @@ class GrepTool(Tool):
             # 给终端的统一格式显示
             if not all_matches:
                 output = f"No matches found for: {pattern}"
-                display_output = f"[bold]{ICONS.get('grep', '🔍')} Grep:[/] [cyan]\"{escape(pattern)}\"[/] [dim]\\[0 处匹配][/]\n[dim]{'─' * 50}[/]"
+                display_output = f"[bold]{ICONS.get('grep', '◆')} Grep:[/] [cyan]\"{escape(pattern)}\"[/] [dim]\\[0 处匹配][/]"
             else:
                 display_output = self._build_terminal_display(pattern, truncated, len(all_matches))
 
@@ -208,16 +208,14 @@ class GrepTool(Tool):
 
         # 开头空行，与其他工具分隔
         parts.append("")
-        # 标题行：✎ Grep: "pattern" [N 处匹配]
-        parts.append(f"[bold]{ICONS.get('grep', '🔍')} Grep:[/] [cyan]\"{escape(pattern)}\"[/] [dim]\\[{total} 处匹配][/]")
-        # 分隔线
-        parts.append(f"[dim]{'─' * 50}[/]")
+        # 标题行：◆ Grep: "pattern" [N 处匹配]
+        parts.append(f"[bold]{ICONS.get('grep', '◆')} Grep:[/] [cyan]\"{escape(pattern)}\"[/] [dim]\\[{total} 处匹配][/]")
 
-        # 匹配列表（带行号）
+        # 匹配列表（2空格缩进）
         for i, (file_path, line_num, line_content) in enumerate(matches, 1):
             # 截断过长的行
             display_line = line_content[:100] + "..." if len(line_content) > 100 else line_content
-            parts.append(f"[dim]{i:>5}[/]  [dim]{escape(file_path)}:{line_num}:[/] {escape(display_line)}")
+            parts.append(f"  [dim]{i:>4}[/]  [dim]{escape(file_path)}:{line_num}:[/] {escape(display_line)}")
 
         return '\n'.join(parts)
 

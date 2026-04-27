@@ -336,7 +336,7 @@ class EditTool(Tool):
         mode_hint = ""
         if line_count > 5:
             mode_hint = (
-                "\n\n💡 提示：old_string 超过 5 行，建议改用行号范围模式：\n"
+                "\n\nℹ 提示：old_string 超过 5 行，建议改用行号范围模式：\n"
                 "  提供 start_line 和 end_line 参数替代 old_string，无需精确复制原文。\n"
                 "  例如: start_line=10, end_line=20, new_string=\"新内容\""
             )
@@ -488,26 +488,25 @@ class EditTool(Tool):
         result.append("")
         line_change = f"-{len(old_lines)} lines, +{len(new_lines)} lines"
         result.append(f"[bold]{ICONS.get('edit', '✎')} Edit:[/] [cyan]{escape(str(path.name))}[/] [dim]\\[{reference}] ({line_change})[/]")
-        result.append(f"[dim]{'─' * 50}[/]")
 
-        # 上文
+        # 上文（2空格缩进）
         for i in range(context_lines):
             line_num = start_line - context_lines + i
             if 0 <= line_num - 1 < len(original_lines):
                 content = self._truncate_line(original_lines[line_num - 1])
-                result.append(f"[dim]{line_num:4d}[/]  [dim]{escape(content)}[/]")
+                result.append(f"  [dim]{line_num:4d}[/]  [dim]{escape(content)}[/]")
 
         # 删除的行
         for i, line in enumerate(old_lines):
             line_num = start_line + i
             content = self._truncate_line(line)
-            result.append(f"[red]{line_num:4d}[/]  [red]{escape(content)}[/]")
+            result.append(f"  [red]{line_num:4d}[/]  [red]{escape(content)}[/]")
 
         # 添加的行
         for i, line in enumerate(new_lines):
             line_num = start_line + i
             content = self._truncate_line(line)
-            result.append(f"[green]{line_num:4d}[/]  [green]{escape(content)}[/]")
+            result.append(f"  [green]{line_num:4d}[/]  [green]{escape(content)}[/]")
 
         # 下文
         after_start_new = start_line + added_count
@@ -516,11 +515,11 @@ class EditTool(Tool):
             new_file_lines = new_content.splitlines()
             if line_num < len(new_file_lines):
                 content = self._truncate_line(new_file_lines[line_num])
-                result.append(f"[dim]{line_num + 1:4d}[/]  [dim]{escape(content)}[/]")
+                result.append(f"  [dim]{line_num + 1:4d}[/]  [dim]{escape(content)}[/]")
 
         if syntax_warning:
             result.append("")
-            result.append(f"[yellow]⚠ 语法警告:[/] {escape(syntax_warning[:100])}")
+            result.append(f"  [yellow]⚠ 语法警告:[/] {escape(syntax_warning[:100])}")
 
         return '\n'.join(result)
 
@@ -543,23 +542,22 @@ class EditTool(Tool):
             f"[bold]{ICONS.get('edit', '✎')} Edit:[/] [cyan]{escape(str(path.name))}[/] "
             f"[dim]\\[{reference}] lines {start_line}-{end_line} ({line_change})[/]"
         )
-        result.append(f"[dim]{'─' * 50}[/]")
 
-        # 删除的行（红色）
+        # 删除的行（红色，2空格缩进）
         for i, line in enumerate(old_lines):
             line_num = start_line + i
             content = self._truncate_line(line)
-            result.append(f"[red]{line_num:4d}[/]  [red]{escape(content)}[/]")
+            result.append(f"  [red]{line_num:4d}[/]  [red]{escape(content)}[/]")
 
         # 添加的行（绿色）
         for i, line in enumerate(new_lines):
             line_num = start_line + i
             content = self._truncate_line(line)
-            result.append(f"[green]{line_num:4d}[/]  [green]{escape(content)}[/]")
+            result.append(f"  [green]{line_num:4d}[/]  [green]{escape(content)}[/]")
 
         if syntax_warning:
             result.append("")
-            result.append(f"[yellow]⚠ 语法警告:[/] {escape(syntax_warning[:100])}")
+            result.append(f"  [yellow]⚠ 语法警告:[/] {escape(syntax_warning[:100])}")
 
         return '\n'.join(result)
 

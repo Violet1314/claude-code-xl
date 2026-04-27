@@ -2,14 +2,13 @@
 import time
 from typing import Optional, List
 from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.panel import Panel
-from rich.box import ROUNDED
 from claude_code.ui import console as app_console
 from claude_code.ui.theme import COLORS, ICONS
+from claude_code.ui.safe_markup import escape_markup
 
 
 class BashStreamingDisplay:
-    """Bash 命令执行显示 (最终卡片风格)"""
+    """Bash 命令执行显示 (缩进+图标前缀，轻盈风格)"""
     def __init__(self, command: str, timeout: int = 120):
         self.command = command
         self.timeout = timeout
@@ -62,35 +61,28 @@ class BashStreamingDisplay:
 
         duration = time.time() - self._start_time
         status_str = '成功' if success else '失败'
-        icon = ICONS.get('bash', '⚡')
+        icon = ICONS.get('bash', '▶')
         color = COLORS['success'] if success else COLORS['error']
 
-        # 标题行：✎ Bash: command [状态] (耗时 Xs)
+        # 标题行：▶ Bash: command [状态] (耗时 Xs)
         display_cmd = self.command if len(self.command) <= 50 else self.command[:47] + "..."
         app_console.print()
         app_console.print(f"[bold]{icon} Bash:[/] [cyan]{display_cmd}[/] [dim]\\[{status_str}] ({duration:.2f}s)[/]")
 
-        # 输出内容用 Panel 包裹
+        # 输出内容：缩进+图标前缀，轻盈风格（去掉 Panel）
         if self._output_lines:
             max_lines = 20
             if len(self._output_lines) > max_lines:
                 display_lines = self._output_lines[-max_lines:]
-                content = "\n".join(display_lines)
+                for line in display_lines:
+                    app_console.print(f"  {escape_markup(line)}", markup=True, highlight=False)
                 omitted = len(self._output_lines) - max_lines
-                content += f"\n\n[dim]... (省略 {omitted} 行) ...[/]"
+                app_console.print(f"  [dim]... (省略 {omitted} 行) ...[/]")
             else:
-                content = "\n".join(self._output_lines)
+                for line in self._output_lines:
+                    app_console.print(f"  {escape_markup(line)}", markup=True, highlight=False)
         else:
             if self._error_message:
-                content = f"[red]{self._error_message}[/]"
+                app_console.print(f"  [{COLORS['error']}]{escape_markup(self._error_message)}[/]")
             else:
-                content = "[dim](无输出)[/]"
-
-        panel = Panel(
-            content,
-            border_style=color,
-            box=ROUNDED,
-            padding=(1, 2),
-        )
-        app_console.print(panel)
-        app_console.print()
+                app_console.print("  [dim](无输出)[/]")

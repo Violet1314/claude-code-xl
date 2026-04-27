@@ -68,7 +68,7 @@ class GlobTool(Tool):
                     success=False, output="",
                     error=(
                         f"目录不存在: {search_path}\n"
-                        f"💡 当前操作根目录: {pm.active_path}\n"
+                        f"ℹ 当前操作根目录: {pm.active_path}\n"
                         f"请确保路径在操作根目录下，如: path=\"{pm.active_path}\\src\""
                     )
                 )
@@ -97,7 +97,7 @@ class GlobTool(Tool):
                 return ToolResult(
                     success=True,
                     output="No files matched.",
-                    display_output=f"[dim {COLORS['border_subtle']}]╭─[/] {ICONS.get('glob', '📁')} [bold]Glob[/]\n[dim {COLORS['border_subtle']}]│[/]  未找到匹配: [cyan]{escape(pattern)}[/]\n[dim {COLORS['border_subtle']}]╰{'─' * 40}[/]"
+                    display_output=f"[bold]{ICONS.get('glob', '◎')} Glob:[/] [dim]未找到匹配: [cyan]{escape(pattern)}[/]"
                 )
 
             total_count = len(matches)
@@ -185,15 +185,13 @@ class GlobTool(Tool):
 
         # 开头空行，与其他工具分隔
         parts.append("")
-        # 标题行：✎ Glob: pattern [N 个匹配]
-        parts.append(f"[bold]{ICONS.get('glob', '📁')} Glob:[/] [cyan]{escape(pattern)}[/] [dim]\\[{total} 个匹配][/]")
-        # 分隔线
-        parts.append(f"[dim]{'─' * 50}[/]")
+        # 标题行：◎ Glob: pattern [N 个匹配]
+        parts.append(f"[bold]{ICONS.get('glob', '◎')} Glob:[/] [cyan]{escape(pattern)}[/] [dim]\\[{total} 个匹配][/]")
 
-        # 文件列表（带行号）
+        # 文件列表（2空格缩进）
         for i, match in enumerate(matches, 1):
             display_path = str(match)
-            parts.append(f"[dim]{i:>5}[/]  {escape(display_path)}")
+            parts.append(f"  [dim]{i:>4}[/]  {escape(display_path)}")
 
         return '\n'.join(parts)
 

@@ -2,7 +2,7 @@
 
 仿照官方 Claude Code 风格构建的 CLI AI 编程助手，支持 AI 驱动的文件操作和命令执行。
 
-**版本：v2.8.25**
+**版本：v2.8.26**
 
 ## 功能特性
 
@@ -16,7 +16,7 @@
 ### 智能优化
 *   **Token 优化** - 文件缓存系统，减少重复传输
 *   **版本隔离** - 写入后版本递增，新版本计数器重置，避免误拦截
-*   **智能防死循环** - 连续 3 次同质错误自动熔断，80轮/20工具上限
+*   **智能防死循环** - 连续 3 次同质错误自动熔断，80轮/50工具上限
 *   **上下文优化** - 需求锚定 + 滑动窗口 + 工具输出摘要 + assistant差异化截断 + token快速判断
 
 ### 安全与权限
@@ -30,7 +30,7 @@
 *   **计划模式** - `/plan <任务>` 让模型自主规划并逐步执行，`/plan stop` 主动退出；Unicode 图标 + 进度条 + 完成仪式面板；Enter 换行支持多行描述
 *   **CTRL+C 中断** - 单击中断当前操作，双击退出程序
 *   **主动交互** - AI 可向用户询问选择，澄清需求
-*   **卡片式输出** - 工具结果美化显示，边框+图标+颜色
+*   **轻盈输出** - AI 响应 Panel 卡片 + 工具结果缩进+图标前缀，层级分明
 *   **终端摘要显示** - Read 工具终端只显示一行摘要，完整内容给模型；连续同类工具紧凑排列
 *   **执行进度** - Bash 流式输出 + Read 进度显示 + 实时计时
 *   **多行续行** - 显示行号 `… {N}>`，编辑更清晰
@@ -144,7 +144,7 @@ python -m pytest tests/test_tools.py -v
 | 选项 | 效果 |
 |------|------|
 | ✓ 允许 (本次) | 仅本次通过，后续需再确认 |
-| ✓ 允许 (会话) | **全会话放行**：所有工具、所有路径自动通过 |
+| ✓ 允许 (会话) | 本次会话所有同类操作自动通过 |
 | ✗ 拒绝 | 仅本次拒绝 |
 
 ## 项目结构
@@ -167,8 +167,10 @@ claude-code/
 │   │   └ settings.py            # 配置加载器
 │   ├── core/
 │   │   ├── client.py           # APIClient（流式+错误建议）
-│   │   ├── conversation.py     # 会话管理（倒序修剪）
+│   │   ├── conversation.py     # 会话管理（需求锚定+滑动窗口+摘要压缩）
 │   │   ├── files.py            # 文件挂载管理
+│   │   ├── path_manager.py     # PathManager（统一路径管理+安全边界）
+│   │   ├── todo.py             # TodoList（计划模式数据模型）
 │   │   └ stats.py               # Token 统计
 │   ├── tools/
 │   │   ├── base.py             # Tool 基类 + PermissionLevel(3级)
@@ -177,24 +179,29 @@ claude-code/
 │   │   ├── permission_ui.py    # 权限 UI（中文选项）
 │   │   ├── file_cache.py       # 文件缓存
 │   │   ├── syntax_checker.py   # 语法检查器
+│   │   ├── command_safety.py   # 命令安全检查（危险/交互/Unix语法）
+│   │   ├── tool_calling.py     # Native Tool Calling
+│   │   ├── context.py          # ToolContext（工具执行上下文）
 │   │   └ builtins/
-│   │       ├── read.py         # 📖 Read
-│   │       ├── write.py        # ✏️ Write
+│   │       ├── read.py         # ◇ Read
+│   │       ├── write.py        # ▼ Write
 │   │       ├── edit.py         # ✎ Edit
-│   │       ├── bash.py         # ⚡ Bash
-│   │       ├── grep.py         # 🔍 Grep
-│   │       ├── glob.py         # 📁 Glob
-│   │       └ ask_user.py       # ❓ AskUserQuestion
+│   │       ├── bash.py         # ▶ Bash
+│   │       ├── grep.py         # ◆ Grep
+│   │       ├── glob.py         # ◎ Glob
+│   │       ├── ask_user.py     # ◈ AskUserQuestion
+│   │       └ todo.py           # ● TodoCreate/TodoUpdate/TodoList
 │   ├── commands/
 │   │   ├── base.py             # Command 基类
 │   │   ├── registry.py         # 命令注册表
-│   │   └ handlers.py           # 8 个内置命令
+│   │   └ handlers.py           # 10 个内置命令
 │   ├── ui/
 │   │   ├── theme.py            # 颜色 + 图标
 │   │   ├── console.py          # Rich 封装
 │   │   ├── components.py       # Logo + 状态栏
 │   │   ├── renderer.py         # Markdown 渲染
 │   │   ├── input.py            # 输入处理（行号续行）
+│   │   ├── safe_markup.py      # Rich Markup 安全转义
 │   │   └ progress_display.py   # 进度显示
 │   └ utils/
 │       ├── paths.py            # 路径处理
@@ -204,7 +211,9 @@ claude-code/
 │   ├── test_file_cache.py      # 缓存测试
 │   ├── test_permission.py      # 权限测试
 │   ├── test_tool_architecture.py # 架构契约测试
-│   └ test_conversation.py      # 会话测试
+│   ├── test_conversation.py    # 会话测试
+│   ├── test_path_manager.py    # 路径管理器测试
+│   └ test_todo.py              # 计划模式测试
 └── workplace/                  # 命令执行隔离目录
 ```
 
@@ -212,18 +221,27 @@ claude-code/
 
 | 工具 | 图标 | 只读 | 敏感 | 功能 |
 |------|------|------|------|------|
-| Read | 📖 | Yes | No | 读取文件（≤1MB，缓存集成） |
-| Write | ✏️ | No | Yes | 创建/覆盖文件（自动语法检查） |
-| Edit | ✎ | No | Yes | 精确替换（需先 Read） |
-| Bash | ⚡ | No | 动态 | 执行命令（流式输出、危险拦截） |
-| Grep | 🔍 | Yes | No | 正则搜索（≤30匹配） |
-| Glob | 📁 | Yes | No | 文件名搜索（≤100结果） |
-| AskUserQuestion | ❓ | Yes | No | 向用户询问 |
+| Read | ◇ | Yes | No | 读取文件（≤1MB，缓存集成） |
+| Write | ▼ | No | Yes | 创建/覆盖文件（自动语法检查） |
+| Edit | ✎ | No | Yes | 精确替换 + 行号范围（双模式） |
+| Bash | ▶ | No | 动态 | 执行命令（流式输出、危险拦截） |
+| Grep | ◆ | Yes | No | 正则搜索（≤30匹配） |
+| Glob | ◎ | Yes | No | 文件名搜索（≤100结果） |
+| AskUserQuestion | ◈ | Yes | No | 向用户询问 |
 | TodoCreate | ● | No | No | 创建任务计划（计划模式） |
 | TodoUpdate | ● | No | No | 更新任务状态（计划模式） |
 | TodoList | ● | Yes | No | 查看当前计划（计划模式） |
 
 ## 更新日志
+
+### v2.8.26 (2026-04-25)
+**全局 UI 美学优化：图标纯净化 + 色彩收敛 + Panel 克制化 + 排版韵律 + 流式体验**
+*   ✅ 图标纯净化：Emoji（📖✏️⚡🔍📁❓🐍📜）→ Unicode 几何符号（◇▼▶◆◎◈▹），等宽对齐，终端宽度不再错位
+*   ✅ 色彩收敛：6种灰色+新旧两套命名 → 三层灰+统一边框(#4A4A4A)+品牌色+状态色，清理 `system`/`user`/`border_subtle`/`border_default` 等旧命名
+*   ✅ Panel 克制化：Bash 输出去掉 Panel，改为缩进+图标前缀；AI 响应、权限确认保留 Panel
+*   ✅ 排版韵律：状态栏分层显示（模型名突出，次要信息 dim）；工具输出统一缩进层级（标题 Level 0，内容 Level 1 = 2空格）；移除冗余分隔线
+*   ✅ 流式体验：思考状态简化为 `⠋ thinking... 3.2s 120 tok`，等待时更安静
+*   ✅ 全量测试通过：185 passed
 
 ### v2.8.25 (2026-04-24)
 **计划模式 UI 品质重构 + `/plan stop` 命令**
@@ -244,13 +262,6 @@ claude-code/
 *   ✅ 连续无工具调用加强警告：连续 ≥2 轮未调用工具时追加 ⚠ 警告
 *   ✅ 提醒中注入完整任务状态列表：减少模型遗忘/猜测
 *   ✅ `PlanDefaults` 新增 `REMINDER_MAX`、`NO_TOOL_ROUNDS_MAX` 配置项
-*   ✅ 全量测试通过：185 passed
-
-### v2.8.23 (2026-04-23)
-**Plan 模式状态机强约束：TodoUpdate 非法状态转换拦截**
-*   ✅ Todo 状态机强校验：`pending → in_progress → completed/failed`，禁止跳步
-*   ✅ `VALID_TRANSITIONS` 状态转换表 + `update_status()` 返回详细错误
-*   ✅ TodoUpdate 工具描述增强 + 执行层接入状态机错误
 *   ✅ 全量测试通过：185 passed
 ## Windows PowerShell 注意事项
 

@@ -67,7 +67,7 @@ def show_welcome(model_name: str = "Claude") -> None:
     con.print(header_text)
     
     # 分隔线
-    con.print(Rule(style=COLORS['border_subtle']))
+    con.print(Rule(style=COLORS['border']))
     
     # 随机编程名言 (居中或左对齐，增加艺术感)
     quote = random.choice(PROGRAMMING_QUOTES)
@@ -94,7 +94,7 @@ def show_status_bar(
     total_cost: float = 0.0,
 ) -> None:
     """
-    显示紧凑状态信息 (使用完整 Panel 边框)
+    显示状态信息 (分层：模型名突出，次要信息 dim)
     """
     con = console.get_console()
 
@@ -107,28 +107,23 @@ def show_status_bar(
         parts = model_name.split()
         model_short = ' '.join(parts[:2]).upper() if len(parts) > 1 else model_name[:15].upper()
 
-    # 构建状态文本
-    status_parts = []
+    # 主行：模型名（突出）
+    con.print(f"[bold {COLORS['primary']}]{ICONS['claude']} {model_short}[/]", end="")
 
-    # 1. 模型
-    status_parts.append(f"[bold {COLORS['primary']}]{ICONS['claude']} {model_short}[/]")
-
-    # 2. Token (添加含义说明)
+    # 次要信息：dim，同行右对齐
+    secondary_parts = []
     token_display = _format_token_count(total_tokens)
-    status_parts.append(f"[dim]{ICONS['token']} {token_display} tokens[/]")
-
-    # 3. 费用
+    secondary_parts.append(f"{token_display} tok")
     if total_cost > 0:
-        cost_display = _format_cost(total_cost)
-        status_parts.append(f"[dim]$ {cost_display}[/]")
-
-    # 4. 文件数
+        secondary_parts.append(f"{ICONS['price']}{_format_cost(total_cost)}")
     if file_count > 0:
-        status_parts.append(f"[dim]{ICONS['folder']} {file_count} files[/]")
+        secondary_parts.append(f"{ICONS['folder']}{file_count}")
 
-    # 输出为一行
-    status_line = " │ ".join(status_parts)
-    con.print(status_line)
+    if secondary_parts:
+        con.print(f"  [dim]{' │ '.join(secondary_parts)}[/]")
+    else:
+        con.print()
+
     con.print()  # 状态栏后空行，与输入分隔
 
 def _format_token_count(count: int) -> str:
@@ -158,7 +153,7 @@ def _create_base_table() -> Table:
         box=SIMPLE,  # 使用简单线条，更现代
         padding=(0, 2),
         header_style=f"bold {COLORS['primary']}",
-        row_styles=[None, f"dim {COLORS['surface_1']}"],  # 斑马纹
+        row_styles=[None, "dim"],  # 斑马纹
     )
 
 def show_model_list(models: List[Dict], current_id: str = None) -> None:
@@ -177,7 +172,7 @@ def show_model_list(models: List[Dict], current_id: str = None) -> None:
     console.get_console().print(Panel(
         table,
         title="[bold white]Available Models[/]",
-        border_style=COLORS['border_default'],
+        border_style=COLORS['border'],
         expand=False,
         box=ROUNDED, # 列表容器使用圆角
     ))
@@ -202,7 +197,7 @@ def show_style_list(styles: List[Dict], current_id: str = None) -> None:
     console.get_console().print(Panel(
         table,
         title="[bold white]AI Persona[/]",
-        border_style=COLORS['border_default'],
+        border_style=COLORS['border'],
         expand=False,
         box=ROUNDED,
     ))
@@ -226,10 +221,11 @@ def show_history_list(history: List[Dict]) -> None:
     console.get_console().print(Panel(
         table,
         title="[bold white]History Sessions[/]",
-        border_style=COLORS['border_default'],
+        border_style=COLORS['border'],
         expand=False,
-        box=ROUNDED,
+        box=ROUNDED, # 列表容器使用圆角
     ))
+
 
 # ============================================================
 # 输入边框 (简化)

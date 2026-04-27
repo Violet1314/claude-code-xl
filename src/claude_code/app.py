@@ -496,8 +496,8 @@ class Application:
             transient=True,
         ) as progress:
 
-            # 初始描述
-            initial_desc = f"[bold {COLORS['primary']}]{model_name}[/] [dim]正在思考...[/]"
+            # 初始描述：⠋ thinking...
+            initial_desc = f"[{COLORS['primary']}]thinking...[/]"
             task = progress.add_task(initial_desc, total=None)
 
             # 【新增】后台定时刷新线程：确保时间实时跳动，不依赖 API Chunk
@@ -512,9 +512,9 @@ class Application:
                             pass
                         break
                     elapsed = time.time() - start_time
-                    # 排版：时间 + 实时输出token数
-                    tok_display = f"{streaming_tokens} tok" if streaming_tokens > 0 else ""
-                    new_desc = f"[bold {COLORS['primary']}]{model_name}[/] [dim]正在思考... {elapsed:.1f}s[/] [cyan]{tok_display}[/]"
+                    # ⠋ thinking... 3.2s 120 tok
+                    tok_display = f" {streaming_tokens} tok" if streaming_tokens > 0 else ""
+                    new_desc = f"[{COLORS['primary']}]thinking...[/] [dim]{elapsed:.1f}s[/] [cyan]{tok_display}[/]"
                     try:
                         progress.update(task, description=new_desc)
                     except Exception:
@@ -757,7 +757,7 @@ class Application:
         # Read 工具：已经是摘要模式，保留原文
         if tool_name == "Read":
             # 检查是否是摘要输出
-            if "📄" in output or "结构概览" in output:
+            if "○" in output or "结构概览" in output:
                 return output  # 摘要已经很精简
             # 非摘要的大输出，压缩
             return self._compress_large_output(output, MAX_OUTPUT_LEN)
@@ -806,10 +806,10 @@ class Application:
 
         for entry in history:
             timestamp = datetime.now().strftime('%H:%M:%S')
-            status = "✅" if entry.get('success') else "❌"
+            status = "✓" if entry.get('success') else "✗"
             tool_name = entry.get('tool', 'unknown')
 
-            console.print(f"[{COLORS['system']}]{timestamp}[/] {status} {tool_name}")
+            console.print(f"[{COLORS['text_muted']}]{timestamp}[/] {status} {tool_name}")
 
             if entry.get('error'):
                 console.print(f"   ", end="")
@@ -1004,7 +1004,7 @@ class Application:
 
             for msg in self.conversation.get_messages():
                 if msg["role"] == "user":
-                    console.print(f"\n[bold {COLORS['user']}]{ICONS['user']} YOU[/]")
+                    console.print(f"\n[bold {COLORS['info']}]{ICONS['user']} YOU[/]")
                     console.print(msg["content"])
                 elif msg["role"] == "assistant":
                     console.print(f"\n[bold {COLORS['primary']}]{ICONS['claude']} CLAUDE[/]")

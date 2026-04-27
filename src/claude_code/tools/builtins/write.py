@@ -135,28 +135,26 @@ class WriteTool(Tool):
         # 开头空行
         parts.append("")
         # 标题行
-        parts.append(f"[bold]{ICONS.get('write', '✏️')} Write:[/] [cyan]{escape(path.name)}[/] [dim]\\[{status}] ({lines} lines, {size_str})[/]")
-        # 分隔线
-        parts.append(f"[dim]{'─' * 50}[/]")
+        parts.append(f"[bold]{ICONS.get('write', '▼')} Write:[/] [cyan]{escape(path.name)}[/] [dim]\\[{status}] ({lines} lines, {size_str})[/]")
 
-        # 内容预览（带行号，最多显示20行）
+        # 内容预览（2空格缩进，最多显示20行）
         content_lines = content.split('\n')
         max_preview = 20
         if len(content_lines) > max_preview:
             for i, line in enumerate(content_lines[:max_preview], 1):
                 # 截断过长的行
                 display_line = line[:100] if len(line) > 100 else line
-                parts.append(f"[dim]{i:>5}[/]  {escape(display_line)}")
+                parts.append(f"  [dim]{i:>4}[/]  {escape(display_line)}")
             omitted = len(content_lines) - max_preview
-            parts.append(f"[dim]... (省略 {omitted} 行) ...[/]")
+            parts.append(f"  [dim]... (省略 {omitted} 行) ...[/]")
         else:
             for i, line in enumerate(content_lines, 1):
                 display_line = line[:100] if len(line) > 100 else line
-                parts.append(f"[dim]{i:>5}[/]  {escape(display_line)}")
+                parts.append(f"  [dim]{i:>4}[/]  {escape(display_line)}")
 
         # 语法警告
         if syntax_warning:
-            parts.append(f"[yellow]⚠ 语法警告:[/] [dim]{escape(syntax_warning[:80])}[/]")
+            parts.append(f"  [yellow]⚠ 语法警告:[/] [dim]{escape(syntax_warning[:80])}[/]")
 
         return '\n'.join(parts)
 

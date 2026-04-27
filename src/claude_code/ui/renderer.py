@@ -45,7 +45,7 @@ def render_response(content: str, model_name: str, duration: float, tokens: dict
         md_content,
         title=header_text,
         title_align="left",
-        border_style=COLORS['border_default'],
+        border_style=COLORS['border'],
         box=ROUNDED,
         padding=(1, 2),  # 上下1行，左右2列留白
     )
@@ -70,7 +70,7 @@ def render_response_simple(content: str, model_name: str, duration: float) -> No
         md_content,
         title=header_text,
         title_align="left",
-        border_style=COLORS['border_subtle'],
+        border_style=COLORS['border'],
         box=ROUNDED,
         padding=(1, 2),
     )

@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional, Callable
 from ..base import Tool, ToolResult
 from ..file_cache import file_cache
 from claude_code.core.path_manager import get_path_manager
-from claude_code.ui.theme import COLORS
+from claude_code.ui.theme import COLORS, ICONS
 from rich.markup import escape
 
 class ReadTool(Tool):
@@ -196,7 +196,7 @@ class ReadTool(Tool):
         else:
             size_str = f"{size_kb / 1024:.1f}MB"
 
-        return f"  📖 Read [cyan]{escape(path.name)}[/]  [dim]{total_lines} lines · {size_str}[/]"
+        return f"  {ICONS.get('read', '◇')} Read [cyan]{escape(path.name)}[/]  [dim]{total_lines} lines · {size_str}[/]"
 
     # ============================================================
     # 文件读取

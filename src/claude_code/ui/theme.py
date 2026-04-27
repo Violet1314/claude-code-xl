@@ -7,7 +7,6 @@ from prompt_toolkit.styles import Style
 COLORS = {
     # 品牌色
     "primary": "#D97757",           # Claude 官方橙色
-    "primary_dim": "#B45309",       # 深橙色
     
     # 状态色
     "success": "#4ADE80",           # 薄荷绿
@@ -20,10 +19,8 @@ COLORS = {
     "bg_elevated": "#1A1A1A",       # 卡片/面板背景
     "bg_overlay": "#262626",        # 浮层/下拉背景
 
-    # 边框层次
-    "border_subtle": "#6A6A6A",     # 卡片边框（明亮的灰色）
-    "border_default": "#7A7A7A",    # 默认边框
-    "border_emphasis": "#8A8A8A",   # 强调边框（焦点）
+    # 边框（统一一档，靠状态色区分重要性）
+    "border": "#4A4A4A",            # 统一边框色
 
     # 文字层次
     "text_primary": "#FAFAFA",      # 主要文字
@@ -33,14 +30,6 @@ COLORS = {
     # 输入区域
     "input_bg": "#1F1F1F",          # 深灰背景
     "input_text": "#E5E7EB",        # 近白色文字
-
-    # 基础色（兼容旧代码）
-    "system": "#6B7280",            # 系统文本灰
-    "bg_dark": "#0A0A0A",           # 极深背景
-    "user": "#60A5FA",              # 用户消息色
-    "assistant": "#FFFFFF",         # AI 回复色
-    "border": "#333333",            # 边框色
-    "border_dim": "#262626",        # 暗边框色
 }
 
 # ============================================================
@@ -59,35 +48,35 @@ ICONS = {
     "thinking": "⠋",
 
     # 文件系统
-    "file": "📎",
+    "file": "○",
 
-    # 工具专属图标
-    "read": "📖",           
-    "write": "✏️",          
-    "edit": "✎",           
-    "bash": "⚡",           
-    "grep": "🔍",           
-    "glob": "📁",           
-    "ask": "❓",            
+    # 工具专属图标（Unicode 几何符号，等宽对齐）
+    "read": "◇",           # 开放菱形 — 阅读/打开
+    "write": "▼",          # 下三角 — 写入/创建
+    "edit": "✎",           # 铅笔 — 编辑/修改
+    "bash": "▶",           # 右三角 — 执行/运行
+    "grep": "◆",           # 实心菱形 — 搜索/聚焦
+    "glob": "◎",           # 靶心 — 模式匹配
+    "ask": "◈",            # 菱形点 — 询问/交互
 
-    # 文件类型图标
-    "file_py": "🐍",        
-    "file_js": "📜",        
-    "file_ts": "📘",        
-    "file_json": "📋",      
-    "file_md": "📝",        
-    "file_txt": "📄",       
-    "file_yaml": "⚙",       
-    "file_html": "🌐",      
-    "file_css": "🎨",       
-    "file_default": "📄",   
+    # 文件类型图标（统一 ▹，以颜色区分类型）
+    "file_py": "▹",        
+    "file_js": "▹",        
+    "file_ts": "▹",        
+    "file_json": "▹",      
+    "file_md": "▹",        
+    "file_txt": "▹",       
+    "file_yaml": "▹",       
+    "file_html": "▹",      
+    "file_css": "▹",       
+    "file_default": "▹",   
 
     # 其他
-    "folder": "📁",         
-    "link": "🔗",           
-    "lock": "🔒",           
-    "star": "⭐",           
-    "clock": "⏱",          
+    "folder": "▸",         
+    "link": "→",           
+    "lock": "■",           
+    "star": "★",           
+    "clock": "◷",          
     "token": "◆",           
     "price": "$",           
 }
@@ -110,7 +99,7 @@ PROMPT_STYLE = Style.from_dict({
     # 补全菜单
     'completion-menu': f'bg:{COLORS["bg_elevated"]} {COLORS["text_secondary"]}',
     'completion-menu.completion.current': f'bg:{COLORS["primary"]} #000000 bold',
-    'completion-menu.meta.completion': f'bg:{COLORS["bg_dark"]} {COLORS["text_muted"]}',
+    'completion-menu.meta.completion': f'bg:{COLORS["bg_base"]} {COLORS["text_muted"]}',
     
     # 命令与标签
     'command': f'{COLORS["success"]} bold',
