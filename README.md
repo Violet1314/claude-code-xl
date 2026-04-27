@@ -131,7 +131,7 @@ python -m pytest tests/test_tools.py -v
 | /new | reset, clear | 开始新会话 |
 | /model | m | 切换 AI 模型 |
 | /style | persona | 切换 AI 风格 |
-| /plan | p | 计划模式：`/plan <任务描述>` 启动执行，`/plan status` 查看状态，`/plan stop` 主动退出 |
+| /plan | p | 计划模式：`/plan <任务描述>` 启动执行，`/plan status` 或 `/plan` 无参数 查看状态，`/plan stop` 主动退出 |
 | /cd | chdir | 切换操作根目录（必须绝对路径） |
 | /pwd | - | 显示当前路径信息 |
 | /save | s | 保存当前会话 |
@@ -198,7 +198,7 @@ claude-code/
 │   ├── ui/
 │   │   ├── theme.py            # 颜色 + 图标
 │   │   ├── console.py          # Rich 封装
-│   │   ├── components.py       # Logo + 状态栏
+│   │   ├── components.py       # Logo + 状态栏 + 计划面板（todo/complete/status/stopped/aborted）
 │   │   ├── renderer.py         # Markdown 渲染
 │   │   ├── input.py            # 输入处理（行号续行）
 │   │   ├── safe_markup.py      # Rich Markup 安全转义
@@ -263,6 +263,9 @@ claude-code/
 *   ✅ 统计行精简：`完成:3 | 失败:0 | 待处理:4` → `✓3  ✗0  ○4`
 *   ✅ `/plan stop` 主动退出计划模式，不清空会话
 *   ✅ 全量测试通过：185 passed
+
+---
+
 ## Windows PowerShell 注意事项
 
 ```powershell
