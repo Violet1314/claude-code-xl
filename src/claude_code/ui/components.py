@@ -464,43 +464,73 @@ def show_plan_status(todo_list, active: bool = False) -> None:
         return
 
     show_todo_panel(todo_list)
+    # 简洁操作提示（不再重复统计行，todo_panel 已包含进度条和统计）
+    con = console.get_console()
+    mode_icon = "●" if active else "○"
     mode_text = "运行中" if active else "未运行"
     hint = "/plan stop 退出计划模式" if active else "/plan <任务描述> 开始新计划"
-    show_message_box(
-        "计划状态",
-        f"状态：{mode_text}\n{_format_plan_stats(todo_list)}\n操作：{hint}",
-        level="info",
-        icon="●" if active else "○",
-    )
+    con.print(f"  {mode_icon} [{COLORS['info']}]{mode_text}[/]  [dim]{hint}[/]")
 
 
 def show_plan_stopped(todo_list) -> None:
     """显示主动退出计划模式摘要。"""
+    con = console.get_console()
+    con.print(Rule(style=COLORS['warning']))
+
     if not todo_list.items:
-        show_message_box("已退出计划模式", "当前没有执行计划。", level="warning", icon="■")
+        panel = Panel(
+            "当前没有执行计划。",
+            title=f"[{COLORS['warning']}]■ 已退出计划模式[/]",
+            title_align="left",
+            border_style=COLORS['warning'],
+            box=ROUNDED,
+            padding=(0, 2),
+        )
+        con.print(panel)
         return
 
     unfinished = [item for item in todo_list.items if not item.is_done]
     lines = [
-        f"进度：{todo_list.progress_text}",
+        f"[{COLORS['warning']}]计划已中断[/]  [dim]{todo_list.progress_text}[/]",
         f"[dim]{_format_plan_stats(todo_list)}[/]",
     ]
     if unfinished:
         lines.append("")
-        lines.append("未完成任务：")
+        lines.append(f"[{COLORS['text_muted']}]未完成任务[/]")
         for item in unfinished:
             lines.append(f"  {item.icon} {item.id}  {item.content}")
     else:
         lines.append("所有任务均已结束。")
 
-    show_message_box("已退出计划模式", "\n".join(lines), level="warning", icon="■")
+    panel = Panel(
+        "\n".join(lines),
+        title=f"[{COLORS['warning']}]■ 已退出计划模式[/]",
+        title_align="left",
+        border_style=COLORS['warning'],
+        box=ROUNDED,
+        padding=(0, 2),
+    )
+    con.print(panel)
 
 
 def show_plan_aborted(reason: str, todo_list=None) -> None:
     """显示计划模式自动退出原因。"""
-    lines = [f"原因：{reason}"]
+    con = console.get_console()
+    con.print(Rule(style=COLORS['error']))
+
+    lines = [f"[{COLORS['error']}]原因[/]  {reason}"]
     if todo_list is not None and todo_list.items:
-        lines.append(f"进度：{todo_list.progress_text}")
+        lines.append(f"[{COLORS['warning']}]进度[/]  {todo_list.progress_text}")
         lines.append(f"[dim]{_format_plan_stats(todo_list)}[/]")
-    lines.append("建议：重新执行 /plan <任务>，或手动继续当前任务。")
-    show_message_box("计划模式已自动退出", "\n".join(lines), level="warning", icon="⚠")
+    lines.append("")
+    lines.append(f"[dim]建议：重新执行 /plan <任务>，或手动继续当前任务。[/]")
+
+    panel = Panel(
+        "\n".join(lines),
+        title=f"[{COLORS['error']}]⚠ 计划模式已自动退出[/]",
+        title_align="left",
+        border_style=COLORS['error'],
+        box=ROUNDED,
+        padding=(0, 2),
+    )
+    con.print(panel)

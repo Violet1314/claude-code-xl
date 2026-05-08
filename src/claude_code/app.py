@@ -96,6 +96,10 @@ class Application:
         for cmd_class in BUILTIN_COMMANDS:
             self.commands.register(cmd_class, app=self)
         self.input_handler = InputHandler(commands=self.commands.list_commands())
+        # 计划模式状态（必须在 _update_input_state 之前初始化）
+        self._plan_mode: bool = False            # 是否处于计划模式
+        self._plan_task: str = ""                # 计划模式任务描述
+        self._plan_reminder_count: int = 0       # 计划模式连续提醒计数（熔断用）
         self._update_input_state()
         self.history_dir = "data/history"
         os.makedirs(self.history_dir, exist_ok=True)
@@ -108,12 +112,6 @@ class Application:
         self._last_sigint: float = 0.0          # 上次 SIGINT 时间戳（仅用于双击退出判定）
         self._sigint_double_threshold: float = 1.0  # 双击判定窗口（秒）
         signal.signal(signal.SIGINT, self._signal_handler)
-
-        # 计划模式状态
-        self._plan_mode: bool = False            # 是否处于计划模式
-        self._plan_task: str = ""                # 计划模式任务描述
-        self._plan_reminder_count: int = 0       # 计划模式连续提醒计数（熔断用）
-
 
     def _setup_system_prompt(self) -> None:
         """设置系统提示词"""
@@ -173,6 +171,7 @@ class Application:
         self.input_handler.update_state(
             model_name=self.current_model.name if self.current_model else "Claude",
             file_count=self.files.count,
+            plan_mode=self._plan_mode,
         )
 
     def _on_exit(self) -> None:
@@ -289,6 +288,7 @@ class Application:
                         show_plan_complete(todo)
                         self._plan_mode = False
                         self._plan_task = ""
+                        self._update_input_state()
                         break
 
             # 检查是否被用户中断（Ctrl+C），中断后直接退出循环
@@ -313,6 +313,7 @@ class Application:
                             self._plan_mode = False
                             self._plan_task = ""
                             self._plan_reminder_count = 0
+                            self._update_input_state()
                             break
 
                         # 构建具体行动指令：告诉模型该调什么工具、传什么参数
@@ -616,6 +617,9 @@ class Application:
         # 解析工具调用
         tool_calls = tool_calling_manager.parse_tool_calls(native_tool_calls)
 
+        # 过滤掉空名工具调用（流式累积不完整时可能产生）
+        tool_calls = [tc for tc in tool_calls if tc.name.strip()]
+
         # 渲染响应（完成后一次性渲染）
         if full_response.strip():
             render_response(full_response, model_name, duration, real_usage, has_tools=bool(tool_calls))
@@ -803,20 +807,64 @@ class Application:
             console.warning("暂无工具执行历史")
             return
 
-        console.print(f"\n[{COLORS['primary']}]=== 工具执行历史 ===[/]")
+        from rich.panel import Panel
+        from rich.box import ROUNDED
 
+        # 工具图标映射
+        tool_icons = {
+            "Read": ICONS.get('read', '◇'),
+            "Write": ICONS.get('write', '▼'),
+            "Edit": ICONS.get('edit', '✎'),
+            "Bash": ICONS.get('bash', '▶'),
+            "Grep": ICONS.get('grep', '◆'),
+            "Glob": ICONS.get('glob', '◎'),
+            "AskUserQuestion": ICONS.get('ask', '◈'),
+            "TodoCreate": "●",
+            "TodoUpdate": "●",
+            "TodoList": "●",
+        }
+
+        lines = []
         for entry in history:
-            timestamp = datetime.now().strftime('%H:%M:%S')
-            status = "✓" if entry.get('success') else "✗"
+            timestamp = entry.get('timestamp', '??:??:??')
             tool_name = entry.get('tool', 'unknown')
+            icon = tool_icons.get(tool_name, ICONS.get('file', '○'))
+            success = entry.get('success', False)
+            duration_ms = entry.get('duration_ms', 0)
 
-            console.print(f"[{COLORS['text_muted']}]{timestamp}[/] {status} {tool_name}")
+            # 状态图标 + 颜色
+            if success:
+                status_icon = ICONS['success']
+                status_color = COLORS['success']
+            else:
+                status_icon = ICONS['error']
+                status_color = COLORS['error']
+
+            # 耗时显示
+            duration_str = ""
+            if duration_ms > 0:
+                if duration_ms >= 1000:
+                    duration_str = f" [{duration_ms / 1000:.1f}s]"
+                else:
+                    duration_str = f" [{duration_ms}ms]"
+
+            lines.append(
+                f"  {icon} [{COLORS['text_muted']}]{timestamp}[/] "
+                f"[{status_color}]{status_icon}[/] {tool_name}{duration_str}"
+            )
 
             if entry.get('error'):
-                console.print(f"   ", end="")
-                console.print(entry['error'], markup=False, highlight=False, style=COLORS['error'])
+                lines.append(f"    [{COLORS['error']}]{entry['error'][:80]}[/]")
 
-        console.print()
+        panel = Panel(
+            "\n".join(lines),
+            title=f"[bold {COLORS['primary']}]{ICONS['claude']} 工具执行历史[/]",
+            title_align="left",
+            border_style=COLORS['border'],
+            box=ROUNDED,
+            padding=(0, 2),
+        )
+        console.get_console().print(panel)
 
     def reset_conversation(self) -> None:
         """重置会话"""

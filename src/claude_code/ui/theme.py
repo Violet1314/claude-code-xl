@@ -113,6 +113,9 @@ PROMPT_STYLE = Style.from_dict({
     'input-lead': f'fg:{COLORS["primary"]} bold bg:{COLORS["input_bg"]}',
     'cursor': f'{COLORS["primary"]} bold',
 
+    # 计划模式指示器
+    'plan-indicator': f'fg:{COLORS["warning"]} bold bg:{COLORS["input_bg"]}',
+
     # 菜单样式
     'menu-selected': f'bg:{COLORS["primary"]} #ffffff bold',
     'menu-text': f'{COLORS["input_text"]}',

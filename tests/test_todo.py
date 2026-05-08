@@ -665,6 +665,9 @@ class TestPlanCommandImprovements:
         def chat(self, task_description):
             self.chat_called_with = task_description
 
+        def _update_input_state(self):
+            pass
+
     def setup_method(self):
         from claude_code.tools.builtins.todo import reset_todo_list
         reset_todo_list()

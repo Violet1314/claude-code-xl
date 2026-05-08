@@ -77,6 +77,7 @@ class InputHandler:
         # 状态
         self.model_name: str = "Claude"
         self.file_count: int = 0
+        self.plan_mode: bool = False
 
     @property
     def session(self) -> PromptSession:
@@ -122,7 +123,12 @@ class InputHandler:
 
     def _get_prompt(self):
         """获取主提示符"""
-        # 统一格式：固定3位宽度右对齐，无前缀
+        if self.plan_mode:
+            # 计划模式：● 前缀提示用户当前处于计划模式
+            return [
+                ('class:plan-indicator', '● '),
+                ('class:input-lead', '1> '),
+            ]
         return [
             ('class:input-lead', '  1> '),
         ]
@@ -140,11 +146,13 @@ class InputHandler:
             display = f'{line_num}> '
         return [('class:input-lead', display)]
 
-    def update_state(self, model_name: str = None, file_count: int = None) -> None:
+    def update_state(self, model_name: str = None, file_count: int = None, plan_mode: bool = None) -> None:
         if model_name is not None:
             self.model_name = model_name
         if file_count is not None:
             self.file_count = file_count
+        if plan_mode is not None:
+            self.plan_mode = plan_mode
 
     def update_commands(self, commands: List[dict]) -> None:
         self.completer.set_commands(commands)

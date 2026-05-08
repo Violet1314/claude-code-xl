@@ -135,7 +135,7 @@ class ToolExecutor:
         if not tool:
             return ExecutionResult(
                 tool_call=tool_call,
-                tool_result=ToolResult(success=False, output="", error=f"未知工具: {tool_call.name}")
+                tool_result=ToolResult(success=False, output="", error=f"未知工具: {tool_call.name or '(空)'}")
             )
 
         # 1.5 设置当前参数（供 get_security_context 等方法使用）
@@ -515,6 +515,7 @@ class ToolExecutor:
         duration_ms: int
     ) -> None:
         """记录执行历史"""
+        from datetime import datetime
         self.execution_history.append({
             "tool": tool_call.name,
             "parameters": tool_call.parameters,
@@ -522,6 +523,7 @@ class ToolExecutor:
             "output": result.output[:500] if result.output else "",
             "error": result.error,
             "duration_ms": duration_ms,
+            "timestamp": datetime.now().strftime('%H:%M:%S'),
         })
         # 注意：Read 操作的缓存记录已移至 ReadTool.execute() 内部
 
