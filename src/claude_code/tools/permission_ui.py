@@ -3,7 +3,7 @@ from typing import Optional
 from rich.panel import Panel
 from rich.text import Text
 from rich.box import ROUNDED
-from claude_code.ui.theme import COLORS, ICONS
+from claude_code.ui.theme import COLORS, ICONS, PANEL_STYLES
 from claude_code.ui.input import interactive_menu
 from claude_code.ui import console
 from .base import PermissionLevel
@@ -60,13 +60,13 @@ class PermissionUI:
 
         content_text = "\n".join(content_lines)
 
-        # 3. 渲染 Panel
+        # 3. 渲染 Panel（警告面板使用圆角）
         panel = Panel(
             content_text,
             title=title_text,
             title_align="left",
             border_style=COLORS['border'],
-            box=ROUNDED,
+            box=PANEL_STYLES['warning'],
             padding=(1, 2),
         )
         
@@ -105,7 +105,7 @@ class PermissionUI:
             "Write": ICONS.get('write', '▼'),
             "Edit": ICONS.get('edit', '✎'),
             "Bash": ICONS.get('bash', '▶'),
-            "Grep": ICONS.get('grep', '◆'),
+            "Grep": ICONS.get('grep', '⌕'),
             "Glob": ICONS.get('glob', '◎'),
             "AskUserQuestion": ICONS.get('ask', '◈'),
         }

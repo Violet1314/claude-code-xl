@@ -55,21 +55,21 @@ ICONS = {
     "write": "▼",          # 下三角 — 写入/创建
     "edit": "✎",           # 铅笔 — 编辑/修改
     "bash": "▶",           # 右三角 — 执行/运行
-    "grep": "◆",           # 实心菱形 — 搜索/聚焦
+    "grep": "⌕",           # 十字准星 — 搜索/聚焦
     "glob": "◎",           # 靶心 — 模式匹配
     "ask": "◈",            # 菱形点 — 询问/交互
 
-    # 文件类型图标（统一 ▹，以颜色区分类型）
-    "file_py": "▹",        
-    "file_js": "▹",        
-    "file_ts": "▹",        
-    "file_json": "▹",      
-    "file_md": "▹",        
-    "file_txt": "▹",       
-    "file_yaml": "▹",       
-    "file_html": "▹",      
-    "file_css": "▹",       
-    "file_default": "▹",   
+    # 文件类型图标（差异化符号，提升辨识度）
+    "file_py": "λ",        # Lambda — Python 函数式感
+    "file_js": "⚡",       # 闪电 — JavaScript 动态感
+    "file_ts": "◈",        # 菱形点 — TypeScript 类型感
+    "file_json": "◉",      # 同心圆 — JSON 数据感
+    "file_md": "¶",        # 段落符 — Markdown 文档感
+    "file_txt": "▹",       # 三角 — 纯文本
+    "file_yaml": "≡",      # 三线 — YAML 配置感
+    "file_html": "◁",      # 左三角 — HTML 标签感
+    "file_css": "◐",       # 半圆 — CSS 样式感
+    "file_default": "▹",   # 默认三角
 
     # 其他
     "folder": "▸",         
@@ -77,8 +77,25 @@ ICONS = {
     "lock": "■",           
     "star": "★",           
     "clock": "◷",          
-    "token": "◆",           
+    "token": "⬡",           # 六边形 — Token 蜂巢感
     "price": "$",           
+}
+
+# ============================================================
+# Panel 边框层级（不同重要程度使用不同边框风格）
+# ============================================================
+from rich.box import ROUNDED, SIMPLE, HORIZONTALS
+
+PANEL_STYLES = {
+    # 重要面板：AI响应、计划完成 → 圆角 + 品牌色/状态色边框
+    "primary": ROUNDED,
+    # 次要面板：工具结果、列表 → 简洁线条
+    "secondary": SIMPLE,
+    # 信息面板：提示、帮助 → 仅上下横线
+    "info": HORIZONTALS,
+    # 警告/错误面板：圆角 + 警告/错误色（复用 primary box）
+    "warning": ROUNDED,
+    "error": ROUNDED,
 }
 
 # ============================================================
@@ -127,12 +144,7 @@ PROMPT_STYLE = Style.from_dict({
 # Logo 渐变色
 # ============================================================
 LOGO_GRADIENT = [
-    "#C1502E",  # 深橙红
-    "#D97757",  # 标准橙（主品牌色）
-    "#E8956F",  # 浅橙
-    "#F4A582",  # 更浅橙
-    "#FBBF93",  # 米橙
-    "#FFD4B3",  # 极浅橙
+    "#E87491",  # 樱花粉（单一颜色）
 ]
 
 # ============================================================

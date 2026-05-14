@@ -95,8 +95,9 @@ class CommandRegistry:
             命令信息列表
         """
         return [
-            {"name": cmd.name, "description": cmd.description}
+            {"name": cmd.name, "description": cmd.description, "aliases": cmd.aliases}
             for cmd in self._commands.values()
+            if not cmd.hidden
         ]
     
     @property

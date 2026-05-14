@@ -74,10 +74,8 @@ class TodoCreateTool(Tool):
                 error="任务列表不能为空",
             )
 
-        todo = get_todo_list()
-        todo.clear()
-
         # 使用 TodoList.create_from_dicts 批量创建（内置校验）
+        # 直接创建新实例替换全局引用，无需先 clear() 旧实例
         todo = TodoList.create_from_dicts(items_data)
 
         # 替换全局实例

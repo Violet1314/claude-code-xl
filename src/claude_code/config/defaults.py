@@ -59,5 +59,5 @@ PLAN = PlanDefaults()
 WORKPLACE_DIR = "workplace"
 
 # 版本信息
-VERSION = "2.8.28 | Author: XieLong"
+VERSION = "2.8.31 | Author: XieLong"
 APP_NAME = "Claude Code Terminal"

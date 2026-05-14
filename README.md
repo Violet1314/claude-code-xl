@@ -2,7 +2,7 @@
 
 仿照官方 Claude Code 风格构建的 CLI AI 编程助手，支持 AI 驱动的文件操作和命令执行。
 
-**版本：v2.8.28**
+**版本：v2.8.31**
 
 ## 功能特性
 
@@ -28,6 +28,7 @@
 
 ### 交互体验
 *   **计划模式** - `/plan <任务>` 自主规划并逐步执行；`/plan status` 查看状态；`/plan stop` 主动退出并展示未完成摘要；单任务进行约束 + Unicode 进度面板 + 完成/熔断总结
+*   **命令隐藏** - 低频命令（如 `/tools`）设为 hidden，不在帮助和补全中显示但仍可执行
 *   **CTRL+C 中断** - 单击中断当前操作，双击退出程序
 *   **主动交互** - AI 可向用户询问选择，澄清需求
 *   **轻盈输出** - AI 响应 Panel 卡片 + 工具结果缩进+图标前缀，层级分明
@@ -200,7 +201,7 @@ claude-code/
 │   │   ├── console.py          # Rich 封装
 │   │   ├── components.py       # Logo + 状态栏 + 计划面板（todo/complete/status/stopped/aborted）
 │   │   ├── renderer.py         # Markdown 渲染
-│   │   ├── input.py            # 输入处理（行号续行）
+│   │   ├── input.py            # 输入处理（行号续行+命令补全过滤路径）
 │   │   ├── safe_markup.py      # Rich Markup 安全转义
 │   │   └ progress_display.py   # 进度显示
 │   └ utils/
@@ -225,7 +226,7 @@ claude-code/
 | Write | ▼ | No | Yes | 创建/覆盖文件（自动语法检查） |
 | Edit | ✎ | No | Yes | 精确替换 + 行号范围（双模式） |
 | Bash | ▶ | No | 动态 | 执行命令（流式输出、危险拦截） |
-| Grep | ◆ | Yes | No | 正则搜索（≤30匹配） |
+| Grep | ⌕ | Yes | No | 正则搜索（≤30匹配） |
 | Glob | ◎ | Yes | No | 文件名搜索（≤100结果） |
 | AskUserQuestion | ◈ | Yes | No | 向用户询问 |
 | TodoCreate | ● | No | No | 创建任务计划（计划模式，超限/空项会提示） |
@@ -234,32 +235,36 @@ claude-code/
 
 ## 更新日志
 
-### v2.8.28 (2026-04-28)
-**UI 渲染品质修补与一致性增强：时间戳 BUG 修复 + Plan prompt 指示 + 生命周期 Panel 一致化 + 信息去冗余**
-*   🐛 工具历史时间戳 BUG 修复：`_record_execution` 存储真实时间戳，不再全部显示为"当前时间"
-*   ✅ 工具历史渲染增强：工具图标映射 + Panel 包裹 + 耗时显示（ms/s）+ 状态图标+颜色
-*   ✅ Plan 模式 prompt 指示：计划模式下输入提示符显示 `●` 前缀（琥珀色），用户不会遗忘当前模式
-*   ✅ 计划生命周期 UI 一致化：`show_plan_stopped`/`show_plan_aborted` 从通用消息框改为专属 Panel
-*   ✅ `/plan status` 去冗余：去除与 todo_panel 重复的统计行，改为追加一行简洁操作提示
+### v2.8.31 (2025-05-01)
+**Bug 修复与代码质量提升：别名冲突修复 + 命令列表补全 + 版本同步**
+*   🐛 别名冲突修复：`/style` 移除 `p` 别名（与 `/plan` 冲突），`/plan` 独占 `p` 快捷键
+*   🐛 `list_commands()` 补充 `aliases` 字段，帮助页正确显示命令别名
+*   🐛 版本号同步：`defaults.py` VERSION 从 `2.8.29` 更新为 `2.8.30`
+*   ✅ 变量命名修正：`input_diff` → `input_tokens`，消除增量语义误导
+*   ✅ 冗余代码清理：`TodoCreateTool` 移除多余的 `clear()` 调用
+*   ✅ 帮助文本修正：常用命令示例中 `/tools`（hidden）替换为 `/plan`
+*   ✅ 文档日期修正：`2026` → `2025`
 *   ✅ 全量测试通过：190 passed
 
-### v2.8.27 (2026-04-27)
-**计划模式执行闭环增强：单任务进行约束 + status/stop 摘要 + 完成/熔断总结 + Todo 透明提示**
-*   ✅ 单任务进行约束：同一时间最多一个 `in_progress`，避免任务并发开启后遗漏收尾
-*   ✅ `/plan status`：可随时查看当前计划模式状态、进度与任务列表
-*   ✅ `/plan stop` 增强：主动退出时展示当前进度和未完成任务摘要
-*   ✅ 完成/熔断总结面板：计划完成后展示统计；连续提醒熔断时说明原因、进度和建议
-*   ✅ Todo 透明提示：`TodoCreate` 对空任务/超上限截断给出明确提示；`TodoUpdate` 错误提示更具体
+### v2.8.30 (2025-04-30)
+**UI 美学设计与视觉增强：图标差异化 + Panel 层级化 + 终端自适应 + 代码块标签栏**
+*   ✅ 图标语义冲突修复：`grep`: ◆→⌕（十字准星），`token`: ◆→⬡（六边形）
+*   ✅ 文件类型图标差异化：py→λ, js→⚡, ts→◈, json→◉, md→¶, yaml→≡, html→◁, css→◐
+*   ✅ Panel 边框层级化：新增 `PANEL_STYLES`（primary/secondary/info/warning/error），全局统一替换
+*   ✅ 欢迎页终端自适应：<80 列紧凑 Logo，≥80 列 6 级渐变 ASCII Logo
+*   ✅ 代码块语言标签栏：自动注入语言注释标签（`# ── PYTHON ──` 等）
+*   ✅ 品牌分隔线：`console.brand_rule()` 纯线条分隔
+*   ✅ 错误码徽章：`error_box()` 支持 `error_code` 参数，标题注入 `┌─429─┐`
+*   ✅ Todo 优先级色彩标记：高优先级红色 ●，低优先级灰色 ○
+*   ✅ 启动随机彩蛋：1% 概率隐藏成就
 *   ✅ 全量测试通过：190 passed
 
-### v2.8.26 (2026-04-25)
-**全局 UI 美学优化：图标纯净化 + 色彩收敛 + Panel 克制化 + 排版韵律 + 流式体验**
-*   ✅ 图标纯净化：Emoji（📖✏️⚡🔍📁❓🐍📜）→ Unicode 几何符号（◇▼▶◆◎◈▹），等宽对齐，终端宽度不再错位
-*   ✅ 色彩收敛：6种灰色+新旧两套命名 → 三层灰+统一边框(#4A4A4A)+品牌色+状态色，清理 `system`/`user`/`border_subtle`/`border_default` 等旧命名
-*   ✅ Panel 克制化：Bash 输出去掉 Panel，改为缩进+图标前缀；AI 响应、权限确认保留 Panel
-*   ✅ 排版韵律：状态栏分层显示（模型名突出，次要信息 dim）；工具输出统一缩进层级（标题 Level 0，内容 Level 1 = 2空格）；移除冗余分隔线
-*   ✅ 流式体验：思考状态简化为 `⠋ thinking... 3.2s 120 tok`，等待时更安静
-*   ✅ 全量测试通过：185 passed
+### v2.8.29 (2025-04-29)
+**交互体验优化与文档同步：命令补全修复 + 命令隐藏 + 思考链关闭**
+*   ✅ 命令补全过滤路径：`MergedCompleter` 检测输入以 `/` 开头时跳过 `PathCompleter`，避免路径补全干扰命令选择
+*   ✅ 命令隐藏机制：`Command` 基类新增 `hidden` 属性；`/tools` 设为 `hidden=True`，不在帮助和补全中显示但仍可执行
+*   ✅ 思考链展示关闭：注释掉 `_show_thinking_summary` 调用，终端不再显示 ◈ 思考过程 Panel
+*   ✅ 文档同步：app.py 行数 1062→1195、`/tools` 别名补充、续行行号右对齐、新增 `ExecutionResult` 代理模式、`SafeTextColumn`、工具输出压缩等描述
 
 ---
 

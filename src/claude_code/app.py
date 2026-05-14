@@ -397,6 +397,26 @@ class Application:
                 consecutive_failures = 0
                 last_error_signature = ""
 
+            # 上下文窗口用量检查：接近上限时自动提醒
+            if self.current_model and self.current_model.context_limit > 0:
+                usage_pct = self.stats.session.total_tokens / self.current_model.context_limit
+                if usage_pct >= 0.9:
+                    console.print(
+                        f"\n[{COLORS['error']}]{ICONS['warning']} 上下文窗口已使用 {usage_pct:.0%}，"
+                        f"剩余空间不足，建议使用 /new 开始新会话[/]\n"
+                    )
+                elif usage_pct >= 0.75:
+                    remaining = self.current_model.context_limit - self.stats.session.total_tokens
+                    if remaining >= 1_000_000:
+                        remaining_str = f"{remaining / 1_000_000:.1f}M"
+                    elif remaining >= 1_000:
+                        remaining_str = f"{remaining / 1_000:.1f}K"
+                    else:
+                        remaining_str = str(remaining)
+                    console.print(
+                        f"[{COLORS['warning']}]{ICONS['warning']} 上下文窗口已使用 {usage_pct:.0%}，"
+                        f"剩余 {remaining_str} tok[/]"
+                    )
 
 
         # 保存统计
@@ -483,6 +503,8 @@ class Application:
         native_tool_calls = []
         real_usage = {"input": 0, "output": 0}
         streaming_tokens = 0  # 流式输出token计数
+        thinking_content = ""  # 思考链内容累积
+        thinking_tokens = 0    # 思考链 token 计数
 
         # 【新增】用于控制后台线程停止的标志
         stop_timer_event = threading.Event()
@@ -514,9 +536,18 @@ class Application:
                             pass
                         break
                     elapsed = time.time() - start_time
-                    # ⠋ thinking... 3.2s 120 tok
-                    tok_display = f" {streaming_tokens} tok" if streaming_tokens > 0 else ""
-                    new_desc = f"[{COLORS['primary']}]thinking...[/] [dim]{elapsed:.1f}s[/] [cyan]{tok_display}[/]"
+                    # 区分思考阶段和生成阶段
+                    if streaming_tokens > 0:
+                        # 生成阶段：显示生成状态
+                        tok_display = f" {streaming_tokens} tok"
+                        new_desc = f"[{COLORS['success']}]generating...[/] [dim]{elapsed:.1f}s[/] [cyan]{tok_display}[/]"
+                    elif thinking_tokens > 0:
+                        # 思考阶段：显示思考 token 计数
+                        think_display = f" {thinking_tokens} tok"
+                        new_desc = f"[{COLORS['warning']}]thinking...[/] [dim]{elapsed:.1f}s[/] [cyan]{think_display}[/]"
+                    else:
+                        # 等待阶段
+                        new_desc = f"[{COLORS['primary']}]thinking...[/] [dim]{elapsed:.1f}s[/]"
                     try:
                         progress.update(task, description=new_desc)
                     except Exception:
@@ -541,6 +572,12 @@ class Application:
                     if chunk is None:
                         continue
 
+                    # 提取思考链内容（extended thinking）
+                    thinking_chunk = self.client.extract_thinking(chunk)
+                    if thinking_chunk:
+                        thinking_content += thinking_chunk
+                        thinking_tokens += 1
+
                     # 提取文本内容
                     content = self.client.extract_content(chunk)
                     if content:
@@ -563,8 +600,55 @@ class Application:
         if self._is_interrupted():
             console.print(f"[{COLORS['warning']}]{ICONS['warning']} 已中断请求[/]")
 
+        # 思考链摘要已关闭（用户不需要看到）
+        # if thinking_content.strip():
+        #     self._show_thinking_summary(thinking_content, thinking_tokens)
+
         duration = time.time() - start_time
         return full_response, native_tool_calls, real_usage, duration
+
+    def _show_thinking_summary(self, thinking_content: str, thinking_tokens: int) -> None:
+        """
+        展示思考链摘要（extended thinking 可视化）
+
+        策略：
+        - 短内容（≤200字符）：直接展示
+        - 长内容：展示首尾摘要 + 省略中间
+        - 使用 Panel 包裹，与 AI 响应风格一致
+
+        Args:
+            thinking_content: 思考链完整内容
+            thinking_tokens: 思考链 token 计数
+        """
+        from rich.panel import Panel
+        from claude_code.ui.theme import PANEL_STYLES
+        from rich.text import Text
+
+        MAX_DISPLAY = 300  # 摘要最大显示字符数
+
+        content = thinking_content.strip()
+
+        if len(content) <= MAX_DISPLAY:
+            display = content
+        else:
+            # 保留首尾，省略中间
+            head = content[:200]
+            tail = content[-80:]
+            omitted = len(content) - 280
+            display = f"{head}\n\n... (省略 {omitted} 字符) ...\n\n{tail}"
+
+        # Token 计数显示
+        tok_str = f"{thinking_tokens} tok" if thinking_tokens < 1000 else f"{thinking_tokens / 1000:.1f}K tok"
+
+        panel = Panel(
+            Text(display, style=COLORS['text_secondary']),
+            title=f"[{COLORS['warning']}]◈ 思考过程[/] [dim]{tok_str}[/]",
+            title_align="left",
+            border_style=COLORS['border'],
+            box=PANEL_STYLES['secondary'],
+            padding=(0, 2),
+        )
+        console.print(panel)
 
     def _accumulate_native_tool_calls(self, chunk: Optional[dict], native_tool_calls: list) -> None:
         """
@@ -628,11 +712,11 @@ class Application:
 
         # 保存 AI 响应：优先使用真实 token，否则回退到估算
         if real_usage["input"] > 0:
-            # 使用增量计算费用
-            input_diff, output_tokens = self.stats.set_real_usage(
+            # 使用真实 token 计算费用（set_real_usage 返回传入的绝对值）
+            input_tokens, output_tokens = self.stats.set_real_usage(
                 real_usage["input"], real_usage["output"]
             )
-            cost = self._calculate_cost(input_diff, output_tokens)
+            cost = self._calculate_cost(input_tokens, output_tokens)
             self.stats.add_cost(cost)
         else:
             self.stats.update_output(full_response)
@@ -808,7 +892,7 @@ class Application:
             return
 
         from rich.panel import Panel
-        from rich.box import ROUNDED
+        from claude_code.ui.theme import PANEL_STYLES
 
         # 工具图标映射
         tool_icons = {
@@ -816,7 +900,7 @@ class Application:
             "Write": ICONS.get('write', '▼'),
             "Edit": ICONS.get('edit', '✎'),
             "Bash": ICONS.get('bash', '▶'),
-            "Grep": ICONS.get('grep', '◆'),
+            "Grep": ICONS.get('grep', '⌕'),
             "Glob": ICONS.get('glob', '◎'),
             "AskUserQuestion": ICONS.get('ask', '◈'),
             "TodoCreate": "●",
@@ -861,7 +945,7 @@ class Application:
             title=f"[bold {COLORS['primary']}]{ICONS['claude']} 工具执行历史[/]",
             title_align="left",
             border_style=COLORS['border'],
-            box=ROUNDED,
+            box=PANEL_STYLES['secondary'],
             padding=(0, 2),
         )
         console.get_console().print(panel)
@@ -1084,6 +1168,7 @@ class Application:
                         file_count=self.files.count,
                         price_short=self.current_model.get_price_short() if self.current_model else "",
                         total_cost=self.stats.session.cost,
+                        context_limit=self.current_model.context_limit if self.current_model else 0,
                     )
 
                     user_input = self.input_handler.prompt()

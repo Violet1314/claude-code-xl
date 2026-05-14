@@ -1,14 +1,19 @@
 """输入处理 - prompt-toolkit 交互"""
+import os
 from typing import List, Optional, Callable
 from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.completion import Completer, Completion, PathCompleter
+from prompt_toolkit.history import FileHistory
 from prompt_toolkit.layout import Layout
 from prompt_toolkit.layout.containers import Window
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.widgets import Frame
 from prompt_toolkit.application import Application
 from claude_code.ui.theme import COLORS, ICONS, PROMPT_STYLE
+
+# 历史文件路径
+_HISTORY_FILE = os.path.join("data", "input_history")
 
 # ============================================================
 # 工具函数：中文宽度处理
@@ -69,10 +74,26 @@ class CommandCompleter(Completer):
 # ============================================================
 # 输入会话
 # ============================================================
+class MergedCompleter(Completer):
+    """合并多个补全器（命令 + 文件路径）"""
+    def __init__(self, completers: List[Completer]):
+        self.completers = completers
+
+    def get_completions(self, document, complete_event):
+        text = document.text_before_cursor.lstrip()
+        for completer in self.completers:
+            # 输入 / 开头时只显示命令补全，跳过路径补全（避免干扰）
+            if text.startswith('/') and isinstance(completer, PathCompleter):
+                continue
+            yield from completer.get_completions(document, complete_event)
+
+
 class InputHandler:
     """输入处理器"""
     def __init__(self, commands: List[dict] = None):
         self.completer = CommandCompleter(commands)
+        self._path_completer = PathCompleter(expanduser=True)
+        self._merged_completer = MergedCompleter([self.completer, self._path_completer])
         self._session: Optional[PromptSession] = None
         # 状态
         self.model_name: str = "Claude"
@@ -111,13 +132,17 @@ class InputHandler:
                 # 对话模式：插入换行
                 event.current_buffer.insert_text('\n')
         
+        # 确保历史文件目录存在
+        os.makedirs(os.path.dirname(_HISTORY_FILE), exist_ok=True)
+        
         return PromptSession(
             multiline=True,
             prompt_continuation=self._get_continuation,
             key_bindings=kb,
-            completer=self.completer,
+            completer=self._merged_completer,
             complete_while_typing=True,
             complete_in_thread=True,
+            history=FileHistory(_HISTORY_FILE),
             style=PROMPT_STYLE,  # 确保样式被应用
         )
 

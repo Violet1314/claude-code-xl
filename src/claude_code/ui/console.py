@@ -7,7 +7,7 @@ from rich.padding import Padding
 from rich.rule import Rule
 from rich.panel import Panel
 from rich.box import ROUNDED
-from claude_code.ui.theme import COLORS, ICONS
+from claude_code.ui.theme import COLORS, ICONS, PANEL_STYLES
 
 # ============================================================
 # Windows 终端编码修复
@@ -135,7 +135,7 @@ def _show_panel_box(
         title=panel_title,
         title_align="left",
         border_style=color,
-        box=ROUNDED,
+        box=PANEL_STYLES.get(level, PANEL_STYLES['primary']),
         padding=(1, 2),
     )
     
@@ -147,8 +147,11 @@ def success_box(title: str, content: str = None) -> None:
     """显示成功消息框"""
     _show_panel_box(title, content, level="success")
 
-def error_box(title: str, content: str = None, suggestion: str = None) -> None:
-    """显示错误消息框"""
+def error_box(title: str, content: str = None, suggestion: str = None, error_code: int = None) -> None:
+    """显示错误消息框（支持错误码徽章）"""
+    if error_code is not None:
+        # 在标题中注入错误码徽章
+        title = f"{title}  ┌─{error_code}─┐"
     _show_panel_box(title, content, level="error", suggestion=suggestion)
 
 def warning_box(title: str, content: str = None) -> None:
@@ -198,6 +201,10 @@ def code(content: str, language: str = "python") -> None:
 def rule(style: str = None) -> None:
     """显示分割线"""
     _console.print(Rule(style=style or COLORS['border']))
+
+def brand_rule() -> None:
+    """显示品牌分隔线（纯线条）"""
+    _console.print(Rule(style=COLORS['border']))
 
 def blank(count: int = 1) -> None:
     """显示空行"""

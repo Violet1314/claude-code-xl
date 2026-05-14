@@ -311,6 +311,31 @@ class APIClient:
         return delta.get("content") or delta.get("text") or ""
 
     @staticmethod
+    def extract_thinking(chunk: Optional[Dict[str, Any]]) -> str:
+        """
+        从响应块中提取 extended thinking 内容
+
+        支持：
+        - OpenAI 兼容格式：delta.reasoning_content
+        - Claude 原生格式：delta.thinking
+
+        Args:
+            chunk: 响应数据块（None 时返回空字符串）
+
+        Returns:
+            提取的思考内容
+        """
+        if chunk is None:
+            return ""
+
+        choices = chunk.get("choices", [])
+        if not choices:
+            return ""
+
+        delta = choices[0].get("delta", {})
+        return delta.get("reasoning_content") or delta.get("thinking") or ""
+
+    @staticmethod
     def extract_tool_calls(chunk: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         从响应块中提取工具调用（原生格式）

@@ -43,7 +43,7 @@ class HelpCommand(Command):
         console.print("  • [dim]/save[/]    → 保存会话到 data/history/")
         console.print("  • [dim]/history[/] → 加载历史会话")
         console.print("  • [dim]/model[/]   → 切换 AI 模型")
-        console.print("  • [dim]/tools[/]   → 查看工具执行历史")
+        console.print("  • [dim]/plan[/]    → 进入计划模式，模型自主执行任务")
 
         console.blank()
         console.print(f"[bold {COLORS['info']}]{ICONS['bash']} 工具系统[/]")
@@ -90,7 +90,7 @@ class StyleCommand(Command):
     
     name = "style"
     description = "切换 AI 风格"
-    aliases = ["persona", "p"]
+    aliases = ["persona"]
     
     def execute(self, args: List[str]) -> None:
         if self.app:
@@ -135,7 +135,7 @@ class ToolsCommand(Command):
     name = "tools"
     description = "查看工具执行历史"
     aliases = ["tool", "history_tools"]
-
+    hidden = True
     def execute(self, args: List[str]) -> None:
         if self.app:
             self.app.show_tools_history()
@@ -185,14 +185,14 @@ class PlanCommand(Command):
         reset_todo_list()
 
         from rich.panel import Panel
-        from rich.box import ROUNDED
+        from claude_code.ui.theme import PANEL_STYLES
         console.print()
         console.print(Panel(
             f"[bold]{task_description}[/]\n[dim]模型将自动规划步骤并逐步执行[/]",
             title=f"[{COLORS['primary']}]● 计划模式[/]",
             title_align="left",
             border_style=COLORS['primary'],
-            box=ROUNDED,
+            box=PANEL_STYLES['primary'],
             padding=(0, 2),
         ))
         # 设置计划模式标志，让 chat() 知道这是计划模式

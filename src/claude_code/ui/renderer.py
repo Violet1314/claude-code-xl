@@ -1,10 +1,45 @@
 """响应渲染器 - 优雅卡片风格 (Elegant Card Style)"""
+import re
 from rich.panel import Panel
 from rich.markdown import Markdown
 from rich.text import Text
-from rich.box import ROUNDED
 from claude_code.ui import console
-from claude_code.ui.theme import COLORS, ICONS
+from claude_code.ui.theme import COLORS, ICONS, PANEL_STYLES
+
+
+def _add_code_block_labels(content: str) -> str:
+    """预处理 Markdown：在代码块首行注入语言标签
+    
+    将 ```python 转换为 ```python\n# ── PYTHON ──
+    让 Rich Markdown 渲染时自动显示语言标签
+    """
+    def _replace_code_block(match):
+        backticks = match.group(1)
+        lang = match.group(2) or ""
+        code = match.group(3)
+        
+        if lang:
+            # 构建语言标签行
+            label = f"# ── {lang.upper()} ──"
+            # 对于不同语言使用不同注释符号
+            if lang.lower() in ("html", "xml", "svg"):
+                label = f"<!-- ── {lang.upper()} ── -->"
+            elif lang.lower() in ("css", "scss", "less"):
+                label = f"/* ── {lang.upper()} ── */"
+            elif lang.lower() in ("sql",):
+                label = f"-- ── {lang.upper()} ──"
+            elif lang.lower() in ("lua",):
+                label = f"-- ── {lang.upper()} ──"
+            elif lang.lower() in ("r",):
+                label = f"# ── {lang.upper()} ──"
+            
+            return f"{backticks}{lang}\n{label}\n{code}"
+        return match.group(0)
+    
+    # 匹配 ```lang\n...\n``` 代码块
+    pattern = r"(```)(\w+)?\n([\s\S]*?)```"
+    return re.sub(pattern, _replace_code_block, content)
+
 
 def render_response(content: str, model_name: str, duration: float, tokens: dict = None, has_tools: bool = False) -> None:
     """
@@ -36,17 +71,19 @@ def render_response(content: str, model_name: str, duration: float, tokens: dict
     # 使用 subtle 分隔符连接
     header_text = " [dim]•[/] ".join(header_parts)
     
-    # 2. 渲染 Markdown 内容
-    # 增加左侧 padding (2) 以创造视觉层级，避免文字贴边
-    md_content = Markdown(content, code_theme="monokai")
+    # 2. 预处理 Markdown：注入代码块语言标签
+    labeled_content = _add_code_block_labels(content)
     
-    # 3. 创建 Panel
+    # 3. 渲染 Markdown 内容
+    md_content = Markdown(labeled_content, code_theme="monokai")
+    
+    # 4. 创建 Panel（重要面板使用圆角）
     panel = Panel(
         md_content,
         title=header_text,
         title_align="left",
         border_style=COLORS['border'],
-        box=ROUNDED,
+        box=PANEL_STYLES['primary'],
         padding=(1, 2),  # 上下1行，左右2列留白
     )
     
@@ -64,14 +101,15 @@ def render_response_simple(content: str, model_name: str, duration: float) -> No
     
     header_text = f"[bold]{model_name}[/] [dim]({duration:.1f}s)[/]"
     
-    md_content = Markdown(content, code_theme="monokai")
+    labeled_content = _add_code_block_labels(content)
+    md_content = Markdown(labeled_content, code_theme="monokai")
     
     panel = Panel(
         md_content,
         title=header_text,
         title_align="left",
         border_style=COLORS['border'],
-        box=ROUNDED,
+        box=PANEL_STYLES['primary'],
         padding=(1, 2),
     )
     

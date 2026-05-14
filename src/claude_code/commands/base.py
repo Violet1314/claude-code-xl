@@ -17,6 +17,9 @@ class Command(ABC):
     # 命令别名
     aliases: List[str] = []
     
+    # 是否隐藏（不在帮助和补全中显示，但仍可执行）
+    hidden: bool = False
+    
     def __init__(self, app: "Application" = None):
         """
         初始化命令

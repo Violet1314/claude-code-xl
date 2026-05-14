@@ -8,8 +8,8 @@ from rich.panel import Panel
 from rich.text import Text
 from rich.columns import Columns
 from rich.rule import Rule
-from rich.box import ROUNDED, SIMPLE
-from claude_code.ui.theme import COLORS, ICONS, PROGRAMMING_QUOTES
+from rich.box import ROUNDED, SIMPLE, HORIZONTALS
+from claude_code.ui.theme import COLORS, ICONS, PROGRAMMING_QUOTES, PANEL_STYLES
 from claude_code.ui import console
 from claude_code.config.defaults import VERSION
 
@@ -37,21 +37,45 @@ CODE_LOGO = [
 ]
 
 def show_logo() -> None:
-    """显示 Claude 官方 Logo (优雅渐变效果)"""
+    """显示 Claude 官方 Logo (优雅渐变效果 + 终端自适应)"""
     con = console.get_console()
+    width = shutil.get_terminal_size().columns
     CLAUDE_COLOR = COLORS['primary']
     
-    # 渲染 CLAUDE
-    for line in CLAUDE_LOGO:
-        con.print(f"[bold {CLAUDE_COLOR}]{line}[/]")
+    # 窄终端（<80列）使用紧凑 Logo
+    if width < 80:
+        con.print(f"[bold {CLAUDE_COLOR}]  {ICONS['claude']} Claude Code[/]")
+        con.print(f"[dim {CLAUDE_COLOR}]  Terminal v{VERSION}[/]")
+        return
     
-    # 渲染 CODE (稍微缩进，形成层级)
-    con.print() # 增加一点垂直呼吸感
-    for line in CODE_LOGO:
-        con.print(f"[bold {CLAUDE_COLOR}]{line}[/]")
+    # 宽终端：渲染完整 ASCII Logo（启用渐变效果）
+    from claude_code.ui.theme import LOGO_GRADIENT
+    
+    # 渲染 CLAUDE（应用 6 级渐变）
+    for i, line in enumerate(CLAUDE_LOGO):
+        color = LOGO_GRADIENT[min(i, len(LOGO_GRADIENT)-1)]
+        con.print(f"[bold {color}]{line}[/]")
+    
+    # 渲染 CODE（稍微缩进，形成层级，继续渐变）
+    con.print()  # 增加一点垂直呼吸感
+    for i, line in enumerate(CODE_LOGO):
+        # CODE_LOGO 有 7 行，从渐变中间开始
+        color = LOGO_GRADIENT[min(i + 2, len(LOGO_GRADIENT)-1)]
+        con.print(f"[bold {color}]{line}[/]")
+
+def _show_easter_egg(con) -> None:
+    """🎲 随机彩蛋（1% 概率触发）"""
+    easter_eggs = [
+        (f"[{COLORS['warning']}]✨ 彩蛋！[/] [dim]你触发了隐藏成就：天选之子[/]", f"[{COLORS['primary']}]{ICONS['star']} 幸运星照耀着你[/]"),
+        (f"[{COLORS['info']}]🎲 彩蛋！[/] [dim]你触发了隐藏成就：概率学家[/]", f"[dim]1% 的概率，你抓住了它[/]"),
+        (f"[{COLORS['success']}]🍀 彩蛋！[/] [dim]你触发了隐藏成就：四叶草[/]", f"[dim]今天代码一定会一次通过！[/]"),
+    ]
+    egg_title, egg_text = random.choice(easter_eggs)
+    con.print(f"\n  {egg_title}")
+    con.print(f"  {egg_text}\n")
 
 def show_welcome(model_name: str = "Claude") -> None:
-    """显示欢迎界面 (卡片式布局)"""
+    """显示欢迎界面 (卡片式布局 + 随机彩蛋)"""
     console.clear()
     show_logo()
     
@@ -66,8 +90,12 @@ def show_welcome(model_name: str = "Claude") -> None:
     )
     con.print(header_text)
     
-    # 分隔线
-    con.print(Rule(style=COLORS['border']))
+    # 品牌分隔线
+    console.brand_rule()
+    
+    # 🎲 随机彩蛋（1% 概率）
+    if random.random() < 0.01:
+        _show_easter_egg(con)
     
     # 随机编程名言 (居中或左对齐，增加艺术感)
     quote = random.choice(PROGRAMMING_QUOTES)
@@ -92,9 +120,10 @@ def show_status_bar(
     file_count: int = 0,
     price_short: str = "",
     total_cost: float = 0.0,
+    context_limit: int = 0,
 ) -> None:
     """
-    显示状态信息 (分层：模型名突出，次要信息 dim)
+    显示状态信息 (分层：模型名突出，次要信息 dim，Token 预算可视化)
     """
     con = console.get_console()
 
@@ -113,7 +142,31 @@ def show_status_bar(
     # 次要信息：dim，同行右对齐
     secondary_parts = []
     token_display = _format_token_count(total_tokens)
-    secondary_parts.append(f"{token_display} tok")
+    
+    # Token 预算可视化：用量百分比 + 剩余空间
+    if context_limit > 0:
+        usage_pct = min(total_tokens / context_limit, 1.0)
+        remaining = max(context_limit - total_tokens, 0)
+        remaining_display = _format_token_count(remaining)
+        
+        # 根据用量选择颜色
+        if usage_pct >= 0.9:
+            pct_color = COLORS['error']
+        elif usage_pct >= 0.7:
+            pct_color = COLORS['warning']
+        else:
+            pct_color = COLORS['success']
+        
+        # 迷你进度条（8宽）
+        bar_width = 8
+        filled = int(bar_width * usage_pct)
+        mini_bar = f"[{pct_color}]{'█' * filled}[/][dim]{'░' * (bar_width - filled)}[/]"
+        
+        token_info = f"{token_display}/{_format_token_count(context_limit)} {mini_bar} [{pct_color}]{usage_pct:.0%}[/]"
+        secondary_parts.append(token_info)
+    else:
+        secondary_parts.append(f"{token_display} tok")
+    
     if total_cost > 0:
         secondary_parts.append(f"{ICONS['price']}{_format_cost(total_cost)}")
     if file_count > 0:
@@ -174,7 +227,7 @@ def show_model_list(models: List[Dict], current_id: str = None) -> None:
         title="[bold white]Available Models[/]",
         border_style=COLORS['border'],
         expand=False,
-        box=ROUNDED, # 列表容器使用圆角
+        box=PANEL_STYLES['secondary'], # 列表容器使用简洁边框
     ))
 
 def show_style_list(styles: List[Dict], current_id: str = None) -> None:
@@ -199,7 +252,7 @@ def show_style_list(styles: List[Dict], current_id: str = None) -> None:
         title="[bold white]AI Persona[/]",
         border_style=COLORS['border'],
         expand=False,
-        box=ROUNDED,
+        box=PANEL_STYLES['secondary'],
     ))
 
 def show_history_list(history: List[Dict]) -> None:
@@ -223,7 +276,7 @@ def show_history_list(history: List[Dict]) -> None:
         title="[bold white]History Sessions[/]",
         border_style=COLORS['border'],
         expand=False,
-        box=ROUNDED, # 列表容器使用圆角
+        box=PANEL_STYLES['secondary'], # 列表容器使用简洁边框
     ))
 
 
@@ -275,13 +328,13 @@ def show_message_box(
     # 构建标题
     title_text = f"{display_icon} {title}"
     
-    # 使用 Panel 包裹内容
+    # 使用 Panel 包裹内容（按层级选择边框风格）
     panel = Panel(
         content,
         title=title_text,
         title_align="left",
         border_style=color,
-        box=ROUNDED,
+        box=PANEL_STYLES.get(level, PANEL_STYLES['info']),
         padding=(1, 2),
     )
     con.print(panel)
@@ -327,7 +380,7 @@ def show_tool_result_box(
         title=title,
         title_align="left",
         border_style=color,
-        box=ROUNDED,
+        box=PANEL_STYLES['secondary'],
         padding=(1, 2),
     )
     con.print(panel)
@@ -359,6 +412,15 @@ def show_todo_panel(todo_list) -> None:
     max_id_width = len(str(todo_list.total_count))
 
     for item in todo_list.items:
+        # 优先级色彩标记（三种颜色实心圆，统一格式）
+        priority = getattr(item, 'priority', 'medium')
+        if priority == 'high':
+            priority_dot = f"[{COLORS['error']}]●[/]"
+        elif priority == 'low':
+            priority_dot = f"[{COLORS['text_muted']}]●[/]"
+        else:  # medium
+            priority_dot = f"[{COLORS['primary']}]●[/]"
+
         # 状态标记 - Unicode 符号，与主题系统统一
         if item.status == "completed":
             status_icon = "✓"
@@ -382,7 +444,7 @@ def show_todo_panel(todo_list) -> None:
         aligned_id = id_num.rjust(max_id_width)
 
         content_lines.append(
-            f"  {status_icon} {aligned_id}  {style}{item.content}{end_style}"
+            f"  {priority_dot} {status_icon} {aligned_id}  {style}{item.content}{end_style}"
         )
 
     content = "\n".join(content_lines)
@@ -409,7 +471,7 @@ def show_todo_panel(todo_list) -> None:
         title=title,
         title_align="left",
         border_style=border_color,
-        box=ROUNDED,
+        box=PANEL_STYLES['primary'],
         padding=(0, 2),
     )
     con.print(panel)
@@ -451,7 +513,7 @@ def show_plan_complete(todo_list) -> None:
         title=f"[{COLORS['success']}]✓ 执行完成[/]",
         title_align="left",
         border_style=COLORS['success'],
-        box=ROUNDED,
+        box=PANEL_STYLES['primary'],
         padding=(0, 2),
     )
     con.print(panel)
@@ -483,7 +545,7 @@ def show_plan_stopped(todo_list) -> None:
             title=f"[{COLORS['warning']}]■ 已退出计划模式[/]",
             title_align="left",
             border_style=COLORS['warning'],
-            box=ROUNDED,
+            box=PANEL_STYLES['warning'],
             padding=(0, 2),
         )
         con.print(panel)
@@ -507,7 +569,7 @@ def show_plan_stopped(todo_list) -> None:
         title=f"[{COLORS['warning']}]■ 已退出计划模式[/]",
         title_align="left",
         border_style=COLORS['warning'],
-        box=ROUNDED,
+        box=PANEL_STYLES['warning'],
         padding=(0, 2),
     )
     con.print(panel)
@@ -530,7 +592,7 @@ def show_plan_aborted(reason: str, todo_list=None) -> None:
         title=f"[{COLORS['error']}]⚠ 计划模式已自动退出[/]",
         title_align="left",
         border_style=COLORS['error'],
-        box=ROUNDED,
+        box=PANEL_STYLES['error'],
         padding=(0, 2),
     )
     con.print(panel)
