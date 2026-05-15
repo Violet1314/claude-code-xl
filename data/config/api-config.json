@@ -6,40 +6,32 @@
   },
   "models": [
     {
+      "id": "gpt-5.5",
+      "name": "GPT 5.5",
+      "price": "Input: $36.25/1M Output: $217.50/1M",
+      "context_limit": 1000000,
+      "tool_mode": "native"
+    },
+    {
       "id": "glm-5.1",
       "name": "GLM 5.1",
-      "price": "Input: $6.83/1M Output: $21.86/1M",
-      "context_limit": 202752,
+      "price": "Input: $9.14/1M Output: $28.71/1M",
+      "context_limit": 200000,
       "tool_mode": "native"
     },
     {
-      "id": "kimi-k2.6-code",
-      "name": "Kimi K2.6 Code",
-      "price": "Input: $4.10/1M Output: $20.49/1M",
-      "context_limit": 262144,
-      "tool_mode": "native"
-    },
-    {
-      "id": "MiniMax-M2.7",
-      "name": "MiniMax M2.7",
-      "price": "Input: $2.05/1M Output: $8.20/1M",
-      "context_limit": 204800,
+      "id": "kimi-k2.6",
+      "name": "Kimi K2.6",
+      "price": "Input: $5.44/1M Output: $25.38/1M",
+      "context_limit": 256000,
       "tool_mode": "native"
     },
     {
       "id": "qwen3.6-plus",
       "name": "Qwen 3.6 Plus",
-      "price": "Input: $4.00/1M Output: $12.00/1M",
+      "price": "Input: $2.00/1M Output: $12.00/1M",
       "context_limit": 1000000,
       "tool_mode": "native"
     },
-    {
-      "id": "deepseek-v3.2",
-      "name": "DeepSeek V3.2",
-      "price": "Input: $0.96/1M Output: $1.91/1M",
-      "context_limit": 128000,
-      "tool_mode": "native"
-    }
-  ],
   "default_model": "glm-5.1"
 }
