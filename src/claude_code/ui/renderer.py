@@ -75,7 +75,7 @@ def render_response(content: str, model_name: str, duration: float, tokens: dict
     labeled_content = _add_code_block_labels(content)
     
     # 3. 渲染 Markdown 内容
-    md_content = Markdown(labeled_content, code_theme="monokai")
+    md_content = Markdown(labeled_content, code_theme="github-dark")
     
     # 4. 创建 Panel（重要面板使用圆角）
     panel = Panel(
@@ -102,7 +102,7 @@ def render_response_simple(content: str, model_name: str, duration: float) -> No
     header_text = f"[bold]{model_name}[/] [dim]({duration:.1f}s)[/]"
     
     labeled_content = _add_code_block_labels(content)
-    md_content = Markdown(labeled_content, code_theme="monokai")
+    md_content = Markdown(labeled_content, code_theme="github-dark")
     
     panel = Panel(
         md_content,

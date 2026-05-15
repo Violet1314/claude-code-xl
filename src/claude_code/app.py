@@ -279,8 +279,17 @@ class Application:
                 # 有工具执行，说明模型在推进，重置提醒计数
                 self._plan_reminder_count = 0
                 if todo.items:
+                    # 收集刚完成的任务 ID，用于闪烁高亮
+                    flash_ids = []
+                    for result in report.results:
+                        if result.success and result.tool_call.name == "TodoUpdate":
+                            metadata = result.metadata or {}
+                            flash_id = metadata.get('flash_id')
+                            if flash_id:
+                                flash_ids.append(flash_id)
+                    
                     console.print()
-                    show_todo_panel(todo)
+                    show_todo_panel(todo, flash_ids=flash_ids if flash_ids else None)
                     # 全部完成时退出计划模式
                     if todo.is_all_done:
                         from claude_code.ui.components import show_plan_complete
@@ -1044,7 +1053,7 @@ class Application:
     # ============================================================
 
     def save_conversation(self) -> None:
-        """保存会话"""
+        """保存会话（增强版：包含完整对话+工具执行记录+挂载文件+路径状态）"""
         if self.conversation.is_empty:
             console.warning("没有对话记录，无法保存")
             return
@@ -1061,11 +1070,39 @@ class Application:
         filepath = os.path.join(self.history_dir, filename)
 
         try:
+            # 收集工具执行历史
+            tool_history = []
+            if hasattr(self, 'tool_executor') and self.tool_executor:
+                tool_history = self.tool_executor.get_history(limit=100)
+
+            # 收集挂载文件信息
+            mounted_files = []
+            if hasattr(self, 'files') and self.files:
+                mounted_files = self.files.list_files()
+
+            # 收集路径管理器状态
+            path_state = {}
+            if hasattr(self, 'path_manager') and self.path_manager:
+                path_state = {
+                    "active_path": str(self.path_manager.active_path),
+                    "workplace": str(self.path_manager.workplace),
+                    "is_workplace_mode": self.path_manager.is_workplace_mode,
+                }
+
             data = {
+                "version": "2.8.32",
                 "title": title,
                 "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
                 "model": self.current_model.id if self.current_model else "",
+                "style_id": self.current_style_id if hasattr(self, 'current_style_id') else "",
                 "messages": messages,
+                "tool_history": tool_history,
+                "mounted_files": mounted_files,
+                "path_state": path_state,
+                "stats": {
+                    "total_tokens": self.stats.session.total_tokens if hasattr(self, 'stats') else 0,
+                    "cost": self.stats.session.cost if hasattr(self, 'stats') else 0.0,
+                },
             }
 
             json_str = json.dumps(data, indent=2, ensure_ascii=False)
@@ -1073,11 +1110,12 @@ class Application:
             with open(filepath, 'w', encoding='utf-8') as f:
                 f.write(json_str)
 
-            console.success(f"会话已保存: {filename}")
+            console.success(f"会话已保存: {title}")
+            console.print(f"[dim]路径: {filepath}[/]")
+            console.print(f"[dim]包含: {len(messages)} 条消息, {len(tool_history)} 条工具记录, {len(mounted_files)} 个挂载文件[/]")
 
         except Exception as e:
             console.error(f"保存失败: {e}")
-
     def load_history(self) -> None:
         """加载历史"""
         if not os.path.exists(self.history_dir):
@@ -1116,32 +1154,91 @@ class Application:
             self._load_history_file(choice)
 
     def _load_history_file(self, filename: str) -> None:
-        """加载历史文件"""
+        """加载历史文件（完整恢复上下文状态）"""
         try:
             filepath = os.path.join(self.history_dir, filename)
 
             with open(filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
 
+            # 1. 恢复对话消息
             self.conversation.load_messages(data.get("messages", []))
 
+            # 2. 恢复模型
             model_id = data.get("model")
             if model_id:
                 model = self.settings.get_model(model_id)
                 if model:
                     self.current_model = model
 
+            # 3. 恢复风格
+            style_id = data.get("style_id")
+            if style_id and style_id in self.settings.style_ids:
+                self.current_style_id = style_id
+                self._setup_system_prompt()
+
+            # 4. 恢复工具执行历史
+            tool_history = data.get("tool_history", [])
+            if tool_history and hasattr(self.tool_executor, 'execution_history'):
+                self.tool_executor.execution_history = tool_history
+
+            # 5. 恢复文件挂载（将保存的列表还原为 AttachedFile 字典）
+            mounted_files = data.get("mounted_files", [])
+            if mounted_files and hasattr(self.files, '_files'):
+                self.files._files.clear()
+                for f_info in mounted_files:
+                    path = f_info.get("path", "")
+                    if path and os.path.isfile(path):
+                        try:
+                            with open(path, 'r', encoding='utf-8') as fp:
+                                content = fp.read()
+                            from claude_code.core.files import AttachedFile
+                            self.files._files[path] = AttachedFile(
+                                path=path,
+                                content=content,
+                                size=f_info.get("size", len(content)),
+                                tokens=f_info.get("tokens", 0),
+                            )
+                        except Exception:
+                            continue
+
+            # 6. 恢复路径状态
+            path_state = data.get("path_state", {})
+            if path_state and hasattr(self, 'path_manager'):
+                active_path = path_state.get("active_path")
+                workplace = path_state.get("workplace")
+                if active_path and os.path.isdir(active_path):
+                    self.path_manager.set_active_path(active_path)
+                    self._setup_system_prompt()
+
+            # 7. 更新输入状态
             self._update_input_state()
+
+            # 8. 显示恢复结果
             console.clear()
             console.success(f"已加载: {data.get('title', '未命名')}")
+            console.print(f"[dim]包含: {len(data.get('messages', []))} 条消息, {len(tool_history)} 条工具记录, {len(mounted_files)} 个挂载文件[/]")
 
-            for msg in self.conversation.get_messages():
+            # 9. 回放对话内容（仅显示最后 5 条，避免刷屏）
+            messages = self.conversation.get_messages()
+            recent_msgs = messages[-5:] if len(messages) > 5 else messages
+            for msg in recent_msgs:
                 if msg["role"] == "user":
                     console.print(f"\n[bold {COLORS['info']}]{ICONS['user']} YOU[/]")
                     console.print(msg["content"])
                 elif msg["role"] == "assistant":
                     console.print(f"\n[bold {COLORS['primary']}]{ICONS['claude']} CLAUDE[/]")
                     console.markdown(msg["content"])
+
+            # 10. 显示状态栏
+            show_status_bar(
+                model_name=self.current_model.name if self.current_model else "Claude",
+                total_tokens=self.stats.session.total_tokens,
+                file_count=self.files.count,
+                price_short=self.current_model.get_price_short() if self.current_model else "",
+                total_cost=self.stats.session.cost,
+                context_limit=self.current_model.context_limit if self.current_model else 0,
+            )
 
         except Exception as e:
             console.error(f"加载失败: {e}")

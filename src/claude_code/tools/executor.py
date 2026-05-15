@@ -45,6 +45,10 @@ class ExecutionResult:
     def display_output(self) -> Optional[str]:
         return self.tool_result.display_output if self.tool_result else None
 
+    @property
+    def metadata(self) -> Dict:
+        return self.tool_result.metadata if self.tool_result else {}
+
 @dataclass
 class ExecutionReport:
     """执行报告"""

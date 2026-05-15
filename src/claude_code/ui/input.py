@@ -211,10 +211,10 @@ def interactive_menu(
             prefix = ' ❯ ' if is_selected else '   '
             result.append((style, prefix + pad_to_width(opt['name'], name_width)))
 
-            # 描述
+            # 描述（选中时高亮，未选中时 dim）
             if opt.get('desc'):
-                desc_style = style if is_selected else 'class:menu-dim'
-                result.append((desc_style, f" │ {opt['desc']}"))
+                desc_style = 'class:menu-selected' if is_selected else 'class:menu-dim'
+                result.append((desc_style, f"  — {opt['desc']}"))
 
             result.append(('', '\n'))
         

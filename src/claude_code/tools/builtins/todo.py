@@ -197,11 +197,17 @@ class TodoUpdateTool(Tool):
         output = f"任务 {item_id} [{item.content}] 状态: {old_status} → {status}"
         progress = f"进度: {todo.progress_text}"
 
+        # 如果是刚完成的任务，在 metadata 中记录以便 UI 闪烁
+        metadata = {}
+        if status == "completed":
+            metadata["flash_id"] = item_id
+
         return ToolResult(
             success=True,
             output=f"{output}\n{progress}",
             summary=f"{item_id}: {old_status} → {status}",
             display_output=f"  {item.icon} {item_id}  {item.content}  [dim]{old_status} →[/] [{status}]",
+            metadata=metadata,
         )
 
     def is_read_only(self) -> bool:

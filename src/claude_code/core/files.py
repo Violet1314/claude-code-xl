@@ -279,10 +279,22 @@ class FileManager:
         
         return "\n".join(parts)
     
+    def list_files(self) -> List[Dict[str, any]]:
+        """
+        列出所有挂载文件信息（用于保存会话）
+
+        Returns:
+            文件信息列表，每项包含 path、size、tokens
+        """
+        return [
+            {"path": f.path, "size": f.size, "tokens": f.tokens}
+            for f in self._files.values()
+        ]
+
     def clear(self) -> int:
         """
         清空所有挂载
-        
+
         Returns:
             清空的文件数
         """

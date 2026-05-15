@@ -126,7 +126,10 @@ def _show_panel_box(
         lines.append(content)
     
     if suggestion:
-        lines.append(f"\n[dim]{ICONS['info']} 建议: {suggestion}[/]")
+        # 视觉引导：建议区块使用 info 色边框包裹，与错误内容区分
+        lines.append("")
+        lines.append(f"[{COLORS['info']}]━ 解决建议 ━[/]")
+        lines.append(f"[{COLORS['info']}]{ICONS['info']} {suggestion}[/]")
         
     final_content = "\n".join(lines) if lines else ""
 
@@ -170,7 +173,7 @@ def markdown(text: str) -> None:
     if not text:
         return
     try:
-        md = Markdown(text, code_theme="monokai")
+        md = Markdown(text, code_theme="github-dark")
         # 左侧缩进 2 个字符，避免贴边
         content = Padding(md, (0, 0, 0, 2))
         _console.print(content)
@@ -185,7 +188,7 @@ def code(content: str, language: str = "python") -> None:
         syntax = Syntax(
             content,
             language,
-            theme="monokai",
+            theme="github-dark",
             line_numbers=True,
             background_color="#0F0F0F",
             padding=(1, 1),

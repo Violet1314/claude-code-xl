@@ -7,6 +7,7 @@ from .edit import EditTool
 from .bash import BashTool
 from .ask_user import AskUserQuestionTool
 from .todo import TodoCreateTool, TodoUpdateTool, TodoListTool
+from .project_context import ProjectContextTool
 
 # 导出所有工具类
 __all__ = [
@@ -20,6 +21,7 @@ __all__ = [
     "TodoCreateTool",
     "TodoUpdateTool",
     "TodoListTool",
+    "ProjectContextTool",
 ]
 
 def register_all_tools(registry):
@@ -34,3 +36,4 @@ def register_all_tools(registry):
     registry.register(TodoCreateTool())
     registry.register(TodoUpdateTool())
     registry.register(TodoListTool())
+    registry.register(ProjectContextTool())

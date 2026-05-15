@@ -55,21 +55,29 @@ class BashStreamingDisplay:
         self._output_lines.append(line)
 
     def stop(self, success: bool, return_code: int = 0) -> None:
-        """停止并显示结果（混合方案：统一标题 + Panel 包裹）"""
+        """停止并显示结果（结构化：标题行 + 分隔线 + 输出区）"""
         if self._display:
             self._display.stop()
 
         duration = time.time() - self._start_time
-        status_str = '成功' if success else '失败'
         icon = ICONS.get('bash', '▶')
         color = COLORS['success'] if success else COLORS['error']
 
-        # 标题行：▶ Bash: command [状态] (耗时 Xs)
+        # 截断命令
         display_cmd = self.command if len(self.command) <= 50 else self.command[:47] + "..."
+        
+        # 标题行：图标 + 命令 + 状态徽章 + 退出码徽章 + 时间胶囊
+        status_badge = f"[{color}] {ICONS['success'] if success else ICONS['error']} {'成功' if success else '失败'} [/]"
+        exit_code_badge = f"[dim]exit {return_code}[/]"
+        time_capsule = f"[dim]⏱ {duration:.2f}s[/]"
+        
         app_console.print()
-        app_console.print(f"[bold]{icon} Bash:[/] [cyan]{display_cmd}[/] [dim]\\[{status_str}] ({duration:.2f}s)[/]")
+        app_console.print(f"[bold]{icon} Bash:[/] [cyan]{display_cmd}[/] {status_badge} {exit_code_badge} {time_capsule}")
+        
+        # 输出区域分隔线
+        app_console.print(f"[dim]{'─' * 60}[/]")
 
-        # 输出内容：缩进+图标前缀，轻盈风格（去掉 Panel）
+        # 输出内容：缩进+图标前缀，轻盈风格
         if self._output_lines:
             max_lines = 20
             if len(self._output_lines) > max_lines:

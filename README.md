@@ -2,7 +2,7 @@
 
 仿照官方 Claude Code 风格构建的 CLI AI 编程助手，支持 AI 驱动的文件操作和命令执行。
 
-**版本：v2.8.31**
+**版本：v2.8.32**
 
 ## 功能特性
 
@@ -164,7 +164,7 @@ claude-code/
 │   ├── __main__.py             # 入口点（Windows 编码修复）
 │   ├── app.py                  # 主应用类
 │   ├── config/
-│   │   ├── defaults.py         # 常量配置
+│   │   ├── defaults.py         # 常量配置（dataclass 分组）
 │   │   └ settings.py            # 配置加载器
 │   ├── core/
 │   │   ├── client.py           # APIClient（流式+错误建议）
@@ -188,21 +188,22 @@ claude-code/
 │   │       ├── write.py        # ▼ Write
 │   │       ├── edit.py         # ✎ Edit
 │   │       ├── bash.py         # ▶ Bash
-│   │       ├── grep.py         # ◆ Grep
+│   │       ├── grep.py         # ⌕ Grep
 │   │       ├── glob.py         # ◎ Glob
 │   │       ├── ask_user.py     # ◈ AskUserQuestion
-│   │       └ todo.py           # ● TodoCreate/TodoUpdate/TodoList
+│   │       ├── todo.py         # ● TodoCreate/TodoUpdate/TodoList
+│   │       └ project_context.py  # ◇ ProjectContext（项目结构感知）
 │   ├── commands/
 │   │   ├── base.py             # Command 基类
 │   │   ├── registry.py         # 命令注册表
-│   │   └ handlers.py           # 10 个内置命令
+│   │   └ handlers.py           # 11 个内置命令
 │   ├── ui/
-│   │   ├── theme.py            # 颜色 + 图标
-│   │   ├── console.py          # Rich 封装
+│   │   ├── theme.py            # 颜色 + 图标 + Panel层级
+│   │   ├── console.py          # Rich 封装（含Markup安全猴子补丁）
 │   │   ├── components.py       # Logo + 状态栏 + 计划面板（todo/complete/status/stopped/aborted）
-│   │   ├── renderer.py         # Markdown 渲染
+│   │   ├── renderer.py         # Markdown 渲染（含代码块语言标签栏）
 │   │   ├── input.py            # 输入处理（行号续行+命令补全过滤路径）
-│   │   ├── safe_markup.py      # Rich Markup 安全转义
+│   │   ├── safe_markup.py      # Rich Markup 安全防护（safe_print/safe_markup/validate_markup）
 │   │   └ progress_display.py   # 进度显示
 │   └ utils/
 │       ├── paths.py            # 路径处理
@@ -232,8 +233,24 @@ claude-code/
 | TodoCreate | ● | No | No | 创建任务计划（计划模式，超限/空项会提示） |
 | TodoUpdate | ● | No | No | 更新任务状态（计划模式，严格状态机 + 单 in_progress 约束） |
 | TodoList | ● | Yes | No | 查看当前计划与进度（计划模式） |
+| ProjectContext | ◇ | Yes | No | 项目结构感知（目录扫描+类型识别+符号索引） |
 
 ## 更新日志
+
+### v2.8.32 (2025-05-02)
+**功能增强与文档同步：新增 ProjectContext + dataclass 重构 + safe_markup 模块**
+*   ✅ 新增 ProjectContext 工具：项目结构感知，自动扫描目录、识别项目类型、索引 Python 符号
+*   ✅ defaults.py 重构为 dataclass 分组：`FileDefaults`/`APIDefaults`/`ConversationDefaults`/`UIDefaults`/`ToolDefaults`/`PlanDefaults`
+*   ✅ 新增 UIDefaults：`MIN_WIDTH=40`、`MAX_WIDTH=120`
+*   ✅ 新增 safe_markup 模块：`safe_print()`/`safe_markup()`/`escape_markup()`/`validate_markup()`，根治 MarkupError 崩溃
+*   ✅ 版本号格式增强：`VERSION` 包含作者信息 `"2.8.31 | Author: XieLong"`
+*   ✅ LOGO_GRADIENT 修正：6级橙色渐变 → 1级樱花粉 `#E87491`
+*   ✅ 新增 thinking 图标：`⠋`
+*   ✅ TodoCreate 实例替换优化：移除 `clear()` 调用，直接替换全局实例
+*   ✅ TodoUpdate 描述扩充：包含详细状态转换规则和禁止的转换说明
+*   ✅ app.py 失败检测结构化：使用 `report` 结构化数据判断失败轮次
+*   ✅ 内置工具总数：10 → 11（含 ProjectContext）
+*   ✅ 全量测试通过：190 passed
 
 ### v2.8.31 (2025-05-01)
 **Bug 修复与代码质量提升：别名冲突修复 + 命令列表补全 + 版本同步**
@@ -251,20 +268,13 @@ claude-code/
 *   ✅ 图标语义冲突修复：`grep`: ◆→⌕（十字准星），`token`: ◆→⬡（六边形）
 *   ✅ 文件类型图标差异化：py→λ, js→⚡, ts→◈, json→◉, md→¶, yaml→≡, html→◁, css→◐
 *   ✅ Panel 边框层级化：新增 `PANEL_STYLES`（primary/secondary/info/warning/error），全局统一替换
-*   ✅ 欢迎页终端自适应：<80 列紧凑 Logo，≥80 列 6 级渐变 ASCII Logo
+*   ✅ 欢迎页终端自适应：<80 列紧凑 Logo，≥80 列启用 LOGO_GRADIENT
 *   ✅ 代码块语言标签栏：自动注入语言注释标签（`# ── PYTHON ──` 等）
 *   ✅ 品牌分隔线：`console.brand_rule()` 纯线条分隔
 *   ✅ 错误码徽章：`error_box()` 支持 `error_code` 参数，标题注入 `┌─429─┐`
 *   ✅ Todo 优先级色彩标记：高优先级红色 ●，低优先级灰色 ○
 *   ✅ 启动随机彩蛋：1% 概率隐藏成就
 *   ✅ 全量测试通过：190 passed
-
-### v2.8.29 (2025-04-29)
-**交互体验优化与文档同步：命令补全修复 + 命令隐藏 + 思考链关闭**
-*   ✅ 命令补全过滤路径：`MergedCompleter` 检测输入以 `/` 开头时跳过 `PathCompleter`，避免路径补全干扰命令选择
-*   ✅ 命令隐藏机制：`Command` 基类新增 `hidden` 属性；`/tools` 设为 `hidden=True`，不在帮助和补全中显示但仍可执行
-*   ✅ 思考链展示关闭：注释掉 `_show_thinking_summary` 调用，终端不再显示 ◈ 思考过程 Panel
-*   ✅ 文档同步：app.py 行数 1062→1195、`/tools` 别名补充、续行行号右对齐、新增 `ExecutionResult` 代理模式、`SafeTextColumn`、工具输出压缩等描述
 
 ---
 

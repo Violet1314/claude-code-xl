@@ -14,6 +14,19 @@ from claude_code.ui import console
 from claude_code.config.defaults import VERSION
 
 # ============================================================
+# 响应式布局工具
+# ============================================================
+def _terminal_width() -> int:
+    """获取当前终端宽度"""
+    return shutil.get_terminal_size().columns
+
+def _responsive_panel_width(min_w: int = 60, max_w: int = 120) -> int:
+    """根据终端宽度计算 Panel 最佳宽度"""
+    tw = _terminal_width()
+    # 终端宽度的 90%，限制在 min_w ~ max_w 之间
+    return max(min_w, min(int(tw * 0.9), max_w))
+
+# ============================================================
 # Logo
 # ============================================================
 CLAUDE_LOGO = [
@@ -227,6 +240,7 @@ def show_model_list(models: List[Dict], current_id: str = None) -> None:
         title="[bold white]Available Models[/]",
         border_style=COLORS['border'],
         expand=False,
+        width=_responsive_panel_width(),
         box=PANEL_STYLES['secondary'], # 列表容器使用简洁边框
     ))
 
@@ -252,6 +266,7 @@ def show_style_list(styles: List[Dict], current_id: str = None) -> None:
         title="[bold white]AI Persona[/]",
         border_style=COLORS['border'],
         expand=False,
+        width=_responsive_panel_width(),
         box=PANEL_STYLES['secondary'],
     ))
 
@@ -270,12 +285,12 @@ def show_history_list(history: List[Dict]) -> None:
             item.get('title', '未命名')[:20],
             f"{item.get('count', 0)} 轮",
         )
-
     console.get_console().print(Panel(
         table,
         title="[bold white]History Sessions[/]",
         border_style=COLORS['border'],
         expand=False,
+        width=_responsive_panel_width(),
         box=PANEL_STYLES['secondary'], # 列表容器使用简洁边框
     ))
 
@@ -390,16 +405,18 @@ def show_tool_result_box(
 # Todo 计划面板
 # ============================================================
 
-def show_todo_panel(todo_list) -> None:
+def show_todo_panel(todo_list, flash_ids: list = None) -> None:
     """显示 TodoList 进度面板
 
     Args:
         todo_list: TodoList 实例
+        flash_ids: 需要闪烁高亮的任务 ID 列表（刚完成的任务）
     """
     if not todo_list.items:
         return
 
     con = console.get_console()
+    flash_ids = flash_ids or []
 
     # 全部完成时边框变绿
     border_color = COLORS['success'] if todo_list.is_all_done else COLORS['primary']
@@ -424,8 +441,13 @@ def show_todo_panel(todo_list) -> None:
         # 状态标记 - Unicode 符号，与主题系统统一
         if item.status == "completed":
             status_icon = "✓"
-            style = "[dim]"
-            end_style = "[/]"
+            # 闪烁效果：刚完成的任务使用高亮绿色 + 粗体
+            if item.id in flash_ids:
+                style = f"[bold {COLORS['success']}]"
+                end_style = "[/]"
+            else:
+                style = "[dim]"
+                end_style = "[/]"
         elif item.status == "in_progress":
             status_icon = "●"
             style = f"[bold {COLORS['primary']}]"

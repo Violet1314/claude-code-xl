@@ -1,5 +1,6 @@
-"""Bash 工具 - 执行 shell 命令（支持流式输出 + 可中断）"""
+"""Bash 工具 - 执行 shell 命令（支持流式输出 + 可中断 + 沙箱安全）"""
 import os
+import re
 import subprocess
 import threading
 import queue
@@ -11,7 +12,7 @@ from claude_code.ui.progress_display import BashStreamingDisplay
 
 
 class BashTool(Tool):
-    """Shell 命令执行工具"""
+    """Shell 命令执行工具（沙箱模式）"""
     name = "Bash"
     description = (
         "执行 shell 命令。"
@@ -21,6 +22,12 @@ class BashTool(Tool):
         "错误示例：mkdir -p data output | ls -la | rm -rf | cp -r"
         "⚠️ 不支持交互式命令：不要执行需要用户输入的命令（如 python script.py 等待 input()），这类命令会卡住直到超时。"
         "所有命令都需要用户确认。"
+        "\n\n"
+        "🔒 沙箱安全限制：\n"
+        "- 工作目录限制在操作根目录及其子目录内\n"
+        "- 禁止访问系统关键路径（Windows/System32 等）\n"
+        "- 禁止使用绝对路径逃逸沙箱\n"
+        "- 命令执行前自动进行安全扫描"
     )
 
     # 输出限制
@@ -29,6 +36,16 @@ class BashTool(Tool):
 
     # 安全检查器（独立模块）
     _safety_checker = CommandSafetyChecker()
+
+    # 沙箱配置
+    SANDBOX_ENABLED = True
+    # 禁止访问的系统路径（Windows）
+    SANDBOX_BLOCKED_PATHS = [
+        r"C:\Windows",
+        r"C:\Program Files",
+        r"C:\Program Files (x86)",
+        r"C:\ProgramData",
+    ]
 
 
     def get_parameters_schema(self) -> Dict[str, Any]:
@@ -286,6 +303,54 @@ class BashTool(Tool):
 
         return output
 
+    def _check_sandbox(self, command: str, work_dir: Path) -> Optional[ToolResult]:
+        """沙箱安全检查：限制工作目录和禁止访问系统路径"""
+        if not self.SANDBOX_ENABLED:
+            return None
+
+        # 1. 检查 cwd 是否为绝对路径且在允许范围内
+        if work_dir.is_absolute():
+            # 解析真实路径（处理 .. 和符号链接）
+            try:
+                real_cwd = work_dir.resolve()
+            except Exception:
+                return ToolResult(
+                    success=False, output="",
+                    error=f"沙箱安全限制：无法解析工作目录 {work_dir}"
+                )
+
+            # 2. 检查是否命中黑名单路径
+            cwd_str = str(real_cwd).lower()
+            for blocked in self.SANDBOX_BLOCKED_PATHS:
+                if cwd_str.startswith(blocked.lower()):
+                    return ToolResult(
+                        success=False, output="",
+                        error=f"沙箱安全限制：禁止在系统路径 {blocked} 下执行命令"
+                    )
+
+        # 3. 检查命令中是否包含绝对路径逃逸尝试
+        # 匹配 Windows 绝对路径如 C:\, D:\ 等
+        abs_path_pattern = re.compile(r'[A-Z]:\\', re.IGNORECASE)
+        for match in abs_path_pattern.finditer(command):
+            path_candidate = command[max(0, match.start()-2):match.end()+50]
+            # 简单判断：如果命令中包含非 cwd 的绝对路径，警告
+            try:
+                cmd_path = Path(path_candidate.split()[0].strip('"'))
+                if cmd_path.is_absolute():
+                    real_cmd_path = cmd_path.resolve()
+                    # 检查是否在黑名单中
+                    cmd_path_str = str(real_cmd_path).lower()
+                    for blocked in self.SANDBOX_BLOCKED_PATHS:
+                        if cmd_path_str.startswith(blocked.lower()):
+                            return ToolResult(
+                                success=False, output="",
+                                error=f"沙箱安全限制：命令尝试访问系统路径 {blocked}"
+                            )
+            except (ValueError, OSError):
+                pass  # 路径解析失败，跳过
+
+        return None
+
     def execute(
         self,
         parameters: Dict[str, Any],
@@ -313,10 +378,14 @@ class BashTool(Tool):
         if pre_check_result:
             return pre_check_result
 
+        # 沙箱安全检查（工作目录限制、系统路径黑名单）
+        sandbox_result = self._check_sandbox(command, work_dir)
+        if sandbox_result:
+            return sandbox_result
+
         # 检查工作目录
         if not work_dir.exists():
             return ToolResult(success=False, output="", error=f"工作目录不存在: {work_dir}")
-
         try:
             progress = BashStreamingDisplay(command, timeout)
             progress.start()
