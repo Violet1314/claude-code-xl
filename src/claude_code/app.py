@@ -247,7 +247,7 @@ class Application:
             "messages": self.conversation.get_messages(),
             "model": self.current_model.id if self.current_model else "",
             "style_id": self.current_style_id,
-            "active_path": self.path_manager.active_path,
+            "active_path": str(self.path_manager.active_path),
             "plan_mode": self._plan_mode,
             "plan_task": self._plan_task,
             "todos": [item.__dict__ for item in todo.items] if todo.items else [],
@@ -886,6 +886,8 @@ class Application:
             cost = self._calculate_cost(input_tokens, output_tokens)
             self.stats.add_cost(cost)
         else:
+            # API 未返回 usage 时，估算 input 和 output
+            self.stats.update_input(self.conversation.get_messages())
             self.stats.update_output(full_response)
         self.conversation.add_assistant_message(full_response)
 

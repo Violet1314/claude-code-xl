@@ -26,7 +26,7 @@ class SessionStats:
 
     @property
     def total_tokens(self) -> int:
-        """会话累计总 token（用于上下文窗口用量检查）"""
+        """会话累计总 token（API 消耗总和，用于费用统计）"""
         return self.accumulated_input + self.accumulated_output
 
     def to_dict(self) -> Dict[str, int]:
