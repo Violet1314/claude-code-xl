@@ -32,6 +32,7 @@ class EditTool(Tool):
         "模式 1 — 精确匹配（默认）：\n"
         "  提供 old_string + new_string，old_string 必须完全精确匹配文件内容。\n"
         "  适合短文本替换（1-5行）。长文本建议用行号模式。\n"
+        "  精确匹配失败时，会自动尝试容错匹配（空白/缩进/换行差异），匹配成功会标注 [fuzzy]。\n"
         "\n"
         "模式 2 — 行号范围：\n"
         "  提供 start_line + end_line + new_string，替换指定行范围的内容。\n"
@@ -132,13 +133,27 @@ class EditTool(Tool):
                 original_content = f.read()
 
             # ============================================================
-            # 精确匹配（不做模糊匹配）
+            # 精确匹配 → 模糊匹配容错
             # ============================================================
             positions = self._find_exact_matches(original_content, old_string)
+            fuzzy_matched = False  # 标记是否使用了模糊匹配
 
             if not positions:
-                # 精确匹配失败，返回清晰的错误指导
-                return self._build_no_match_error(original_content, old_string, file_path)
+                # 精确匹配失败，尝试模糊匹配容错
+                fuzzy_results = self._find_fuzzy_matches(original_content, old_string)
+                if len(fuzzy_results) == 1:
+                    # 模糊匹配唯一，使用该结果
+                    start_char, end_char = fuzzy_results[0]
+                    # 用匹配到的原始内容替换 old_string，确保替换区域正确
+                    old_string = original_content[start_char:end_char]
+                    positions = [start_char]
+                    fuzzy_matched = True
+                elif len(fuzzy_results) > 1:
+                    # 模糊匹配多处，仍报错
+                    return self._build_no_match_error(original_content, old_string, file_path)
+                else:
+                    # 模糊匹配也失败，返回精确匹配的错误
+                    return self._build_no_match_error(original_content, old_string, file_path)
 
             match_count = len(positions)
 
@@ -169,18 +184,19 @@ class EditTool(Tool):
             is_valid, syntax_warning = check_syntax(new_content, file_path)
 
             output = self._build_model_output(
-                path, old_string, new_string, start_line, version, reference, syntax_warning
+                path, old_string, new_string, start_line, version, reference, syntax_warning,
+                fuzzy_matched=fuzzy_matched
             )
             display_output = self._build_terminal_display(
                 path, old_string, new_string, original_content, new_content,
-                start_line, version, reference, syntax_warning
+                start_line, version, reference, syntax_warning, fuzzy_matched=fuzzy_matched
             )
 
             return ToolResult(
                 success=True,
                 output=output,
                 display_output=display_output,
-                summary=f"Edit {path.name}",
+                summary=f"Edit {path.name}" + (" (fuzzy)" if fuzzy_matched else ""),
                 metadata={
                     "file_path": str(path.absolute()),
                     "old_length": len(old_string),
@@ -189,6 +205,7 @@ class EditTool(Tool):
                     "cache_version": version,
                     "cache_reference": reference,
                     "syntax_valid": is_valid,
+                    "fuzzy_matched": fuzzy_matched,
                 }
             )
 
@@ -329,6 +346,83 @@ class EditTool(Tool):
             start = pos + 1
         return positions
 
+    def _normalize_for_fuzzy_match(self, text: str) -> str:
+        """归一化文本用于模糊匹配（不改变原始内容，仅用于比较）
+
+        归一化规则：
+        1. \r\n → \n（换行符统一）
+        2. 每行行尾空白去除
+        3. Tab → 4空格（缩进对齐）
+        4. 首尾空行去除
+        """
+        # 1. 换行符统一
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
+        # 2. 按行处理：行尾空白去除 + tab→空格
+        lines = text.split('\n')
+        lines = [line.expandtabs(4).rstrip() for line in lines]
+        # 3. 去除首尾空行
+        while lines and lines[0] == '':
+            lines.pop(0)
+        while lines and lines[-1] == '':
+            lines.pop()
+        return '\n'.join(lines)
+
+    def _find_fuzzy_matches(self, content: str, old_string: str) -> List[Tuple[int, int]]:
+        """模糊匹配：在精确匹配失败时尝试容错匹配
+
+        归一化后按行比较，返回原始内容中的 (起始字符位置, 结束字符位置) 列表。
+        只在精确匹配失败时调用，匹配结果必须唯一才使用。
+
+        策略：将 old_string 和 content 都按行归一化后，逐行滑动窗口匹配。
+        匹配成功后，将匹配的行号范围映射回原始内容的字符位置。
+
+        Returns:
+            匹配的 (start_char_index, end_char_index) 列表（基于原始内容）
+        """
+        # 归一化行列表
+        norm_old_lines = self._normalize_for_fuzzy_match(old_string).split('\n')
+        orig_content_lines = content.replace('\r\n', '\n').replace('\r', '\n').split('\n')
+        norm_content_lines = [line.expandtabs(4).rstrip() for line in orig_content_lines]
+
+        if not norm_old_lines or not norm_content_lines:
+            return []
+
+        # 去除 old_string 归一化后的首尾空行（已在 _normalize 中处理，但确保安全）
+        while norm_old_lines and norm_old_lines[0] == '':
+            norm_old_lines.pop(0)
+        while norm_old_lines and norm_old_lines[-1] == '':
+            norm_old_lines.pop()
+        if not norm_old_lines:
+            return []
+
+        old_len = len(norm_old_lines)
+        content_len = len(norm_content_lines)
+
+        if old_len > content_len:
+            return []
+
+        # 滑动窗口：在归一化内容行中查找连续匹配的行序列
+        results = []
+        for i in range(content_len - old_len + 1):
+            match = True
+            for j in range(old_len):
+                if norm_content_lines[i + j] != norm_old_lines[j]:
+                    match = False
+                    break
+            if match:
+                # 计算原始内容中的字符位置
+                # 匹配的行范围：[i, i + old_len - 1]
+                start_line = i
+                end_line = i + old_len - 1
+
+                # 计算起始字符位置
+                start_char = sum(len(orig_content_lines[k]) + 1 for k in range(start_line))
+                # 计算结束字符位置（end_line 行尾）
+                end_char = sum(len(orig_content_lines[k]) + 1 for k in range(end_line)) + len(orig_content_lines[end_line])
+
+                results.append((start_char, end_char))
+
+        return results
     def _build_no_match_error(self, content: str, old_string: str, file_path: str) -> ToolResult:
         """精确匹配失败时的错误反馈（含上下文指导）"""
         # 提供行号模式建议
@@ -408,7 +502,7 @@ class EditTool(Tool):
     # ============================================================
 
     def _build_model_output(
-        self, path, old_string, new_string, start_line, version, reference, syntax_warning=None
+        self, path, old_string, new_string, start_line, version, reference, syntax_warning=None, fuzzy_matched=False
     ) -> str:
         """构建给模型的纯文本输出（精确匹配模式）"""
         parts = []
@@ -416,6 +510,8 @@ class EditTool(Tool):
         parts.append(f"Path: {path}")
         parts.append(f"Cache: [{reference}]")
         parts.append(f"Mode: exact_match")
+        if fuzzy_matched:
+            parts.append(f"Match: fuzzy (whitespace/indent normalized)")
         parts.append(f"Start line: {start_line}")
         parts.append("")
 
@@ -474,7 +570,7 @@ class EditTool(Tool):
 
     def _build_terminal_display(
         self, path, old_string, new_string, original_content, new_content,
-        start_line, version, reference, syntax_warning=None
+        start_line, version, reference, syntax_warning=None, fuzzy_matched=False
     ) -> str:
         """给终端的统一格式 diff 显示（精确匹配模式）"""
         old_lines = old_string.splitlines()
@@ -487,7 +583,8 @@ class EditTool(Tool):
         result = []
         result.append("")
         line_change = f"-{len(old_lines)} lines, +{len(new_lines)} lines"
-        result.append(f"[bold]{ICONS.get('edit', '✎')} Edit:[/] [cyan]{escape(str(path.name))}[/] [dim]\\[{reference}] ({line_change})[/]")
+        fuzzy_tag = " [dim]\\[fuzzy][/]" if fuzzy_matched else ""
+        result.append(f"[bold]{ICONS.get('edit', '✎')} Edit:[/] [cyan]{escape(str(path.name))}[/] [dim]\\[{reference}] ({line_change})[/]{fuzzy_tag}")
 
         # 上文（2空格缩进）
         for i in range(context_lines):

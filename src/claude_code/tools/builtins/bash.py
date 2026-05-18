@@ -21,6 +21,7 @@ class BashTool(Tool):
         "正确示例：mkdir data, output（逗号分隔）| Get-ChildItem（或简写 ls）| Remove-Item -Recurse -Force | Copy-Item -Recurse"
         "错误示例：mkdir -p data output | ls -la | rm -rf | cp -r"
         "⚠️ 不支持交互式命令：不要执行需要用户输入的命令（如 python script.py 等待 input()），这类命令会卡住直到超时。"
+        "输出限制：默认 5000 字符，测试/构建类命令（pytest/pip install等）自动提升至 10000。"
         "所有命令都需要用户确认。"
         "\n\n"
         "🔒 沙箱安全限制：\n"
@@ -31,8 +32,22 @@ class BashTool(Tool):
     )
 
     # 输出限制
-    MAX_OUTPUT_LENGTH = 5000
+    DEFAULT_MAX_OUTPUT_LENGTH = 5000
     MAX_EXECUTION_TIME = 120  # 秒
+
+    # 动态输出限制：根据命令类型调整
+    OUTPUT_LIMITS = {
+        "verbose": 10000,   # 测试/构建/安装类命令（输出信息量大）
+        "normal": 5000,     # 默认
+    }
+
+    # 匹配 verbose 类命令的关键词
+    VERBOSE_COMMANDS = (
+        "pytest", "python -m pytest", "pip install", "pip list",
+        "npm install", "npm test", "cargo build", "cargo test",
+        "go test", "go build", "mvn", "gradle",
+        "dotnet build", "dotnet test",
+    )
 
     # 安全检查器（独立模块）
     _safety_checker = CommandSafetyChecker()
@@ -62,6 +77,11 @@ class BashTool(Tool):
                     "type": "integer",
                     "description": "超时时间（秒），默认 120",
                     "default": 120
+                },
+                "max_output_length": {
+                    "type": "integer",
+                    "description": "最大输出字符数，默认 5000（测试/构建命令自动 10000）",
+                    "default": 0
                 },
                 "cwd": {
                     "type": "string",
@@ -93,7 +113,12 @@ class BashTool(Tool):
         if os.name == 'nt':
             unix_error = self._safety_checker.check_unix_syntax(command)
             if unix_error:
-                return ToolResult(success=False, output="", error=unix_error)
+                # 附加 PowerShell 转换建议
+                ps_suggestion = self._safety_checker.get_powershell_suggestion(command)
+                error_msg = unix_error
+                if ps_suggestion:
+                    error_msg = f"{unix_error}\n\n{ps_suggestion}"
+                return ToolResult(success=False, output="", error=error_msg)
 
         return None  # 通过
 
@@ -262,15 +287,35 @@ class BashTool(Tool):
         return_code = process.wait()
         return return_code, stdout_lines, stderr_lines, None
 
+    def _get_output_limit(self, command: str, explicit_limit: int = 0) -> int:
+        """根据命令类型动态确定输出限制
+
+        Args:
+            command: 要执行的命令
+            explicit_limit: 用户显式指定的限制（0 表示自动）
+
+        Returns:
+            输出字符上限
+        """
+        if explicit_limit and explicit_limit > 0:
+            return explicit_limit
+        cmd_lower = command.lower().strip()
+        for verbose_cmd in self.VERBOSE_COMMANDS:
+            if verbose_cmd in cmd_lower:
+                return self.OUTPUT_LIMITS["verbose"]
+        return self.OUTPUT_LIMITS["normal"]
+
     def _build_final_output(
         self,
         stdout_lines: List[str],
         stderr_lines: List[str],
-        success: bool
+        success: bool,
+        max_output_length: int = None
     ) -> str:
         """
         构建最终输出（含截断）
         """
+        max_len = max_output_length or self.DEFAULT_MAX_OUTPUT_LENGTH
         # 成功：stdout + stderr（如有）
         # 失败：stderr + stdout（如有）
         if success:
@@ -286,20 +331,20 @@ class BashTool(Tool):
                 output = '\n'.join(stdout_lines) if stdout_lines else "(命令执行失败，无输出)"
 
         # 截断处理：优先保留错误信息
-        if len(output) > self.MAX_OUTPUT_LENGTH:
+        if len(output) > max_len:
             if not success and stderr_lines:
                 stderr_text = '\n'.join(stderr_lines)
-                if len(stderr_text) > self.MAX_OUTPUT_LENGTH:
-                    output = stderr_text[:self.MAX_OUTPUT_LENGTH] + f"\n... (stderr 已截断，共 {len(stderr_text)} 字符)"
+                if len(stderr_text) > max_len:
+                    output = stderr_text[:max_len] + f"\n... (stderr 已截断，共 {len(stderr_text)} 字符)"
                 else:
                     stdout_text = '\n'.join(stdout_lines) if stdout_lines else ""
-                    remaining = self.MAX_OUTPUT_LENGTH - len(stderr_text) - 10
+                    remaining = max_len - len(stderr_text) - 10
                     if stdout_text and remaining > 0:
                         output = stderr_text + '\n[stdout]\n' + stdout_text[:remaining] + f"\n... (stdout 已截断)"
                     else:
                         output = stderr_text
             else:
-                output = output[:self.MAX_OUTPUT_LENGTH] + f"\n... (输出过长，已截断，共 {len(output)} 字符)"
+                output = output[:max_len] + f"\n... (输出过长，已截断，共 {len(output)} 字符)"
 
         return output
 
@@ -364,6 +409,7 @@ class BashTool(Tool):
 
         command = parameters.get("command", "").strip()
         timeout = min(int(parameters.get("timeout", 120)), self.MAX_EXECUTION_TIME)
+        max_output = int(parameters.get("max_output_length", 0))
 
         # 使用 PathManager 统一路径解析
         from claude_code.core.path_manager import get_path_manager
@@ -404,7 +450,10 @@ class BashTool(Tool):
                 )
 
             success = return_code == 0
-            output = self._build_final_output(stdout_lines, stderr_lines, success)
+            output = self._build_final_output(
+                stdout_lines, stderr_lines, success,
+                max_output_length=self._get_output_limit(command, max_output)
+            )
 
             progress.stop(success, return_code)
 

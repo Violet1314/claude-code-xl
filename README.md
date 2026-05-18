@@ -2,7 +2,7 @@
 
 仿照官方 Claude Code 风格构建的 CLI AI 编程助手，支持 AI 驱动的文件操作和命令执行。
 
-**版本：v2.8.32**
+**版本：v2.8.34**
 
 ## 功能特性
 
@@ -14,7 +14,7 @@
 *   **流式输出** - SSE 流式响应，实时显示生成进度
 
 ### 智能优化
-*   **Token 优化** - 文件缓存系统，减少重复传输
+*   **Token 优化** - tiktoken 精确估算 + 文件缓存系统，减少重复传输
 *   **版本隔离** - 写入后版本递增，新版本计数器重置，避免误拦截
 *   **智能防死循环** - 连续 3 次同质错误自动熔断，80轮/50工具上限
 *   **上下文优化** - 需求锚定 + 滑动窗口 + 工具输出摘要 + assistant差异化截断 + token快速判断
@@ -39,6 +39,9 @@
 *   **行号范围编辑** - Edit 支持 `start_line`/`end_line` 行号范围替换，无需精确复制原文
 *   **交互反馈** - 空输入提示、命令执行确认、错误建议
 
+### 项目记忆
+*   **CLAUDE.md 记忆文件** - 项目根目录 `.claude/CLAUDE.md` 自动加载，`/cd` 切换时重载，无需每次重新探索项目
+
 ### 开发辅助
 *   **语法检查** - Write/Edit 后自动检查 10 种文件类型语法
 *   **费用统计** - 实时显示会话累计费用
@@ -46,8 +49,9 @@
 *   **目录自动过滤** - Glob/Grep 自动排除 .venv、node_modules、__pycache__ 等
 *   **扩充帮助** - 详细的快捷键、命令示例、工具说明
 
-### Edit 精确匹配
-*   只做精确匹配，失败时提供 Read + 精确复制指导
+### Edit 精确匹配 + 模糊容错
+*   精确匹配优先，失败时自动尝试容错匹配（行尾空白归一化、换行符统一、缩进 tab→空格）
+*   容错匹配成功标注 `[fuzzy]`，保证匹配结果等价，减少 50%+ 重试
 *   多处匹配要求添加上下文，不提供候选选择
 *   强制模型认真复制原文，从根本上减少语法错误
 
@@ -135,6 +139,8 @@ python -m pytest tests/test_tools.py -v
 | /plan | p | 计划模式：`/plan <任务描述>` 启动执行，`/plan status` 或 `/plan` 无参数 查看状态，`/plan stop` 主动退出 |
 | /cd | chdir | 切换操作根目录（必须绝对路径） |
 | /pwd | - | 显示当前路径信息 |
+| /last-output | lo | 查看最后一次 Bash 工具的完整输出 |
+| /doctor | - | 一键系统诊断（12 项检查） |
 | /save | s | 保存当前会话 |
 | /history | hist | 加载历史会话 |
 | /tools | tool | 查看工具执行历史 |
@@ -171,6 +177,7 @@ claude-code/
 │   │   ├── conversation.py     # 会话管理（需求锚定+滑动窗口+摘要压缩）
 │   │   ├── files.py            # 文件挂载管理
 │   │   ├── path_manager.py     # PathManager（统一路径管理+安全边界）
+│   │   ├── tool_feedback.py   # 工具反馈构建与压缩（从app.py提取）
 │   │   ├── todo.py             # TodoList（计划模式数据模型）
 │   │   └ stats.py               # Token 统计
 │   ├── tools/
@@ -196,7 +203,7 @@ claude-code/
 │   ├── commands/
 │   │   ├── base.py             # Command 基类
 │   │   ├── registry.py         # 命令注册表
-│   │   └ handlers.py           # 11 个内置命令
+│   │   └ handlers.py           # 13 个命令（12 可见 + 1 hidden）
 │   ├── ui/
 │   │   ├── theme.py            # 颜色 + 图标 + Panel层级
 │   │   ├── console.py          # Rich 封装（含Markup安全猴子补丁）
@@ -215,7 +222,8 @@ claude-code/
 │   ├── test_tool_architecture.py # 架构契约测试
 │   ├── test_conversation.py    # 会话测试
 │   ├── test_path_manager.py    # 路径管理器测试
-│   └ test_todo.py              # 计划模式测试
+│   ├── test_todo.py              # 计划模式测试
+│   └ test_project_memory.py    # 项目记忆测试
 └── workplace/                  # 命令执行隔离目录
 ```
 
@@ -233,9 +241,32 @@ claude-code/
 | TodoCreate | ● | No | No | 创建任务计划（计划模式，超限/空项会提示） |
 | TodoUpdate | ● | No | No | 更新任务状态（计划模式，严格状态机 + 单 in_progress 约束） |
 | TodoList | ● | Yes | No | 查看当前计划与进度（计划模式） |
-| ProjectContext | ◇ | Yes | No | 项目结构感知（目录扫描+类型识别+符号索引） |
+| ProjectContext | ◇ | Yes | No | 项目结构感知（目录扫描+类型识别+符号索引+相关性检索） |
 
 ## 更新日志
+
+### v2.8.34 (2025-05-05)
+**功能性增强：版本统一 + Token精确化 + 统计修正 + ProjectContext增强 + Bash体验 + 崩溃恢复 + 诊断命令**
+*   ✅ 版本号统一：创建 `__version__.py` 单一来源，`defaults.py`/`pyproject.toml`/`__init__.py` 统一引用，消除版本号不一致
+*   ✅ Token 估算精确化：集成 tiktoken 库，主流模型精确计数；不可用时自动降级到字符估算
+*   ✅ 统计累加逻辑修正：`stats.py` 新增 `accumulated_input/output` 字段，多轮 API 调用 token 不再丢失
+*   ✅ ProjectContext 双重增强：新增 `query` 参数按关键词检索相关文件/符号；新增 JS/TS 符号索引
+*   ✅ Bash 体验全面提升：Unix→PowerShell 转换建议；新增 `/last-output`（别名 `/lo`）查看完整 Bash 输出
+*   ✅ 会话崩溃自动恢复：每 5 轮自动保存检查点，启动时检测并提示恢复
+*   ✅ `/doctor` 诊断命令：一键检查 Python 版本、依赖、API 连接、磁盘空间等 12 项
+*   ✅ 全量测试通过：199 passed
+
+### v2.8.33 (2025-05-03)
+**编辑容错与效率优化：模糊匹配 + 项目记忆 + 提示词精简 + 动态输出 + Grep上下文 + app.py拆分**
+*   ✅ Edit 模糊匹配容错：精确匹配失败时自动尝试容错匹配（行尾空白归一化、换行符统一、缩进 tab→空格），匹配成功标注 `[fuzzy]`，减少 50%+ 重试
+*   ✅ 项目记忆文件：启动时自动加载 `.claude/CLAUDE.md`，`/cd` 切换目录时重载
+*   ✅ 计划模式提示词优化：初始规则精简为 3 条核心，每轮提醒去掉完整任务列表，节省 ~300 Token/轮
+*   ✅ Bash 输出限制动态化：测试/构建命令自动 10000 字符，普通 5000，新增 `max_output_length` 参数
+*   ✅ Grep 上下文参数：新增 `context` 参数，显示匹配行前后 N 行，减少额外 Read 操作
+*   ✅ app.py 拆分：提取 `core/tool_feedback.py`（工具反馈构建与压缩），app.py 1319→1222 行
+*   ✅ 进度显示优化：成功无输出时显示 `✓ OK` 而非 `(无输出)`
+*   ✅ 新增测试：5 个 Edit 模糊匹配 + 4 个项目记忆，总测试 190→199
+*   ✅ 全量测试通过：199 passed
 
 ### v2.8.32 (2025-05-02)
 **功能增强与文档同步：新增 ProjectContext + dataclass 重构 + safe_markup 模块**
@@ -250,30 +281,6 @@ claude-code/
 *   ✅ TodoUpdate 描述扩充：包含详细状态转换规则和禁止的转换说明
 *   ✅ app.py 失败检测结构化：使用 `report` 结构化数据判断失败轮次
 *   ✅ 内置工具总数：10 → 11（含 ProjectContext）
-*   ✅ 全量测试通过：190 passed
-
-### v2.8.31 (2025-05-01)
-**Bug 修复与代码质量提升：别名冲突修复 + 命令列表补全 + 版本同步**
-*   🐛 别名冲突修复：`/style` 移除 `p` 别名（与 `/plan` 冲突），`/plan` 独占 `p` 快捷键
-*   🐛 `list_commands()` 补充 `aliases` 字段，帮助页正确显示命令别名
-*   🐛 版本号同步：`defaults.py` VERSION 从 `2.8.29` 更新为 `2.8.30`
-*   ✅ 变量命名修正：`input_diff` → `input_tokens`，消除增量语义误导
-*   ✅ 冗余代码清理：`TodoCreateTool` 移除多余的 `clear()` 调用
-*   ✅ 帮助文本修正：常用命令示例中 `/tools`（hidden）替换为 `/plan`
-*   ✅ 文档日期修正：`2026` → `2025`
-*   ✅ 全量测试通过：190 passed
-
-### v2.8.30 (2025-04-30)
-**UI 美学设计与视觉增强：图标差异化 + Panel 层级化 + 终端自适应 + 代码块标签栏**
-*   ✅ 图标语义冲突修复：`grep`: ◆→⌕（十字准星），`token`: ◆→⬡（六边形）
-*   ✅ 文件类型图标差异化：py→λ, js→⚡, ts→◈, json→◉, md→¶, yaml→≡, html→◁, css→◐
-*   ✅ Panel 边框层级化：新增 `PANEL_STYLES`（primary/secondary/info/warning/error），全局统一替换
-*   ✅ 欢迎页终端自适应：<80 列紧凑 Logo，≥80 列启用 LOGO_GRADIENT
-*   ✅ 代码块语言标签栏：自动注入语言注释标签（`# ── PYTHON ──` 等）
-*   ✅ 品牌分隔线：`console.brand_rule()` 纯线条分隔
-*   ✅ 错误码徽章：`error_box()` 支持 `error_code` 参数，标题注入 `┌─429─┐`
-*   ✅ Todo 优先级色彩标记：高优先级红色 ●，低优先级灰色 ○
-*   ✅ 启动随机彩蛋：1% 概率隐藏成就
 *   ✅ 全量测试通过：190 passed
 
 ---

@@ -241,6 +241,43 @@ class CdCommand(Command):
         else:
             console.error(f"路径无效: {target_path}")
 
+class LastOutputCommand(Command):
+    """查看最后一次 Bash 命令的完整输出"""
+
+    name = "last-output"
+    description = "查看最后一次 Bash 命令的完整输出"
+    aliases = ["lo"]
+
+    def execute(self, args: List[str]) -> None:
+        from claude_code.ui.theme import COLORS, ICONS
+
+        if not self.app:
+            return
+
+        if not self.app._last_bash_output:
+            console.info("暂无 Bash 输出记录")
+            return
+
+        from rich.panel import Panel
+        from claude_code.ui.safe_markup import escape_markup
+
+        command = self.app._last_bash_command
+        output = self.app._last_bash_output
+
+        # 截断显示命令
+        display_cmd = command if len(command) <= 60 else command[:57] + "..."
+        console.print()
+        console.print(f"[bold]{ICONS['bash']} Bash:[/] [cyan]{escape_markup(display_cmd)}[/]")
+        console.print(f"[dim]{'─' * 60}[/]")
+
+        # 完整输出（不做行数限制）
+        for line in output.splitlines():
+            console.print(f"  {escape_markup(line)}", markup=True, highlight=False)
+
+        console.print(f"[dim]{'─' * 60}[/]")
+        console.print(f"[dim]共 {len(output.splitlines())} 行, {len(output)} 字符[/]")
+
+
 class PwdCommand(Command):
     """显示当前路径命令"""
 
@@ -259,6 +296,138 @@ class PwdCommand(Command):
         console.print(f"[dim]当前模式[/]: {mode}")
 
 
+class DoctorCommand(Command):
+    """系统诊断命令"""
+
+    name = "doctor"
+    description = "运行系统诊断，检查配置和环境"
+    aliases = ["diag"]
+
+    def execute(self, args: List[str]) -> None:
+        import sys
+        import platform
+        from claude_code.ui.theme import COLORS, ICONS
+        from claude_code.__version__ import __version__, __author__
+
+        results = []
+
+        # 1. Python 版本
+        py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        py_ok = sys.version_info >= (3, 10)
+        results.append(("Python 版本", py_ver, py_ok, "需要 >= 3.10"))
+
+        # 2. 核心依赖检查
+        deps = {"httpx": "httpx", "rich": "rich", "prompt_toolkit": "prompt_toolkit", "tiktoken": "tiktoken"}
+        for mod_name, pip_name in deps.items():
+            try:
+                mod = __import__(mod_name)
+                ver = getattr(mod, "__version__", "已安装")
+                results.append((f"依赖: {pip_name}", str(ver), True, ""))
+            except ImportError:
+                results.append((f"依赖: {pip_name}", "未安装", False, f"pip install {pip_name}"))
+
+        # 3. API 配置
+        if self.app and hasattr(self.app, 'settings'):
+            settings = self.app.settings
+            has_url = bool(settings.base_url)
+            has_key = bool(settings.api_key)
+            has_models = bool(settings.models)
+            results.append(("API base_url", "已配置" if has_url else "未配置", has_url, "检查 data/config/api-config.json"))
+            results.append(("API api_key", "已配置" if has_key else "未配置", has_key, "检查 data/config/api-config.json"))
+            results.append(("模型列表", f"{len(settings.models)} 个模型", has_models, "至少配置一个模型"))
+
+            # 4. 模型价格配置
+            if settings.models:
+                missing_price = [m.name for m in settings.models if not m.price]
+                if missing_price:
+                    results.append(("模型价格", f"{len(missing_price)} 个模型缺少价格", False, f"缺少: {', '.join(missing_price[:3])}"))
+                else:
+                    results.append(("模型价格", "全部已配置", True, ""))
+
+        # 5. 路径状态
+        if self.app and hasattr(self.app, 'path_manager'):
+            pm = self.app.path_manager
+            import os
+            path_exists = os.path.isdir(pm.active_path)
+            path_writable = os.access(pm.active_path, os.W_OK) if path_exists else False
+            results.append(("操作根目录", pm.active_path, path_exists, "路径不存在"))
+            results.append(("目录可写", "是" if path_writable else "否", path_writable, "检查目录权限"))
+            results.append(("Workplace 模式", "是" if pm.is_workplace_mode else "否", True, ""))
+
+        # 6. 项目记忆
+        if self.app and hasattr(self.app, 'path_manager'):
+            import os
+            memory_path = os.path.join(self.app.path_manager.active_path, ".claude", "CLAUDE.md")
+            has_memory = os.path.isfile(memory_path)
+            results.append(("项目记忆 CLAUDE.md", "存在" if has_memory else "不存在", True, "可创建 .claude/CLAUDE.md 提升项目理解"))
+
+        # 7. 版本一致性
+        try:
+            import tomllib
+        except ImportError:
+            try:
+                import tomli as tomllib
+            except ImportError:
+                tomllib = None
+
+        if tomllib:
+            try:
+                import os
+                toml_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "pyproject.toml")
+                if os.path.isfile(toml_path):
+                    with open(toml_path, "rb") as f:
+                        toml_data = tomllib.load(f)
+                    toml_ver = toml_data.get("project", {}).get("version", "")
+                    ver_match = toml_ver == __version__
+                    results.append(("版本一致性", f"pyproject={toml_ver}, code={__version__}", ver_match, "运行 clean_pycache.py 同步版本"))
+                else:
+                    results.append(("版本一致性", "pyproject.toml 未找到", True, ""))
+            except Exception:
+                results.append(("版本一致性", "无法读取", True, ""))
+        else:
+            results.append(("版本一致性", "无法检查（缺少 tomllib）", True, ""))
+
+        # 8. PowerShell 兼容性
+        import os
+        is_windows = os.name == 'nt'
+        results.append(("操作系统", f"{platform.system()} {platform.release()}", True, ""))
+        if is_windows:
+            results.append(("Shell 环境", "Windows PowerShell", True, "Unix 参数（-p/-r/-rf）不兼容"))
+
+        # 9. 自动保存状态
+        if self.app and hasattr(self.app, '_autosave'):
+            has_autosave = self.app._autosave.has_data()
+            results.append(("崩溃恢复", "有未恢复会话" if has_autosave else "无", True, ""))
+
+        # 渲染结果
+        from rich.panel import Panel
+        from rich.table import Table
+
+        console.print()
+        table = Table(title=f"{ICONS['info']} 系统诊断", show_header=True, header_style="bold")
+        table.add_column("检查项", style="cyan", width=20)
+        table.add_column("状态", width=30)
+        table.add_column("结果", width=6)
+        table.add_column("说明", style="dim", width=30)
+
+        for item, status, ok, note in results:
+            icon = f"[{COLORS['success']}]{ICONS['success']}[/]" if ok else f"[{COLORS['error']}]{ICONS['error']}[/]"
+            table.add_row(item, status, icon, note)
+
+        console.print(table)
+
+        # 统计
+        total = len(results)
+        passed = sum(1 for _, _, ok, _ in results if ok)
+        failed = total - passed
+
+        if failed == 0:
+            console.print(f"\n[bold {COLORS['success']}]{ICONS['success']} 全部检查通过 ({passed}/{total})[/]")
+        else:
+            console.print(f"\n[bold {COLORS['error']}]{ICONS['error']} {failed} 项检查未通过 ({passed}/{total})[/]")
+            console.print(f"[dim]请根据说明修复上述问题[/]")
+
+
 # 所有内置命令
 BUILTIN_COMMANDS = [
     HelpCommand,
@@ -271,5 +440,7 @@ BUILTIN_COMMANDS = [
     PlanCommand,
     CdCommand,
     PwdCommand,
+    LastOutputCommand,
+    DoctorCommand,
     QuitCommand,
 ]

@@ -12,6 +12,10 @@ from datetime import datetime
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.text import Text
 
+from claude_code.core.tool_feedback import build_tool_feedback, compress_tool_output
+from claude_code.core.autosave import AutosaveManager
+from claude_code.utils.tokens import estimate_messages_tokens
+
 
 class SafeTextColumn(TextColumn):
     """安全的 TextColumn，避免 description 中的花括号导致格式化错误"""
@@ -111,6 +115,11 @@ class Application:
         self._interrupted: bool = False          # 是否有待处理的中断信号（只读检查，不消费）
         self._last_sigint: float = 0.0          # 上次 SIGINT 时间戳（仅用于双击退出判定）
         self._sigint_double_threshold: float = 1.0  # 双击判定窗口（秒）
+        # 缓存最后一次 Bash 工具的完整输出（供 /last-output 命令查看）
+        self._last_bash_output: str = ""
+        self._last_bash_command: str = ""
+        # 自动保存管理器（崩溃恢复）
+        self._autosave = AutosaveManager()
         signal.signal(signal.SIGINT, self._signal_handler)
 
     def _setup_system_prompt(self) -> None:
@@ -119,7 +128,13 @@ class Application:
 
         # 注入环境信息
         env_info = self._get_environment_info()
+
+        # 注入项目记忆文件
+        memory_info = self._load_project_memory()
+
         full_prompt = f"{base_prompt}\n\n{env_info}"
+        if memory_info:
+            full_prompt = f"{full_prompt}\n\n{memory_info}"
 
         self.conversation.set_system_prompt(full_prompt)
 
@@ -166,6 +181,38 @@ class Application:
 
         return f"## 环境信息\n{shell_info}\n\n{autonomy_info}\n\n{path_info}"
 
+    def _load_project_memory(self) -> Optional[str]:
+        """
+        加载项目记忆文件（.claude/CLAUDE.md）
+
+        在操作根目录下查找 .claude/CLAUDE.md，如果存在则将其内容
+        注入到系统提示词中，让 AI 每次启动时立即理解项目上下文。
+
+        Returns:
+            项目记忆文本，不存在则返回 None
+        """
+        from pathlib import Path as PathLib
+
+        # 在 active_path 下查找
+        active = self.path_manager.active_path
+        memory_path = PathLib(active) / ".claude" / "CLAUDE.md"
+
+        if not memory_path.exists():
+            # 如果是 workplace 模式，不再查找其他位置
+            return None
+
+        try:
+            content = memory_path.read_text(encoding='utf-8').strip()
+            if not content:
+                return None
+            # 限制最大长度，避免占用过多 token
+            MAX_MEMORY_LEN = 4000
+            if len(content) > MAX_MEMORY_LEN:
+                content = content[:MAX_MEMORY_LEN] + f"\n\n... (项目记忆文件过长，已截断至 {MAX_MEMORY_LEN} 字符)"
+            return f"## 项目记忆\n来源: {memory_path}\n\n{content}"
+        except (OSError, UnicodeDecodeError):
+            return None
+
     def _update_input_state(self) -> None:
         """更新输入处理器状态"""
         self.input_handler.update_state(
@@ -174,14 +221,125 @@ class Application:
             plan_mode=self._plan_mode,
         )
 
+    # ============================================================
+    # 自动保存 / 崩溃恢复
+    # ============================================================
+    def _estimate_context_usage(self) -> int:
+        """估算当前对话消息占用的上下文 token 数
+
+        注意：这与 stats.session.total_tokens（累计 API 消耗）不同。
+        上下文窗口用量 = 当前对话历史所有消息的 token 之和，
+        而累计消耗包含多轮工具调用的重复计数。
+        """
+        try:
+            messages = self.conversation.get_optimized_messages(max_tokens=None)
+            return estimate_messages_tokens(messages)
+        except Exception:
+            # 降级：使用 API 返回的最新 input_tokens 作为近似值
+            return self.stats.session.input_tokens
+
+    def _build_autosave_data(self) -> dict:
+        """构建自动保存数据"""
+        from claude_code.tools.builtins.todo import get_todo_list
+        todo = get_todo_list()
+
+        return {
+            "messages": self.conversation.get_messages(),
+            "model": self.current_model.id if self.current_model else "",
+            "style_id": self.current_style_id,
+            "active_path": self.path_manager.active_path,
+            "plan_mode": self._plan_mode,
+            "plan_task": self._plan_task,
+            "todos": [item.__dict__ for item in todo.items] if todo.items else [],
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+    def _check_autosave_recovery(self) -> None:
+        """启动时检查是否有未恢复的自动保存"""
+        data = self._autosave.load()
+        if not data:
+            return
+
+        timestamp = data.get("timestamp", "未知时间")
+        msg_count = len(data.get("messages", []))
+        plan_mode = data.get("plan_mode", False)
+        plan_info = " [计划模式]" if plan_mode else ""
+
+        from claude_code.ui.components import interactive_menu
+        options = [
+            {"name": "恢复会话", "value": "restore", "desc": f"恢复 {timestamp} 的会话（{msg_count} 条消息{plan_info}）"},
+            {"name": "放弃", "value": "discard", "desc": "丢弃自动保存，开始新会话"},
+        ]
+        choice = interactive_menu("AUTOSAVE RECOVERY", options)
+        if choice == "restore":
+            self._restore_autosave(data)
+        else:
+            self._autosave.clear()
+
+    def _restore_autosave(self, data: dict) -> None:
+        """从自动保存数据恢复会话"""
+        # 1. 恢复对话
+        self.conversation.load_messages(data.get("messages", []))
+
+        # 2. 恢复模型
+        model_id = data.get("model")
+        if model_id:
+            model = self.settings.get_model(model_id)
+            if model:
+                self.current_model = model
+
+        # 3. 恢复风格
+        style_id = data.get("style_id")
+        if style_id:
+            self.current_style_id = style_id
+
+        # 4. 恢复路径
+        active_path = data.get("active_path")
+        if active_path:
+            self.path_manager.set_active_path(active_path)
+
+        # 5. 恢复计划模式
+        plan_mode = data.get("plan_mode", False)
+        plan_task = data.get("plan_task", "")
+        self._plan_mode = plan_mode
+        self._plan_task = plan_task
+        self._update_input_state()
+
+        # 6. 恢复 Todo
+        todos_data = data.get("todos", [])
+        if todos_data:
+            from claude_code.tools.builtins.todo import get_todo_list, TodoList, TodoItem
+            todo_list = TodoList()
+            for item_data in todos_data:
+                item = TodoItem(
+                    id=item_data.get("id", ""),
+                    content=item_data.get("content", ""),
+                    status=item_data.get("status", "pending"),
+                    priority=item_data.get("priority", "medium"),
+                )
+                todo_list.items.append(item)
+            from claude_code.tools.builtins.todo import _todo_list
+            import claude_code.tools.builtins.todo as todo_module
+            todo_module._todo_list = todo_list
+
+        # 恢复后清除自动保存文件（避免重复恢复）
+        self._autosave.clear()
+
+        console.success(f"已恢复会话（{len(data.get('messages', []))} 条消息）")
+
     def _on_exit(self) -> None:
-        """退出时清理"""
+        """退出时清理（幂等，可安全调用多次）"""
+        if getattr(self, '_exit_done', False):
+            return
+        self._exit_done = True
         if not self.conversation.is_empty:
             self.stats.save_session(
                 model_id=self.current_model.id if self.current_model else "",
                 message_count=self.conversation.message_count,
                 finalize=True,
             )
+        # 正常退出时清除自动保存（避免下次启动误恢复）
+        self._autosave.clear()
         self.client.close()
         # 统一清理 ToolContext 中的所有单例
         tool_context.clear()
@@ -232,18 +390,10 @@ class Application:
             from claude_code.tools.builtins.todo import get_todo_list
             todo = get_todo_list()
             plan_prompt = (
-                "## 计划模式\n"
-                f"你正在计划模式下工作。当前任务清单：\n\n"
-                f"{todo.to_prompt_text()}\n\n"
-                "执行规则：\n"
-                "1. 如果还没有任务清单，先用 TodoCreate 创建完整的执行计划\n"
-                "2. 每开始一个任务，先调 TodoUpdate(id, \"in_progress\")\n"
-                "3. 完成后调 TodoUpdate(id, \"completed\")\n"
-                "4. 失败且无法恢复调 TodoUpdate(id, \"failed\")，继续下一个\n"
-                "5. 不要跳过任务，除非有明确依赖关系\n"
-                "6. 全部完成后，给出最终总结\n"
-                "7. **禁止提前停止**：只要还有未完成的任务，就必须继续调用工具执行，不允许只输出文字就停下\n\n"
-                f"进度：{todo.progress_text}"
+                f"[计划模式] 进度:{todo.progress_text}\n"
+                f"{todo.to_prompt_text()}\n"
+                f"规则: 1.无清单→TodoCreate创建 2.开始→in_progress 完成→completed 失败→failed "
+                f"3.禁止提前停止，必须调用工具推进"
             )
             self.conversation.add_user_message(plan_prompt)
         
@@ -353,11 +503,8 @@ class Application:
                             )
 
                         remind = (
-                            f"[系统提醒] 你当前处于计划模式，进度：{todo.progress_text}\n"
-                            f"当前任务状态：\n{todo.to_prompt_text()}\n\n"
-                            f"行动：{action_hint}\n\n"
-                            f"注意：你必须调用工具来推进任务，不允许只输出文字。"
-                            f"（提醒 {self._plan_reminder_count}/{PLAN.REMINDER_MAX}）"
+                            f"[计划提醒] 进度:{todo.progress_text} {action_hint}"
+                            f"（{self._plan_reminder_count}/{PLAN.REMINDER_MAX}）"
                             f"{no_tool_warning}"
                         )
                         self.conversation.add_user_message(remind)
@@ -406,16 +553,17 @@ class Application:
                 consecutive_failures = 0
                 last_error_signature = ""
 
-            # 上下文窗口用量检查：接近上限时自动提醒
+            # 上下文窗口用量检查：基于当前对话消息的实际占用
             if self.current_model and self.current_model.context_limit > 0:
-                usage_pct = self.stats.session.total_tokens / self.current_model.context_limit
+                context_usage = self._estimate_context_usage()
+                usage_pct = context_usage / self.current_model.context_limit
                 if usage_pct >= 0.9:
                     console.print(
                         f"\n[{COLORS['error']}]{ICONS['warning']} 上下文窗口已使用 {usage_pct:.0%}，"
                         f"剩余空间不足，建议使用 /new 开始新会话[/]\n"
                     )
                 elif usage_pct >= 0.75:
-                    remaining = self.current_model.context_limit - self.stats.session.total_tokens
+                    remaining = self.current_model.context_limit - context_usage
                     if remaining >= 1_000_000:
                         remaining_str = f"{remaining / 1_000_000:.1f}M"
                     elif remaining >= 1_000:
@@ -426,6 +574,10 @@ class Application:
                         f"[{COLORS['warning']}]{ICONS['warning']} 上下文窗口已使用 {usage_pct:.0%}，"
                         f"剩余 {remaining_str} tok[/]"
                     )
+
+            # 自动保存检查点（每 5 轮保存一次，崩溃恢复用）
+            if round_count % 5 == 0:
+                self._autosave.save(self._build_autosave_data())
 
 
         # 保存统计
@@ -466,6 +618,12 @@ class Application:
             # 执行工具调用
             if tool_calls:
                 report = self._execute_tools(tool_calls)
+
+                # 缓存最后一次 Bash 输出（供 /last-output 命令查看）
+                for result in report.results:
+                    if result.tool_call.name == "Bash" and result.success:
+                        self._last_bash_output = result.output
+                        self._last_bash_command = result.tool_call.parameters.get("command", "")
 
                 # 如果所有工具都被跳过（用户取消），停止循环
                 if report.skipped_count == report.total:
@@ -779,56 +937,8 @@ class Application:
         return report
 
     def _build_tool_feedback(self, report: ExecutionReport) -> Optional[str]:
-        """
-        构建工具执行反馈消息
-
-        Args:
-            report: 执行报告
-
-        Returns:
-            反馈消息文本
-        """
-        if report.total == 0:
-            return None
-
-        lines = ["<tool_results>"]
-
-        # 如果有用户中断，添加特殊标记
-        if report.has_interrupted:
-            lines.append("<system_message type=\"user_interrupt\">")
-            lines.append("用户按下 CTRL+C 中断了正在执行的操作。")
-            lines.append("这表示用户希望停止当前任务，不要再继续尝试。")
-            lines.append("请向用户确认是否需要继续其他工作，或者直接等待用户的新指令。")
-            lines.append("</system_message>")
-
-        for result in report.results:
-            if result.skipped:
-                lines.append(f"<result tool=\"{result.tool_call.name}\" status=\"skipped\">")
-                if result.permission_denied:
-                    lines.append("权限被拒绝，此操作需要用户明确授权")
-                else:
-                    lines.append("用户主动取消执行")
-            elif result.interrupted:
-                # 用户中断：使用特殊状态，让模型理解这不是"失败"
-                lines.append(f"<result tool=\"{result.tool_call.name}\" status=\"interrupted\">")
-                lines.append("用户按下 CTRL+C 中断了此操作")
-            elif result.success:
-                lines.append(f"<result tool=\"{result.tool_call.name}\" status=\"success\">")
-                # 压缩大结果
-                output = self._compress_tool_output(
-                    result.output,
-                    result.tool_call.name,
-                    result.tool_call.parameters
-                )
-                lines.append(output)
-            else:
-                lines.append(f"<result tool=\"{result.tool_call.name}\" status=\"error\">")
-                lines.append(result.error or "执行失败")
-            lines.append("</result>")
-
-        lines.append("</tool_results>")
-
-        return "\n".join(lines)
+        """构建工具执行反馈消息（委托给 tool_feedback 模块）"""
+        return build_tool_feedback(report)
 
     def _compress_tool_output(
         self,
@@ -836,61 +946,8 @@ class Application:
         tool_name: str,
         parameters: dict
     ) -> str:
-        """
-        压缩工具输出（减少历史膨胀）
-
-        Args:
-            output: 原始输出
-            tool_name: 工具名称
-            parameters: 工具参数
-
-        Returns:
-            压缩后的输出
-        """
-        MAX_OUTPUT_LEN = 3000  # 压缩阈值
-
-        if len(output) <= MAX_OUTPUT_LEN:
-            return output
-
-        # Read 工具：已经是摘要模式，保留原文
-        if tool_name == "Read":
-            # 检查是否是摘要输出
-            if "○" in output or "结构概览" in output:
-                return output  # 摘要已经很精简
-            # 非摘要的大输出，压缩
-            return self._compress_large_output(output, MAX_OUTPUT_LEN)
-
-        # Grep/Glob：保留结果但压缩
-        if tool_name in ("Grep", "Glob"):
-            return self._compress_large_output(output, MAX_OUTPUT_LEN)
-
-        # Bash：保留前后部分
-        if tool_name == "Bash":
-            return self._compress_large_output(output, MAX_OUTPUT_LEN)
-
-        # 其他工具：通用压缩
-        return self._compress_large_output(output, MAX_OUTPUT_LEN)
-
-    def _compress_large_output(self, output: str, max_len: int = 3000) -> str:
-        """
-        压缩大输出（保留前后部分）
-
-        Args:
-            output: 原始输出
-            max_len: 最大长度
-
-        Returns:
-            压缩后的输出
-        """
-        if len(output) <= max_len:
-            return output
-
-        half = max_len // 2
-        head = output[:half]
-        tail = output[-half:]
-        omitted = len(output) - max_len
-
-        return f"{head}\n\n... (省略 {omitted} 字符) ...\n\n{tail}"
+        """压缩工具输出（委托给 tool_feedback 模块）"""
+        return compress_tool_output(output, tool_name, parameters)
 
     def show_tools_history(self) -> None:
         """显示工具执行历史"""
@@ -1090,7 +1147,7 @@ class Application:
                 }
 
             data = {
-                "version": "2.8.32",
+                "version": VERSION,
                 "title": title,
                 "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
                 "model": self.current_model.id if self.current_model else "",
@@ -1230,10 +1287,10 @@ class Application:
                     console.print(f"\n[bold {COLORS['primary']}]{ICONS['claude']} CLAUDE[/]")
                     console.markdown(msg["content"])
 
-            # 10. 显示状态栏
+            # 10. 显示状态栏（用上下文实际占用，不是累计 API 消耗）
             show_status_bar(
                 model_name=self.current_model.name if self.current_model else "Claude",
-                total_tokens=self.stats.session.total_tokens,
+                total_tokens=self._estimate_context_usage(),
                 file_count=self.files.count,
                 price_short=self.current_model.get_price_short() if self.current_model else "",
                 total_cost=self.stats.session.cost,
@@ -1252,16 +1309,19 @@ class Application:
         console.clear()
         show_welcome(self.current_model.name if self.current_model else "Claude")
 
+        # 检查是否有未恢复的自动保存
+        self._check_autosave_recovery()
+
         try:
             while True:
                 try:
                     # 在每次对话开始前，清除上一轮的中断标志
                     self._clear_interrupt()
 
-                    # 在每次对话开始前，显示紧凑的状态头
+                    # 在每次对话开始前，显示紧凑的状态头（用上下文实际占用）
                     show_status_bar(
                         model_name=self.current_model.name if self.current_model else "Claude",
-                        total_tokens=self.stats.session.total_tokens,
+                        total_tokens=self._estimate_context_usage(),
                         file_count=self.files.count,
                         price_short=self.current_model.get_price_short() if self.current_model else "",
                         total_cost=self.stats.session.cost,

@@ -2,6 +2,9 @@
 from dataclasses import dataclass
 from typing import Dict
 
+# 版本信息 — 单一来源
+from claude_code.__version__ import __version__ as _base_version, __author__ as _author
+
 @dataclass(frozen=True)
 class FileDefaults:
     """文件挂载相关配置"""
@@ -58,6 +61,6 @@ PLAN = PlanDefaults()
 # Workplace 隔离目录
 WORKPLACE_DIR = "workplace"
 
-# 版本信息
-VERSION = "2.8.32 | Author: XieLong"
+# 版本信息（从 __version__.py 单一来源派生）
+VERSION = f"{_base_version} | Author: {_author}"
 APP_NAME = "Claude Code Terminal"

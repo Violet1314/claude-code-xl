@@ -17,7 +17,8 @@ class GrepTool(Tool):
         "重要：\n"
         "- path 必须使用绝对路径，如 path=\"E:\\项目目录\\src\"\n"
         "- 默认使用操作根目录\n"
-        "- 建议使用精确模式减少匹配数量"
+        "- 建议使用精确模式减少匹配数量\n"
+        "- context 参数可显示匹配行的上下文行数，减少额外 Read 操作"
     )
 
     MAX_FILE_SIZE = 1 * 1024 * 1024
@@ -52,6 +53,11 @@ class GrepTool(Tool):
                     "type": "string",
                     "description": "输出模式：content(显示内容) 或 files_with_matches(仅文件名)",
                     "default": "content"
+                },
+                "context": {
+                    "type": "integer",
+                    "description": "上下文行数：显示匹配行前后各 N 行（默认 0，不显示上下文）",
+                    "default": 0
                 }
             },
             "required": ["pattern"],
@@ -76,6 +82,7 @@ class GrepTool(Tool):
         file_type = parameters.get("type")
         ignore_case = parameters.get("-i", False)
         output_mode = parameters.get("output_mode", "content")
+        context_lines = max(0, int(parameters.get("context", 0)))
 
         # 使用 PathManager 统一路径解析
         pm = get_path_manager()
@@ -126,6 +133,9 @@ class GrepTool(Tool):
                 matches = self._search_in_file(file_path, regex)
                 if matches:
                     matched_files.append(file_path)
+                    # 如果需要上下文，扩展匹配结果
+                    if context_lines > 0:
+                        matches = self._add_context_to_matches(file_path, matches, context_lines)
                     all_matches.extend(matches)
                     if len(all_matches) >= self.MAX_MATCHES:
                         break
@@ -182,7 +192,9 @@ class GrepTool(Tool):
         parts.append("")
 
         current_file = None
-        for file_path, line_num, line_content in matches:
+        for match in matches:
+            file_path, line_num, line_content = match[0], match[1], match[2]
+            is_match = match[3] if len(match) > 3 else True
             if file_path != current_file:
                 if current_file is not None:
                     parts.append("")
@@ -191,7 +203,8 @@ class GrepTool(Tool):
 
             if len(line_content) > self.PREVIEW_WIDTH:
                 line_content = line_content[:self.PREVIEW_WIDTH - 3] + "..."
-            parts.append(f"{line_num:5d} | {line_content}")
+            prefix = f"{line_num:5d} |" if is_match else f"{line_num:5d} |"
+            parts.append(f"{prefix} {line_content}")
 
         if total > self.MAX_MATCHES:
             parts.append(f"\n... ({total} total matches, showing first {self.MAX_MATCHES})")
@@ -212,10 +225,15 @@ class GrepTool(Tool):
         parts.append(f"[bold]{ICONS.get('grep', '◆')} Grep:[/] [cyan]\"{escape(pattern)}\"[/] [dim]\\[{total} 处匹配][/]")
 
         # 匹配列表（2空格缩进）
-        for i, (file_path, line_num, line_content) in enumerate(matches, 1):
+        for i, match in enumerate(matches, 1):
+            file_path, line_num, line_content = match[0], match[1], match[2]
+            is_match = match[3] if len(match) > 3 else True
             # 截断过长的行
             display_line = line_content[:100] + "..." if len(line_content) > 100 else line_content
-            parts.append(f"  [dim]{i:>4}[/]  [dim]{escape(file_path)}:{line_num}:[/] {escape(display_line)}")
+            if is_match:
+                parts.append(f"  [dim]{i:>4}[/]  [dim]{escape(file_path)}:{line_num}:[/] {escape(display_line)}")
+            else:
+                parts.append(f"       [dim]{escape(file_path)}:{line_num}:[/] [dim]{escape(display_line)}[/]")
 
         return '\n'.join(parts)
 
@@ -323,6 +341,58 @@ class GrepTool(Tool):
         except (UnicodeDecodeError, PermissionError):
             pass
         return matches
+
+    def _add_context_to_matches(self, file_path: Path, matches: List[tuple], context_lines: int) -> List[tuple]:
+        """为匹配结果添加上下文行
+
+        Args:
+            file_path: 文件路径
+            matches: 原始匹配列表 [(file_path_str, line_num, line_content), ...]
+            context_lines: 上下文行数
+
+        Returns:
+            包含上下文行的匹配列表，上下文行标记为 "context" 类型
+        """
+        if not matches or context_lines <= 0:
+            return matches
+
+        # 读取文件所有行
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                all_lines = f.readlines()
+        except (UnicodeDecodeError, PermissionError):
+            return matches
+
+        # 收集需要显示的行号（匹配行 ± 上下文）
+        result = []
+        seen_lines = set()
+        match_line_nums = {m[1] for m in matches}
+
+        for file_path_str, line_num, line_content in matches:
+            # 添加匹配行之前的上下文
+            for ctx_num in range(max(1, line_num - context_lines), line_num):
+                if ctx_num not in seen_lines:
+                    seen_lines.add(ctx_num)
+                    ctx_content = all_lines[ctx_num - 1].rstrip('\n\r') if ctx_num <= len(all_lines) else ""
+                    is_match = ctx_num in match_line_nums
+                    result.append((file_path_str, ctx_num, ctx_content, is_match))
+
+            # 添加匹配行本身
+            if line_num not in seen_lines:
+                seen_lines.add(line_num)
+                result.append((file_path_str, line_num, line_content, True))
+
+            # 添加匹配行之后的上下文
+            for ctx_num in range(line_num + 1, min(len(all_lines) + 1, line_num + context_lines + 1)):
+                if ctx_num not in seen_lines:
+                    seen_lines.add(ctx_num)
+                    ctx_content = all_lines[ctx_num - 1].rstrip('\n\r')
+                    is_match = ctx_num in match_line_nums
+                    result.append((file_path_str, ctx_num, ctx_content, is_match))
+
+        # 按行号排序
+        result.sort(key=lambda x: x[1])
+        return result
 
     # ============================================================
     # 工具属性

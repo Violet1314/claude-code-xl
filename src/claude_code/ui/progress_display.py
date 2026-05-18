@@ -92,5 +92,7 @@ class BashStreamingDisplay:
         else:
             if self._error_message:
                 app_console.print(f"  [{COLORS['error']}]{escape_markup(self._error_message)}[/]")
+            elif success:
+                app_console.print("  [dim]✓ OK[/]")
             else:
                 app_console.print("  [dim](无输出)[/]")

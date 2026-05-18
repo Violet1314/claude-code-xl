@@ -215,6 +215,42 @@ class CommandSafetyChecker:
                 return True, f"交互式命令，会等待用户输入导致卡住: {pattern}"
         return False, ""
 
+    # Unix→PowerShell 转换建议映射
+    UNIX_TO_PS_SUGGESTIONS: List[Tuple[str, str, str]] = [
+        # (正则, 错误描述, PowerShell 替代命令)
+        (r'\bls\s+-[la]+\b', "ls -la 不兼容 PowerShell", "Get-ChildItem | Format-Table Mode, LastWriteTime, Length, Name"),
+        (r'\bls\s+-[a]+\b', "ls -a 不兼容 PowerShell", "Get-ChildItem -Force"),
+        (r'\bls\s+-[l]+\b', "ls -l 不兼容 PowerShell", "Get-ChildItem | Format-Table Mode, LastWriteTime, Length, Name"),
+        (r'\brm\s+-[rf]+\b', "rm -rf 不兼容 PowerShell", "Remove-Item -Recurse -Force <path>"),
+        (r'\brm\s+-r\b', "rm -r 不兼容 PowerShell", "Remove-Item -Recurse <path>"),
+        (r'\brm\s+-f\b', "rm -f 不兼容 PowerShell", "Remove-Item -Force <path>"),
+        (r'\bmkdir\s+-p\b', "mkdir -p 不兼容 PowerShell", "New-Item -ItemType Directory -Force <path>"),
+        (r'\bcp\s+-r\b', "cp -r 不兼容 PowerShell", "Copy-Item -Recurse <src> <dst>"),
+        (r'\bmv\s+-f\b', "mv -f 不兼容 PowerShell", "Move-Item -Force <src> <dst>"),
+        (r'\bcat\s+', "cat 在 PowerShell 中是 Get-Content 的别名，但行为可能不同", "Get-Content <file>"),
+        (r'\bfind\s+', "find 不兼容 PowerShell", "Get-ChildItem -Recurse -Filter <pattern>"),
+        (r'\bgrep\s+', "grep 不兼容 PowerShell", "Select-String -Pattern <pattern> <file>"),
+        (r'\bwhich\s+', "which 不兼容 PowerShell", "Get-Command <name>"),
+        (r'\btouch\s+', "touch 不兼容 PowerShell", "New-Item -ItemType File <path>"),
+        (r'\bchmod\s+', "chmod 不兼容 PowerShell", "icacls <path> 或 Set-Acl"),
+        (r'\bchown\s+', "chown 不兼容 PowerShell", "icacls <path> 或 Set-Acl"),
+    ]
+
+    def get_powershell_suggestion(self, command: str) -> Optional[str]:
+        """检测 Unix 风格命令并返回 PowerShell 转换建议
+
+        Args:
+            command: 用户输入的命令
+
+        Returns:
+            转换建议字符串，或 None（无需建议）
+        """
+        cmd_lower = command.strip().lower()
+        for pattern, desc, ps_cmd in self.UNIX_TO_PS_SUGGESTIONS:
+            if re.search(pattern, cmd_lower, re.IGNORECASE):
+                return f"{desc}\n建议使用: {ps_cmd}"
+        return None
+
     def check_unix_syntax(self, command: str) -> Optional[str]:
         """检查 Windows PowerShell 不兼容的 Unix 语法
         

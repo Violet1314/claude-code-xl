@@ -471,6 +471,125 @@ class TestEditTool:
         assert "old_string" in result or "start_line" in result
 
 
+    def test_edit_fuzzy_match_trailing_whitespace(self):
+        """测试模糊匹配：old_string 有行尾空白但文件没有"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            # 文件内容没有行尾空格
+            f.write("def hello():\n    pass\n    return True\n")
+            f.flush()
+            temp_path = f.name
+
+        try:
+            tool = EditTool()
+            # old_string 有行尾空格（AI 从某些编辑器复制时常见）
+            result = tool.execute({
+                "file_path": temp_path,
+                "old_string": "    pass   ",
+                "new_string": "    print('hello')"
+            })
+
+            assert result.success
+            assert result.metadata.get("fuzzy_matched") is True
+
+            with open(temp_path, 'r') as f:
+                content = f.read()
+            assert "print('hello')" in content
+        finally:
+            os.unlink(temp_path)
+
+    def test_edit_fuzzy_match_tab_indent(self):
+        """测试模糊匹配：tab vs 空格缩进差异"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            # 文件内容用 tab 缩进
+            f.write("def hello():\n\tpass\n\treturn True\n")
+            f.flush()
+            temp_path = f.name
+
+        try:
+            tool = EditTool()
+            # old_string 用空格缩进（AI 常见情况）
+            result = tool.execute({
+                "file_path": temp_path,
+                "old_string": "    pass",
+                "new_string": "    print('hello')"
+            })
+
+            assert result.success
+            assert result.metadata.get("fuzzy_matched") is True
+
+            with open(temp_path, 'r') as f:
+                content = f.read()
+            assert "print('hello')" in content
+        finally:
+            os.unlink(temp_path)
+
+    def test_edit_fuzzy_match_crlf(self):
+        """测试模糊匹配：old_string 用 CRLF 但文件用 LF"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            # 文件内容用 LF 换行（Python open 默认行为）
+            f.write("def hello():\n    pass\n    return True\n")
+            f.flush()
+            temp_path = f.name
+
+        try:
+            tool = EditTool()
+            # old_string 用 CRLF 换行（AI 在 Windows 环境下常见）
+            result = tool.execute({
+                "file_path": temp_path,
+                "old_string": "    pass\r\n    return True",
+                "new_string": "    print('hello')\n    return False"
+            })
+
+            assert result.success
+            assert result.metadata.get("fuzzy_matched") is True
+
+            with open(temp_path, 'r') as f:
+                content = f.read()
+            assert "print('hello')" in content
+        finally:
+            os.unlink(temp_path)
+
+    def test_edit_fuzzy_match_multiple_results_still_fails(self):
+        """测试模糊匹配：多处匹配仍然报错"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("    pass   \n    pass   \n")
+            f.flush()
+            temp_path = f.name
+
+        try:
+            tool = EditTool()
+            result = tool.execute({
+                "file_path": temp_path,
+                "old_string": "pass",
+                "new_string": "print('hello')"
+            })
+
+            # 多处匹配应该仍然失败
+            assert not result.success
+        finally:
+            os.unlink(temp_path)
+
+    def test_edit_exact_match_no_fuzzy_flag(self):
+        """测试精确匹配成功时不标记 fuzzy"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("def hello():\n    pass\n")
+            f.flush()
+            temp_path = f.name
+
+        try:
+            tool = EditTool()
+            result = tool.execute({
+                "file_path": temp_path,
+                "old_string": "pass",
+                "new_string": "print('hello')"
+            })
+
+            assert result.success
+            assert result.metadata.get("fuzzy_matched") is False
+        finally:
+            os.unlink(temp_path)
+
+
 class TestGlobTool:
     """Glob 工具测试"""
     def test_glob_find_files(self):
