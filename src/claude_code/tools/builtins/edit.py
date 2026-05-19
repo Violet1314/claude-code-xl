@@ -37,11 +37,7 @@ class EditTool(Tool):
         "模式 2 — 行号范围：\n"
         "  提供 start_line + end_line + new_string，替换指定行范围的内容。\n"
         "  适合大块替换（5行以上），无需精确复制原文，直接用 Read 返回的行号定位。\n"
-        "  替换结果会返回被替换的原始内容，供确认是否正确。\n"
-        "\n"
-        "重要：必须使用绝对路径，如 file_path=\"E:\\项目目录\\src\\file.py\"\n"
-        "相对路径会自动基于操作根目录解析为绝对路径\n"
-        "不要猜测或简化 old_string，必须从 Read 结果中精确复制。"
+        "  替换结果会返回被替换的原始内容，供确认是否正确。"
     )
 
     def get_parameters_schema(self) -> Dict[str, Any]:
@@ -51,7 +47,7 @@ class EditTool(Tool):
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "文件路径（必须使用绝对路径，相对路径基于操作根目录解析）",
+                    "description": "文件路径",
                     "example": "E:\\项目目录\\src\\file.py"
                 },
                 "old_string": {
@@ -104,23 +100,37 @@ class EditTool(Tool):
                 success=False, output="",
                 error=f"路径越界: {file_path} 不在操作根目录 {pm.active_path} 下，禁止访问"
             )
+        # v2.8.36：缓存新鲜度校验
+        freshness_hint = ""
+        if not file_cache.is_cached(file_path):
+            freshness_hint = (
+                "\n[提示] 此文件尚未被 Read 缓存。"
+                "建议先调用 Read 确认文件当前内容，再执行 Edit，避免匹配失败。"
+            )
+        else:
+            read_count = file_cache.get_read_count(file_path)
+            if read_count == 0:
+                freshness_hint = (
+                    "\n[提示] 此文件自上次修改后未被重新读取。"
+                    "建议先调用 Read 获取最新内容，再执行 Edit，避免匹配失败。"
+                )
 
         # 判断模式：有 start_line/end_line → 行号范围模式，否则 → 精确匹配模式
         start_line = parameters.get("start_line")
         end_line = parameters.get("end_line")
 
         if start_line is not None and end_line is not None:
-            return self._execute_line_range_mode(file_path, start_line, end_line, new_string, pm)
+            return self._execute_line_range_mode(file_path, start_line, end_line, new_string, pm, freshness_hint)
         else:
             old_string = parameters.get("old_string", "")
-            return self._execute_exact_match_mode(file_path, old_string, new_string, pm)
+            return self._execute_exact_match_mode(file_path, old_string, new_string, pm, freshness_hint)
 
     # ============================================================
     # 模式 1：精确匹配
     # ============================================================
 
     def _execute_exact_match_mode(
-        self, file_path: str, old_string: str, new_string: str, pm
+        self, file_path: str, old_string: str, new_string: str, pm, freshness_hint: str = ""
     ) -> ToolResult:
         """精确匹配模式执行"""
         try:
@@ -150,10 +160,10 @@ class EditTool(Tool):
                     fuzzy_matched = True
                 elif len(fuzzy_results) > 1:
                     # 模糊匹配多处，仍报错
-                    return self._build_no_match_error(original_content, old_string, file_path)
+                    return self._build_no_match_error(original_content, old_string, file_path, freshness_hint)
                 else:
                     # 模糊匹配也失败，返回精确匹配的错误
-                    return self._build_no_match_error(original_content, old_string, file_path)
+                    return self._build_no_match_error(original_content, old_string, file_path, freshness_hint)
 
             match_count = len(positions)
 
@@ -185,8 +195,12 @@ class EditTool(Tool):
 
             output = self._build_model_output(
                 path, old_string, new_string, start_line, version, reference, syntax_warning,
-                fuzzy_matched=fuzzy_matched
+                fuzzy_matched=fuzzy_matched, new_content=new_content
             )
+            # v2.8.36：附加缓存新鲜度提示
+            if freshness_hint:
+                output = output + freshness_hint
+
             display_output = self._build_terminal_display(
                 path, old_string, new_string, original_content, new_content,
                 start_line, version, reference, syntax_warning, fuzzy_matched=fuzzy_matched
@@ -225,7 +239,7 @@ class EditTool(Tool):
     # ============================================================
 
     def _execute_line_range_mode(
-        self, file_path: str, start_line: int, end_line: int, new_string: str, pm
+        self, file_path: str, start_line: int, end_line: int, new_string: str, pm, freshness_hint: str = ""
     ) -> ToolResult:
         """行号范围模式执行"""
         try:
@@ -292,6 +306,10 @@ class EditTool(Tool):
                 path, start_line, actual_end, old_string, new_string,
                 version, reference, syntax_warning
             )
+            # v2.8.36：附加缓存新鲜度提示
+            if freshness_hint:
+                output = output + freshness_hint
+
             display_output = self._build_line_range_terminal_display(
                 path, start_line, actual_end, old_string, new_string,
                 version, reference, syntax_warning
@@ -423,7 +441,7 @@ class EditTool(Tool):
                 results.append((start_char, end_char))
 
         return results
-    def _build_no_match_error(self, content: str, old_string: str, file_path: str) -> ToolResult:
+    def _build_no_match_error(self, content: str, old_string: str, file_path: str, freshness_hint: str = "") -> ToolResult:
         """精确匹配失败时的错误反馈（含上下文指导）"""
         # 提供行号模式建议
         line_count = old_string.count('\n') + 1
@@ -457,14 +475,17 @@ class EditTool(Tool):
                         )
                     )
 
+        total_lines = content.count('\n') + 1
         return ToolResult(
             success=False, output="",
             error=(
-                f"精确匹配失败: old_string 在文件中未找到。\n\n"
+                f"精确匹配失败: old_string 在文件中未找到（文件共 {total_lines} 行）。\n\n"
                 f"建议：\n"
                 f"1. 重新 Read 文件，精确复制要替换的原文（包括缩进）\n"
-                f"2. 或缩小 old_string 范围，只匹配最关键的一两行"
+                f"2. 或缩小 old_string 范围，只匹配最关键的一两行\n"
+                f"3. 或使用行号范围模式直接指定行号"
                 f"{mode_hint}"
+                f"{freshness_hint}"
             )
         )
 
@@ -502,9 +523,9 @@ class EditTool(Tool):
     # ============================================================
 
     def _build_model_output(
-        self, path, old_string, new_string, start_line, version, reference, syntax_warning=None, fuzzy_matched=False
+        self, path, old_string, new_string, start_line, version, reference, syntax_warning=None, fuzzy_matched=False, new_content=None
     ) -> str:
-        """构建给模型的纯文本输出（精确匹配模式）"""
+        """构建给模型的纯文本输出（精确匹配模式），包含修改后上下文确认"""
         parts = []
         parts.append(f"File: {path.name}")
         parts.append(f"Path: {path}")
@@ -520,6 +541,23 @@ class EditTool(Tool):
             parts.append(f"- {line}")
         for line in new_string.splitlines():
             parts.append(f"+ {line}")
+
+        # 修改后上下文确认（前后各3行，让模型无需额外 Read 即可确认结果）
+        if new_content:
+            new_lines = new_content.splitlines()
+            new_line_count = len(new_string.splitlines())
+            end_line = start_line + new_line_count - 1
+            context_before = 3
+            context_after = 3
+            ctx_start = max(1, start_line - context_before)
+            ctx_end = min(len(new_lines), end_line + context_after)
+            if ctx_end > ctx_start:
+                parts.append("")
+                parts.append(f"▼ 修改后上下文（行 {ctx_start}-{ctx_end}）:")
+                for i in range(ctx_start - 1, ctx_end):
+                    marker = " →" if start_line <= i + 1 <= end_line else "  "
+                    line_display = new_lines[i][:120] if len(new_lines[i]) > 120 else new_lines[i]
+                    parts.append(f"  {i + 1:5d}{marker} {line_display}")
 
         if syntax_warning:
             parts.append("")

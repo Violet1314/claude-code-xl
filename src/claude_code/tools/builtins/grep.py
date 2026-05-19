@@ -14,11 +14,7 @@ class GrepTool(Tool):
     name = "Grep"
     description = (
         "在文件中搜索匹配正则表达式的内容。返回匹配的行及其上下文。\n"
-        "重要：\n"
-        "- path 必须使用绝对路径，如 path=\"E:\\项目目录\\src\"\n"
-        "- 默认使用操作根目录\n"
-        "- 建议使用精确模式减少匹配数量\n"
-        "- context 参数可显示匹配行的上下文行数，减少额外 Read 操作"
+        "建议使用精确模式减少匹配数量。context 参数可显示匹配行的上下文行数，减少额外 Read 操作。"
     )
 
     MAX_FILE_SIZE = 1 * 1024 * 1024
@@ -37,7 +33,7 @@ class GrepTool(Tool):
                 },
                 "path": {
                     "type": "string",
-                    "description": "搜索的文件或目录路径（必须使用绝对路径，默认使用操作根目录）",
+                    "description": "搜索的文件或目录路径（默认使用操作根目录）",
                     "default": "."
                 },
                 "type": {

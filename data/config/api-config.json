@@ -1,8 +1,8 @@
 {
-  "base_url": "https://xxxxxxx/v1",
-  "api_key": "sk-xxxxxxxxxxxxxxxx",
+  "base_url": "https://xxxxxxxxxxxxxxxxx/v1",
+  "api_key": "sk-xxxxxxxxxxxxxxxxx",
   "task_models": {
-    "summary": "deepseek-v3.2"
+  "summary": "qwen3.6-plus"
   },
   "models": [
     {
@@ -33,5 +33,13 @@
       "context_limit": 1000000,
       "tool_mode": "native"
     },
+    {
+      "id": "deepseek-v4-pro",
+      "name": "DeepSeek V4 Pro",
+      "price": "Input: $2.00/1M Output: $4.00/1M",
+      "context_limit": 1000000,
+      "tool_mode": "native"
+    }
+  ],
   "default_model": "glm-5.1"
 }

@@ -6,7 +6,6 @@ v2.8.17 优化要点：
 3. 中间压缩：对中间轮次的大输出进行摘要化，节省 token
 4. 工具输出摘要化：历史轮次的工具大输出替换为摘要
 """
-import re
 from typing import List, Dict, Optional
 from dataclasses import dataclass, field
 
@@ -18,13 +17,25 @@ class Message:
     """单条消息"""
     role: str
     content: str
+    tool_call_id: Optional[str] = None   # tool 角色消息的调用 ID
+    tool_calls: Optional[list] = None     # assistant 消息的原生 tool_calls
     
     def to_dict(self) -> Dict[str, str]:
-        return {"role": self.role, "content": self.content}
+        result = {"role": self.role, "content": self.content}
+        if self.tool_call_id:
+            result["tool_call_id"] = self.tool_call_id
+        if self.tool_calls:
+            result["tool_calls"] = self.tool_calls
+        return result
     
     @classmethod
     def from_dict(cls, data: Dict[str, str]) -> "Message":
-        return cls(role=data.get("role", ""), content=data.get("content", ""))
+        return cls(
+            role=data.get("role", ""),
+            content=data.get("content", ""),
+            tool_call_id=data.get("tool_call_id"),
+            tool_calls=data.get("tool_calls"),
+        )
 
 class Conversation:
     """会话管理器"""
@@ -79,9 +90,26 @@ class Conversation:
         """添加用户消息"""
         self._messages.append(Message(role="user", content=content))
     
-    def add_assistant_message(self, content: str) -> None:
-        """添加助手消息"""
-        self._messages.append(Message(role="assistant", content=content))
+    def add_assistant_message(self, content: str, tool_calls: Optional[list] = None) -> None:
+        """添加助手消息（可附带原生 tool_calls）"""
+        self._messages.append(Message(role="assistant", content=content, tool_calls=tool_calls))
+    
+    def add_tool_message(self, tool_call_id: str, content: str) -> None:
+        """添加工具结果消息（原生 tool role）"""
+        self._messages.append(Message(role="tool", content=content, tool_call_id=tool_call_id))
+    
+    def add_tool_messages(self, tool_results: List[Dict[str, str]]) -> None:
+        """批量添加工具结果消息
+        
+        Args:
+            tool_results: 列表，每项包含 tool_call_id 和 content
+        """
+        for tr in tool_results:
+            self._messages.append(Message(
+                role="tool",
+                content=tr.get("content", ""),
+                tool_call_id=tr.get("tool_call_id", ""),
+            ))
     
     def get_messages(self) -> List[Dict[str, str]]:
         """获取所有消息"""
@@ -142,7 +170,11 @@ class Conversation:
                 # 锚定用户消息后的助手回复也保留（保持对话连贯性）
                 # 对 tool 大输出进行摘要化，防止锚定区域占用过多 token
                 if msg.role == "tool" and len(msg.content) > self.TOOL_SUMMARY_THRESHOLD:
-                    anchor_msgs.append(Message(role=msg.role, content=self._compress_history_content(msg.content)))
+                    anchor_msgs.append(Message(
+                        role=msg.role,
+                        content=self._compress_history_content(msg.content, msg.role),
+                        tool_call_id=msg.tool_call_id,
+                    ))
                 else:
                     anchor_msgs.append(msg)
             if user_count > self.ANCHOR_USER_MSGS:
@@ -176,7 +208,12 @@ class Conversation:
         middle_compressed = []
         for msg in middle_msgs:
             compressed_content = self._compress_history_content(msg.content, msg.role)
-            middle_compressed.append(Message(role=msg.role, content=compressed_content))
+            middle_compressed.append(Message(
+                role=msg.role,
+                content=compressed_content,
+                tool_call_id=msg.tool_call_id,
+                tool_calls=msg.tool_calls,
+            ))
         
         middle_tokens = sum(estimate_tokens(m.content) + 4 for m in middle_compressed)
         
@@ -213,12 +250,14 @@ class Conversation:
     
     def _compress_history_content(self, content: str, role: str = "") -> str:
         """
-        对历史消息中的工具大输出进行摘要化
+        对历史消息中的大输出进行摘要化
         
         规则：
-        - 包含 <tool_results> 的大输出 → 摘要化
-        - 包含 <result> 的大输出 → 摘要化
+        - tool 角色消息（原生格式）→ 保留首尾摘要
+        - 包含 <tool_results> 的旧格式消息 → 摘要化（向后兼容）
         - assistant 超长消息 → 保留首尾（比工具结果更宽松）
+        - 路径提醒消息 → 极简化
+        - 计划模式提示 → 极简化
         - 普通超长消息 → 保留首尾
         
         Args:
@@ -231,9 +270,13 @@ class Conversation:
         if len(content) <= self.TOOL_SUMMARY_THRESHOLD:
             return content
         
-        # 工具结果消息：摘要化
-        if "<tool_results>" in content or "<result" in content:
-            return self._summarize_tool_results(content)
+        # tool 角色消息（原生格式）：保留首尾
+        if role == "tool":
+            head = content[:self.TOOL_SUMMARY_MAX]
+            tail_len = self.TOOL_SUMMARY_MAX // 2
+            tail = content[-tail_len:]
+            omitted = len(content) - len(head) - tail_len
+            return f"{head}\n\n... (省略 {omitted} 字符) ...\n\n{tail}"
         
         # 路径提醒消息：极简化
         if "[系统提醒]" in content:
@@ -253,49 +296,6 @@ class Conversation:
             return f"{head}\n\n... (省略 {omitted} 字符) ...\n\n{tail}"
         
         return content
-    
-    def _summarize_tool_results(self, content: str) -> str:
-        """
-        将工具结果摘要化
-        
-        提取每个 <result> 的工具名、状态、简要信息，
-        丢弃大块输出内容。
-        
-        Args:
-            content: 包含 <tool_results> 的消息内容
-            
-        Returns:
-            摘要化后的内容
-        """
-        # 提取中断信息
-        interrupt_note = ""
-        if "user_interrupt" in content:
-            interrupt_note = "\n[用户中断了部分操作]"
-        
-        # 提取每个工具结果的状态
-        summaries = []
-        # 匹配 <result tool="xxx" status="yyy">
-        pattern = r'<result\s+tool="([^"]+)"\s+status="([^"]+)">'
-        matches = re.findall(pattern, content)
-        
-        for tool_name, status in matches:
-            if status == "success":
-                summaries.append(f"✓ {tool_name}")
-            elif status == "error":
-                summaries.append(f"✗ {tool_name}")
-            elif status == "skipped":
-                summaries.append(f"○ {tool_name}")
-            elif status == "interrupted":
-                summaries.append(f"⚠ {tool_name}")
-            else:
-                summaries.append(f"? {tool_name}({status})")
-        
-        if summaries:
-            summary_text = ", ".join(summaries)
-            return f"<tool_results_summary>{interrupt_note}\n执行结果: {summary_text}\n(详细输出已压缩，如需查看请重新调用工具)</tool_results_summary>"
-        
-        # 无法解析的兜底：截断
-        return content[:self.TOOL_SUMMARY_MAX] + f"\n... (省略 {len(content) - self.TOOL_SUMMARY_MAX} 字符) ..."
     
     def reset(self) -> None:
         """重置会话（保留 system prompt）"""

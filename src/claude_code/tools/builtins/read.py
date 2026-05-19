@@ -13,11 +13,7 @@ class ReadTool(Tool):
 
     name = "Read"
     description = (
-        "读取用户本机文件内容。你可以直接访问用户提供的任何本地路径，无需用户手动粘贴内容。"
-        "文件会被完整缓存，后续操作使用缓存引用节省 Token。"
-        "读取后请直接执行任务，不要再次调用 Read。如需编辑，直接使用 Edit 工具。"
-        "\n重要：必须使用绝对路径，如 file_path=\"E:\\项目目录\\src\\file.py\""
-        "\n相对路径会自动基于操作根目录解析为绝对路径"
+        "读取用户本机文件内容。文件会被完整缓存，后续操作使用缓存引用节省 Token。"
     )
 
     # 文件大小限制 (1MB)
@@ -38,7 +34,7 @@ class ReadTool(Tool):
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "文件路径（必须使用绝对路径，相对路径基于操作根目录解析）",
+                    "description": "文件路径",
                     "example": "E:\\项目目录\\src\\file.py"
                 },
                 "offset": {
@@ -120,7 +116,7 @@ class ReadTool(Tool):
 
             # 构建输出
             output = self._build_model_output(
-                path, lines, total_lines, size_kb, reference, offset, limit
+                path, lines, total_lines, size_kb, reference, offset, limit, was_cached
             )
             display_output = self._build_terminal_display(
                 path, lines, total_lines, size_kb, reference, version, was_cached
@@ -157,7 +153,7 @@ class ReadTool(Tool):
     # ============================================================
 
     def _build_model_output(
-        self, path, lines, total_lines, size_kb, reference, offset, limit
+        self, path, lines, total_lines, size_kb, reference, offset, limit, was_cached=False
     ) -> str:
         """构建给模型的纯文本输出"""
         parts = []
@@ -166,6 +162,8 @@ class ReadTool(Tool):
         parts.append(f"File: {path.name} ({total_lines} lines, {size_kb:.1f}KB)")
         parts.append(f"Path: {path}")
         parts.append(f"Cache: {reference}")
+        if was_cached:
+            parts.append("⚠ 缓存内容：如 Edit 匹配失败，请重新 Read 获取最新内容")
         parts.append("")
 
         # 计算读取范围

@@ -129,6 +129,7 @@ class TodoUpdateTool(Tool):
         "- pending → in_progress：开始执行任务时调用\n"
         "- in_progress → completed：完成实际工作后调用\n"
         "- in_progress → failed：任务失败时调用\n"
+        "- in_progress → pending：任务暂无法推进，暂停并释放进行中名额\n"
         "\n"
         "✗ 禁止的转换：\n"
         "- pending → completed：必须先标记 in_progress，执行实际工作后再标记 completed\n"

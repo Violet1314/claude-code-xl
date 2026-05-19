@@ -651,6 +651,84 @@ class TestTodoImprovements:
         assert "忽略" in result.summary
         assert "忽略" in result.display_output
 
+    def test_in_progress_to_pending(self):
+        """in_progress → pending 回退合法"""
+        todo = TodoList.create_from_dicts([
+            {"content": "任务1"},
+            {"content": "任务2"},
+        ])
+        todo.update_status("t1", "in_progress")
+
+        result, error = todo.update_status("t1", "pending")
+        assert result is True
+        assert error == ""
+        assert todo.get_item("t1").status == "pending"
+
+    def test_in_progress_to_pending_releases_slot(self):
+        """回退到 pending 后释放 in_progress 名额，可以开始新任务"""
+        todo = TodoList.create_from_dicts([
+            {"content": "任务1"},
+            {"content": "任务2"},
+        ])
+        todo.update_status("t1", "in_progress")
+
+        # 回退 t1
+        todo.update_status("t1", "pending")
+
+        # in_progress 名额已释放，可以开始 t2
+        result, error = todo.update_status("t2", "in_progress")
+        assert result is True
+        assert todo.get_item("t2").status == "in_progress"
+        assert todo.in_progress_count == 1
+
+    def test_in_progress_to_pending_then_back(self):
+        """回退后可以重新标记为 in_progress"""
+        todo = TodoList.create_from_dicts([
+            {"content": "任务1"},
+        ])
+        todo.update_status("t1", "in_progress")
+        todo.update_status("t1", "pending")
+
+        # 重新开始
+        result, error = todo.update_status("t1", "in_progress")
+        assert result is True
+        assert todo.get_item("t1").status == "in_progress"
+
+    def test_pending_to_completed_still_blocked(self):
+        """回退功能不影响 pending → completed 的禁止规则"""
+        todo = TodoList.create_from_dicts([
+            {"content": "任务1"},
+        ])
+        result, error = todo.update_status("t1", "completed")
+        assert result is False
+        assert "尚未开始" in error or "pending" in error
+
+    def test_completed_still_immutable_after_revert_feature(self):
+        """回退功能不影响 completed/failed 的不可变规则"""
+        todo = TodoList.create_from_dicts([
+            {"content": "任务1"},
+        ])
+        todo.update_status("t1", "in_progress")
+        todo.update_status("t1", "completed")
+
+        # completed 仍然不可变更
+        result, error = todo.update_status("t1", "pending")
+        assert result is False
+        assert "已完成" in error
+
+    def test_revert_error_message_includes_pending_option(self):
+        """冲突错误提示包含 pending 选项"""
+        todo = TodoList.create_from_dicts([
+            {"content": "任务1"},
+            {"content": "任务2"},
+        ])
+        todo.update_status("t1", "in_progress")
+
+        result, error = todo.update_status("t2", "in_progress")
+        assert result is False
+        assert "pending" in error
+        assert "暂停" in error
+
 
 class TestPlanCommandImprovements:
     """/plan 命令增强行为测试"""

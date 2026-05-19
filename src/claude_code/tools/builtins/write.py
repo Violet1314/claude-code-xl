@@ -17,8 +17,6 @@ class WriteTool(Tool):
     name = "Write"
     description = (
         "创建新文件或覆盖文件。慎用，会覆盖已有内容。"
-        "\n重要：必须使用绝对路径，如 file_path=\"E:\\项目目录\\src\\file.py\""
-        "\n相对路径会自动基于操作根目录解析为绝对路径"
     )
 
     def get_parameters_schema(self) -> Dict[str, Any]:
@@ -28,7 +26,7 @@ class WriteTool(Tool):
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "文件路径（必须使用绝对路径，相对路径基于操作根目录解析）",
+                    "description": "文件路径",
                     "example": "E:\\项目目录\\src\\file.py"
                 },
                 "content": {
@@ -80,11 +78,30 @@ class WriteTool(Tool):
             # 语法检查（支持多种文件类型）
             is_valid, syntax_warning = check_syntax(content, file_path)
 
-            # 构建输出（语法警告更显眼）
-            if syntax_warning:
-                output_msg = f"写入成功: {file_path} ({len(content)} 字符)\n\n【语法警告】{syntax_warning}\n建议：检查并修正语法错误后再继续。"
+            # 构建输出（含首尾摘要确认，让模型无需额外 Read 即可确认结果）
+            content_lines = content.splitlines()
+            total_lines = len(content_lines)
+            if total_lines <= 20:
+                # 短文件：完整显示
+                content_preview = '\n'.join(f"  {i+1:5d}  {line[:120]}" for i, line in enumerate(content_lines))
+                output_msg = f"写入成功: {file_path} ({len(content)} 字符, {total_lines} 行)\n\n{content_preview}"
             else:
-                output_msg = f"写入成功: {file_path} ({len(content)} 字符)"
+                # 长文件：显示首10行+尾5行
+                head_lines = content_lines[:10]
+                tail_lines = content_lines[-5:]
+                head_preview = '\n'.join(f"  {i+1:5d}  {line[:120]}" for i, line in enumerate(head_lines))
+                tail_start = total_lines - 5 + 1
+                tail_preview = '\n'.join(f"  {tail_start+i:5d}  {line[:120]}" for i, line in enumerate(tail_lines))
+                omitted = total_lines - 15
+                output_msg = (
+                    f"写入成功: {file_path} ({len(content)} 字符, {total_lines} 行)\n\n"
+                    f"{head_preview}\n"
+                    f"  ... (省略 {omitted} 行) ...\n"
+                    f"{tail_preview}"
+                )
+
+            if syntax_warning:
+                output_msg += f"\n\n【语法警告】{syntax_warning}\n建议：检查并修正语法错误后再继续。"
 
             # 构建终端显示（卡片式）
             display_output = self._build_terminal_display(path, content, is_valid, syntax_warning)

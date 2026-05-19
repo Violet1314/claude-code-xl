@@ -16,19 +16,9 @@ class BashTool(Tool):
     name = "Bash"
     description = (
         "执行 shell 命令。"
-        "当前环境：Windows PowerShell。"
-        "注意：必须使用 PowerShell 语法，不支持 Unix 参数如 -p、-r。"
-        "正确示例：mkdir data, output（逗号分隔）| Get-ChildItem（或简写 ls）| Remove-Item -Recurse -Force | Copy-Item -Recurse"
-        "错误示例：mkdir -p data output | ls -la | rm -rf | cp -r"
-        "⚠️ 不支持交互式命令：不要执行需要用户输入的命令（如 python script.py 等待 input()），这类命令会卡住直到超时。"
-        "输出限制：默认 5000 字符，测试/构建类命令（pytest/pip install等）自动提升至 10000。"
-        "所有命令都需要用户确认。"
-        "\n\n"
-        "🔒 沙箱安全限制：\n"
-        "- 工作目录限制在操作根目录及其子目录内\n"
-        "- 禁止访问系统关键路径（Windows/System32 等）\n"
-        "- 禁止使用绝对路径逃逸沙箱\n"
-        "- 命令执行前自动进行安全扫描"
+        "⚠️ 不支持交互式命令（如 python -i、vim 等），会卡住直到超时。"
+        "输出限制：默认 5000 字符，测试/构建类命令自动提升至 10000。"
+        "沙箱：工作目录限制在操作根目录内，禁止访问系统关键路径，命令执行前自动安全扫描。"
     )
 
     # 输出限制
@@ -85,7 +75,7 @@ class BashTool(Tool):
                 },
                 "cwd": {
                     "type": "string",
-                    "description": "工作目录（必须使用绝对路径，默认使用操作根目录）",
+                    "description": "工作目录（默认使用操作根目录）",
                     "default": "."
                 }
             },
@@ -469,10 +459,15 @@ class BashTool(Tool):
                     }
                 )
             else:
+                # 构建增强错误信息：附加 exit code + 常见原因提示
+                error_msg = output if output else f"命令返回非零退出码: {return_code}"
+                hint = self._get_exit_code_hint(return_code, command)
+                if hint:
+                    error_msg = f"{error_msg}\n\n诊断: 退出码 {return_code} — {hint}"
                 return ToolResult(
                     success=False,
                     output="",
-                    error=output if output else f"命令返回非零退出码: {return_code}",
+                    error=error_msg,
                     metadata={
                         "command": command,
                         "return_code": return_code,
@@ -484,6 +479,31 @@ class BashTool(Tool):
             return ToolResult(success=False, output="", error=f"命令执行超时（{timeout}秒）")
         except Exception as e:
             return ToolResult(success=False, output="", error=f"执行失败: {str(e)}")
+
+    @staticmethod
+    def _get_exit_code_hint(return_code: int, command: str) -> str:
+        """根据退出码和命令给出常见原因提示"""
+        hints = {
+            1: "一般性错误，检查命令语法和参数",
+            2: "命令用法错误，检查参数格式",
+            126: "权限不足，无法执行该命令",
+            127: "命令未找到，检查命令名是否正确或是否已安装",
+            128: "退出参数无效",
+            130: "命令被 Ctrl+C 中断",
+        }
+        hint = hints.get(return_code, "")
+        # 特殊场景补充
+        if not hint:
+            if return_code > 128:
+                signal_num = return_code - 128
+                hint = f"被信号 {signal_num} 终止"
+            elif 'pip' in command and return_code == 1:
+                hint = "pip 安装失败，检查包名、网络连接或 Python 版本兼容性"
+            elif 'pytest' in command and return_code == 1:
+                hint = "测试失败，查看输出中的 FAILED 用例"
+            elif 'git' in command and return_code == 1:
+                hint = "git 操作失败，检查仓库状态、分支名或远程配置"
+        return hint
 
     def is_sensitive(self, command: str) -> bool:
         """检查命令是否敏感"""

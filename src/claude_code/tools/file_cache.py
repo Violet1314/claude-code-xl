@@ -4,8 +4,12 @@
 1. 文件内容只完整存储一次
 2. 后续修改直接更新基础内容并递增版本
 3. 【优化】读取计数按版本隔离，写入后新版本计数器重置，避免误拦截
+4. 【优化】语义摘要：缓存文件的结构化摘要（类名、函数签名、import），
+   长对话中模型可通过 get_file_summary() 查询文件概览，减少盲目重读
 """
+import ast
 import hashlib
+import re
 import time
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
@@ -23,6 +27,9 @@ class CachedFile:
     
     # 【优化】版本统计信息: {version_id: {"count": int, "ranges": List[Tuple[int, int]]}}
     version_stats: Dict[int, Dict[str, Any]] = field(default_factory=dict)
+    
+    # 【v2.8.36】语义摘要：缓存文件的结构化摘要
+    summary: Optional[Dict[str, Any]] = field(default=None, repr=False)
 
     def get_content_hash(self) -> str:
         """获取当前内容的 hash"""
@@ -95,7 +102,8 @@ class FileCacheManager:
                             base_hash=current_hash,
                             version=new_version,
                             # 保留旧版本统计
-                            version_stats=cached.version_stats.copy() 
+                            version_stats=cached.version_stats.copy(),
+                            summary=self._build_summary(content, file_path),
                         )
                         # 初始化新版本统计
                         new_cached.get_version_stats(new_version)
@@ -136,6 +144,7 @@ class FileCacheManager:
                 base_content=content,
                 base_hash=self._compute_hash(content),
                 version=0,
+                summary=self._build_summary(content, file_path),
             )
             # 初始化版本 0 的统计
             cached.get_version_stats(0)
@@ -179,7 +188,8 @@ class FileCacheManager:
                 base_content=content,
                 base_hash=self._compute_hash(content),
                 version=new_version,
-                version_stats=old_stats
+                version_stats=old_stats,
+                summary=self._build_summary(content, file_path),
             )
             
             # 初始化新版本的统计（计数器从 0 开始）
@@ -239,6 +249,12 @@ class FileCacheManager:
         """检查当前版本是否已读取过该文件"""
         return self.get_read_count(file_path) > 0
 
+    def is_cached(self, file_path: str) -> bool:
+        """检查文件是否在缓存中（任何版本）"""
+        key = self._get_file_key(file_path)
+        with self._lock:
+            return key in self._cache
+
     def get_read_ranges(self, file_path: str) -> List[Tuple[int, int]]:
         """获取当前版本已读取的行范围列表"""
         key = self._get_file_key(file_path)
@@ -267,6 +283,159 @@ class FileCacheManager:
         """清空缓存"""
         with self._lock:
             self._cache.clear()
+
+    # ============================================================
+    # 语义摘要 (v2.8.36) - 供长对话中模型查询文件概览
+    # ============================================================
+
+    def _build_summary(self, content: str, file_path: str) -> Optional[Dict[str, Any]]:
+        """
+        构建文件语义摘要（轻量级，不依赖外部库）
+        
+        支持：
+        - Python：提取 class/def/import
+        - JS/TS：提取 class/function/export
+        - JSON/YAML：提取顶层 key
+        - 其他：提取非空行数和文件类型
+        
+        Args:
+            content: 文件内容
+            file_path: 文件路径
+        
+        Returns:
+            摘要字典，或解析失败时返回 None
+        """
+        path = Path(file_path)
+        ext = path.suffix.lower()
+        lines = content.splitlines()
+        total_lines = len(lines)
+        
+        summary: Dict[str, Any] = {
+            "lines": total_lines,
+            "size": len(content),
+        }
+        
+        # Python 文件：提取类、函数、import
+        if ext == ".py":
+            try:
+                tree = ast.parse(content)
+                classes = []
+                functions = []
+                imports = []
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.ClassDef):
+                        methods = [n.name for n in node.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+                        classes.append({"name": node.name, "methods": methods[:8]})
+                    elif isinstance(node, ast.FunctionDef) and not any(
+                        isinstance(p, ast.ClassDef) and node.lineno > p.lineno and node.end_lineno < p.end_lineno
+                        for p in ast.walk(tree) if isinstance(p, ast.ClassDef)
+                    ):
+                        functions.append(node.name)
+                    elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                        for alias in node.names:
+                            imports.append(alias.name)
+                if classes:
+                    summary["classes"] = classes[:10]
+                if functions:
+                    summary["functions"] = functions[:15]
+                if imports:
+                    summary["imports"] = imports[:10]
+            except SyntaxError:
+                pass  # 语法错误时回退到正则提取
+            except Exception:
+                pass
+        
+        # JS/TS：正则提取 class/function/export/import
+        elif ext in (".js", ".ts", ".jsx", ".tsx"):
+            class_pattern = re.compile(r"(?:export\s+)?(?:class|interface)\s+(\w+)")
+            func_pattern = re.compile(r"(?:export\s+)?(?:function|const|let|var)\s+(\w+)")
+            import_pattern = re.compile(r"import\s+.*?from\s+['\"]([^'\"]+)['\"]")
+            classes = [m.group(1) for m in class_pattern.finditer(content)]
+            functions = [m.group(1) for m in func_pattern.finditer(content)]
+            imports = [m.group(1) for m in import_pattern.finditer(content)]
+            if classes:
+                summary["classes"] = classes[:10]
+            if functions:
+                summary["functions"] = functions[:15]
+            if imports:
+                summary["imports"] = imports[:10]
+        
+        # JSON：提取顶层 key
+        elif ext == ".json":
+            try:
+                import json
+                data = json.loads(content)
+                if isinstance(data, dict):
+                    summary["keys"] = list(data.keys())[:15]
+            except Exception:
+                pass
+        
+        # YAML：提取顶层 key
+        elif ext in (".yaml", ".yml"):
+            try:
+                top_keys = []
+                for line in lines:
+                    stripped = line.strip()
+                    if stripped and not stripped.startswith("#") and ":" in stripped:
+                        key = stripped.split(":")[0].strip()
+                        if key and not key.startswith("-"):
+                            top_keys.append(key)
+                if top_keys:
+                    summary["keys"] = top_keys[:15]
+            except Exception:
+                pass
+        
+        # 所有文件都提取 shebang（如果有）
+        if lines and lines[0].startswith("#!/"):
+            summary["shebang"] = lines[0].strip()
+        
+        # 如果摘要为空（只有 lines/size），返回 None 表示无需缓存摘要
+        if len(summary) <= 2:
+            return None
+        return summary
+
+    def get_file_summary(self, file_path: str) -> Optional[str]:
+        """
+        获取文件语义摘要的格式化文本（供模型查询）
+        
+        Returns:
+            格式化摘要文本，文件未缓存或无摘要时返回 None
+        """
+        key = self._get_file_key(file_path)
+        with self._lock:
+            if key not in self._cache:
+                return None
+            cached = self._cache[key]
+            if not cached.summary:
+                return None
+            
+            path = Path(file_path)
+            parts = [f"文件: {path.name} ({cached.summary.get('lines', 0)} 行)"]
+            
+            if "classes" in cached.summary:
+                for cls in cached.summary["classes"]:
+                    methods_str = ", ".join(cls.get("methods", [])) if cls.get("methods") else ""
+                    if methods_str:
+                        parts.append(f"  class {cls['name']}: {methods_str}")
+                    else:
+                        parts.append(f"  class {cls['name']}")
+            
+            if "functions" in cached.summary:
+                funcs = cached.summary["functions"]
+                parts.append(f"  函数: {', '.join(funcs)}")
+            
+            if "imports" in cached.summary:
+                imps = cached.summary["imports"]
+                parts.append(f"  import: {', '.join(imps)}")
+            
+            if "keys" in cached.summary:
+                keys = cached.summary["keys"]
+                parts.append(f"  顶层键: {', '.join(keys)}")
+            
+            if "shebang" in cached.summary:
+                parts.append(f"  shebang: {cached.summary['shebang']}")
+            
+            return "\n".join(parts)
 
 
 # 全局缓存管理器实例

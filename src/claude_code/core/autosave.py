@@ -12,7 +12,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 
 # 自动保存间隔（对话轮数）
-AUTOSAVE_INTERVAL = 5
+AUTOSAVE_INTERVAL = 20
 
 # 自动保存文件路径
 AUTOSAVE_DIR = "data/sessions"
@@ -103,10 +103,13 @@ def save_autosave(
             done = sum(1 for t in todos if t.get("status") in ("completed", "failed"))
             data["todo_progress"] = f"{done}/{len(todos)}"
 
+        # 防 surrogate 字符：先 dumps 再 encode/decode 替换非法码点
+        json_str = json.dumps(data, ensure_ascii=False, indent=2)
+        json_str = json_str.encode('utf-8', errors='replace').decode('utf-8')
         with open(path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.write(json_str)
         return True
-    except (IOError, OSError):
+    except (IOError, OSError, UnicodeEncodeError, UnicodeDecodeError, ValueError):
         return False
 
 

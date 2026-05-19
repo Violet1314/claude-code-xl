@@ -1,63 +1,67 @@
-"""工具反馈构建 - 将工具执行结果转换为模型可理解的消息格式
+"""工具反馈构建 - 将工具执行结果转换为原生 tool role 消息
 
-从 app.py 拆分出的模块，职责：
-1. 构建 XML 格式的工具反馈消息
-2. 压缩过大的工具输出（减少历史 Token 膨胀）
+v2.8.35 重构：
+- 改用原生 tool role 消息替代 user+XML 格式
+- 每个工具结果独立一条 tool message，带 tool_call_id
+- 模型可精确关联自己的 tool_call 与对应结果，多轮工具调用时不再混淆
 """
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 
-def build_tool_feedback(report) -> Optional[str]:
+def build_tool_feedback(report) -> Optional[List[Dict[str, str]]]:
     """
-    构建工具执行反馈消息
+    构建工具执行反馈消息（原生 tool role 格式）
+
+    每个工具结果独立一条消息，通过 tool_call_id 与模型的 tool_call 关联。
+    这让模型在多轮工具调用中能精确区分用户意图与工具反馈。
 
     Args:
         report: ExecutionReport 执行报告
 
     Returns:
-        反馈消息文本，无结果时返回 None
+        工具结果消息列表，每项包含 tool_call_id 和 content；
+        无结果时返回 None
     """
     if report.total == 0:
         return None
 
-    lines = ["<tool_results>"]
-
-    # 如果有用户中断，添加特殊标记
-    if report.has_interrupted:
-        lines.append("<system_message type=\"user_interrupt\">")
-        lines.append("用户按下 CTRL+C 中断了正在执行的操作。")
-        lines.append("这表示用户希望停止当前任务，不要再继续尝试。")
-        lines.append("请向用户确认是否需要继续其他工作，或者直接等待用户的新指令。")
-        lines.append("</system_message>")
+    results = []
+    has_interrupt = report.has_interrupted
 
     for result in report.results:
+        # 获取 tool_call_id（API 原生返回的调用 ID）
+        tool_call_id = result.tool_call.id if result.tool_call.id else f"tc_{id(result.tool_call)}"
+
         if result.skipped:
-            lines.append(f"<result tool=\"{result.tool_call.name}\" status=\"skipped\">")
             if result.permission_denied:
-                lines.append("权限被拒绝，此操作需要用户明确授权")
+                content = "权限被拒绝，此操作需要用户明确授权"
             else:
-                lines.append("用户主动取消执行")
+                content = "用户主动取消执行"
         elif result.interrupted:
-            # 用户中断：使用特殊状态，让模型理解这不是"失败"
-            lines.append(f"<result tool=\"{result.tool_call.name}\" status=\"interrupted\">")
-            lines.append("用户按下 CTRL+C 中断了此操作")
+            content = (
+                "用户按下 CTRL+C 中断了此操作。"
+                "这表示用户希望停止当前任务，不要再继续尝试。"
+            )
         elif result.success:
-            lines.append(f"<result tool=\"{result.tool_call.name}\" status=\"success\">")
             # 压缩大结果
-            output = compress_tool_output(
+            content = compress_tool_output(
                 result.output,
                 result.tool_call.name,
                 result.tool_call.parameters
             )
-            lines.append(output)
         else:
-            lines.append(f"<result tool=\"{result.tool_call.name}\" status=\"error\">")
-            lines.append(result.error or "执行失败")
-        lines.append("</result>")
+            content = result.error or "执行失败"
 
-    lines.append("</tool_results>")
+        # 如果有全局中断且这是第一条结果，附加中断上下文
+        if has_interrupt and not results:
+            content = f"[系统提示：用户中断了部分操作，请确认是否继续]\n{content}"
 
-    return "\n".join(lines)
+        results.append({
+            "tool_call_id": tool_call_id,
+            "content": content,
+        })
+
+    return results if results else None
 
 
 def compress_tool_output(

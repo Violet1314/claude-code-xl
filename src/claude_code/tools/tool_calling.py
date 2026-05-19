@@ -81,7 +81,7 @@ class ToolCallingManager:
             except json.JSONDecodeError:
                 parameters = {}
 
-            result.append(ToolCall(name=name, parameters=parameters))
+            result.append(ToolCall(name=name, parameters=parameters, id=tc.get("id", "")))
 
         return result
 

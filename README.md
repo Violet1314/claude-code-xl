@@ -2,7 +2,7 @@
 
 仿照官方 Claude Code 风格构建的 CLI AI 编程助手，支持 AI 驱动的文件操作和命令执行。
 
-**版本：v2.8.34**
+**版本：v2.8.36**
 
 ## 功能特性
 
@@ -15,9 +15,11 @@
 
 ### 智能优化
 *   **Token 优化** - tiktoken 精确估算 + 文件缓存系统，减少重复传输
+*   **语义摘要** - 缓存文件时自动提取结构化摘要（类名、函数、import），长对话可快速查询文件概览
 *   **版本隔离** - 写入后版本递增，新版本计数器重置，避免误拦截
 *   **智能防死循环** - 连续 3 次同质错误自动熔断，80轮/50工具上限
 *   **上下文优化** - 需求锚定 + 滑动窗口 + 工具输出摘要 + assistant差异化截断 + token快速判断
+*   **长对话防幻觉** - 上下文使用 ≥70% 时自动提醒模型先 Read 确认，不依赖模糊记忆
 
 ### 安全与权限
 *   **统一路径管理** - PathManager 统一所有工具路径解析，`/cd` 切换目录，`/pwd` 查看状态
@@ -27,7 +29,7 @@
 *   **路径范围检查** - Bash 文件操作检测是否在项目目录外
 
 ### 交互体验
-*   **计划模式** - `/plan <任务>` 自主规划并逐步执行；`/plan status` 查看状态；`/plan stop` 主动退出并展示未完成摘要；单任务进行约束 + Unicode 进度面板 + 完成/熔断总结
+*   **计划模式** - `/plan <任务>` 自主规划并逐步执行；`/plan status` 查看状态；`/plan stop` 主动退出并展示未完成摘要；单任务进行约束（WIP=1）+ 任务暂停回退（in_progress→pending） + Unicode 进度面板 + 完成/熔断总结
 *   **命令隐藏** - 低频命令（如 `/tools`）设为 hidden，不在帮助和补全中显示但仍可执行
 *   **CTRL+C 中断** - 单击中断当前操作，双击退出程序
 *   **主动交互** - AI 可向用户询问选择，澄清需求
@@ -239,49 +241,47 @@ claude-code/
 | Glob | ◎ | Yes | No | 文件名搜索（≤100结果） |
 | AskUserQuestion | ◈ | Yes | No | 向用户询问 |
 | TodoCreate | ● | No | No | 创建任务计划（计划模式，超限/空项会提示） |
-| TodoUpdate | ● | No | No | 更新任务状态（计划模式，严格状态机 + 单 in_progress 约束） |
+| TodoUpdate | ● | No | No | 更新任务状态（计划模式，严格状态机 + 单 in_progress 约束 + 支持暂停回退） |
 | TodoList | ● | Yes | No | 查看当前计划与进度（计划模式） |
 | ProjectContext | ◇ | Yes | No | 项目结构感知（目录扫描+类型识别+符号索引+相关性检索） |
 
 ## 更新日志
 
+### v2.8.36 (2026-05-19)
+**长对话质量优化：语义摘要 + 防幻觉提醒 + Edit 新鲜度校验 + autosave 崩溃修复**
+*   ✅ 文件内容语义摘要：`FileCacheManager` 对 Python/JS/TS/JSON/YAML 提取结构化摘要（类名、函数、import、顶层键），长对话可快速查询文件概览
+*   ✅ 长对话防幻觉提醒：上下文窗口使用 ≥70% 时自动注入 user 角色提醒，建议先 Read 确认
+*   ✅ Edit 缓存新鲜度校验：执行前检查文件是否已缓存/当前版本是否被读取过，未读则附加提示建议先 Read
+*   ✅ autosave 崩溃修复：修复 API 响应含 surrogate 字符时编码崩溃；异常捕获扩展
+*   ✅ 自动保存间隔调整：从每 5 轮调整为每 20 轮
+*   ✅ 全量测试通过：205 passed
+
+### v2.8.35 (2025-05-06)
+**API 接入体验优化：原生 tool role + 路径去重 + description 精简 + 变更确认上下文 + 错误增强 + 策略引导 + 增量提醒 + 缓存新鲜度**
+*   ✅ 工具反馈改用原生 tool role：`build_tool_feedback()` 从 XML+user role 改为原生 tool role 消息列表，每条带 `tool_call_id`，模型可精确关联 tool_call 与结果
+*   ✅ 旧 XML 兼容代码清理：移除 `_replay_legacy_tool_results`、`_summarize_tool_results` 及相关检测分支
+*   ✅ 路径规则去重：移除 6 个工具 description 和参数 schema 中的重复路径规则，统一收敛至 system prompt + PathManager
+*   ✅ 工具 description 精简：行为指引移至 system prompt 的 **工具使用规范** 段，description 只保留功能说明
+*   ✅ Edit 返回变更确认上下文：精确匹配成功后附加修改后文件上下文（前后各3行），无需额外 Read
+*   ✅ Write 返回首尾摘要：短文件完整显示，长文件首10+尾5行，一次调用即可确认结果
+*   ✅ Bash 错误增强：失败时附加 exit code + 常见原因提示（127=命令未找到、pip/pytest/git 特定提示）
+*   ✅ 工具组合策略引导：system prompt 新增 **工具组合策略** 段（5 条最佳实践）
+*   ✅ 计划模式提醒增量优化：首轮注入完整规则，后续只注入增量进度，每轮节省 ~200 token
+*   ✅ Read 缓存新鲜度提示：缓存命中时附加"如 Edit 匹配失败，请重新 Read"提示
+*   ✅ Conversation 增强：Message 新增 `tool_call_id`/`tool_calls` 字段；新增 `add_tool_message()` 等方法
+*   ✅ Todo 状态机回退：新增 `in_progress → pending` 合法转换，任务暂无法推进时可暂停并释放进行中名额
+*   ✅ 全量测试通过：205 passed
+
 ### v2.8.34 (2025-05-05)
 **功能性增强：版本统一 + Token精确化 + 统计修正 + ProjectContext增强 + Bash体验 + 崩溃恢复 + 诊断命令**
-*   ✅ 版本号统一：创建 `__version__.py` 单一来源，`defaults.py`/`pyproject.toml`/`__init__.py` 统一引用，消除版本号不一致
+*   ✅ 版本号统一：创建 `__version__.py` 单一来源，`defaults.py`/`pyproject.toml`/`__init__.py` 统一引用
 *   ✅ Token 估算精确化：集成 tiktoken 库，主流模型精确计数；不可用时自动降级到字符估算
-*   ✅ 统计累加逻辑修正：`stats.py` 新增 `accumulated_input/output` 字段，多轮 API 调用 token 不再丢失
-*   ✅ ProjectContext 双重增强：新增 `query` 参数按关键词检索相关文件/符号；新增 JS/TS 符号索引
-*   ✅ Bash 体验全面提升：Unix→PowerShell 转换建议；新增 `/last-output`（别名 `/lo`）查看完整 Bash 输出
+*   ✅ 统计累加逻辑修正：`stats.py` 新增 `accumulated_input/output` 字段
+*   ✅ ProjectContext 双重增强：新增 `query` 参数按关键词检索；新增 JS/TS 符号索引
+*   ✅ Bash 体验全面提升：Unix→PowerShell 转换建议；新增 `/last-output`（别名 `/lo`）
 *   ✅ 会话崩溃自动恢复：每 5 轮自动保存检查点，启动时检测并提示恢复
-*   ✅ `/doctor` 诊断命令：一键检查 Python 版本、依赖、API 连接、磁盘空间等 12 项
+*   ✅ `/doctor` 诊断命令：一键检查 12 项
 *   ✅ 全量测试通过：199 passed
-
-### v2.8.33 (2025-05-03)
-**编辑容错与效率优化：模糊匹配 + 项目记忆 + 提示词精简 + 动态输出 + Grep上下文 + app.py拆分**
-*   ✅ Edit 模糊匹配容错：精确匹配失败时自动尝试容错匹配（行尾空白归一化、换行符统一、缩进 tab→空格），匹配成功标注 `[fuzzy]`，减少 50%+ 重试
-*   ✅ 项目记忆文件：启动时自动加载 `.claude/CLAUDE.md`，`/cd` 切换目录时重载
-*   ✅ 计划模式提示词优化：初始规则精简为 3 条核心，每轮提醒去掉完整任务列表，节省 ~300 Token/轮
-*   ✅ Bash 输出限制动态化：测试/构建命令自动 10000 字符，普通 5000，新增 `max_output_length` 参数
-*   ✅ Grep 上下文参数：新增 `context` 参数，显示匹配行前后 N 行，减少额外 Read 操作
-*   ✅ app.py 拆分：提取 `core/tool_feedback.py`（工具反馈构建与压缩），app.py 1319→1222 行
-*   ✅ 进度显示优化：成功无输出时显示 `✓ OK` 而非 `(无输出)`
-*   ✅ 新增测试：5 个 Edit 模糊匹配 + 4 个项目记忆，总测试 190→199
-*   ✅ 全量测试通过：199 passed
-
-### v2.8.32 (2025-05-02)
-**功能增强与文档同步：新增 ProjectContext + dataclass 重构 + safe_markup 模块**
-*   ✅ 新增 ProjectContext 工具：项目结构感知，自动扫描目录、识别项目类型、索引 Python 符号
-*   ✅ defaults.py 重构为 dataclass 分组：`FileDefaults`/`APIDefaults`/`ConversationDefaults`/`UIDefaults`/`ToolDefaults`/`PlanDefaults`
-*   ✅ 新增 UIDefaults：`MIN_WIDTH=40`、`MAX_WIDTH=120`
-*   ✅ 新增 safe_markup 模块：`safe_print()`/`safe_markup()`/`escape_markup()`/`validate_markup()`，根治 MarkupError 崩溃
-*   ✅ 版本号格式增强：`VERSION` 包含作者信息 `"2.8.31 | Author: XieLong"`
-*   ✅ LOGO_GRADIENT 修正：6级橙色渐变 → 1级樱花粉 `#E87491`
-*   ✅ 新增 thinking 图标：`⠋`
-*   ✅ TodoCreate 实例替换优化：移除 `clear()` 调用，直接替换全局实例
-*   ✅ TodoUpdate 描述扩充：包含详细状态转换规则和禁止的转换说明
-*   ✅ app.py 失败检测结构化：使用 `report` 结构化数据判断失败轮次
-*   ✅ 内置工具总数：10 → 11（含 ProjectContext）
-*   ✅ 全量测试通过：190 passed
 
 ---
 

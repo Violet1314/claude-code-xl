@@ -21,12 +21,13 @@ class TodoItem:
     # pending → in_progress ✓ 开始任务
     # in_progress → completed ✓ 完成任务
     # in_progress → failed ✓ 任务失败
+    # in_progress → pending ✓ 任务暂停（暂无法推进，释放进行中名额）
     # 其他转换 ✗ 禁止
     VALID_TRANSITIONS = {
-        "pending": ("in_progress",),           # pending 只能转到 in_progress
-        "in_progress": ("completed", "failed"), # in_progress 可以完成或失败
-        "completed": (),                        # 已完成不可变更
-        "failed": (),                           # 已失败不可变更
+        "pending": ("in_progress",),                          # pending 只能转到 in_progress
+        "in_progress": ("completed", "failed", "pending"),    # in_progress 可以完成、失败或暂停
+        "completed": (),                                      # 已完成不可变更
+        "failed": (),                                         # 已失败不可变更
     }
 
     def __post_init__(self):
@@ -113,9 +114,10 @@ class TodoList:
             active = self.get_in_progress_item()
             if active is not None and active.id != item_id:
                 return False, (
-                    f"已有任务 {active.id} 正在进行中，请先调用 "
+                    f"已有任务 {active.id} 正在进行中，请先结束当前任务："
                     f"TodoUpdate(id=\"{active.id}\", status=\"completed\") 或 "
-                    f"TodoUpdate(id=\"{active.id}\", status=\"failed\") 结束当前任务"
+                    f"TodoUpdate(id=\"{active.id}\", status=\"failed\") 或 "
+                    f"TodoUpdate(id=\"{active.id}\", status=\"pending\") 暂停后换任务"
                 )
 
         # 状态机验证：检查转换是否合法
