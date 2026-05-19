@@ -2,7 +2,7 @@
 
 仿照官方 Claude Code 风格构建的 CLI AI 编程助手，支持 AI 驱动的文件操作和命令执行。
 
-**版本：v2.8.36**
+**版本：v2.8.37**
 
 ## 功能特性
 
@@ -240,12 +240,24 @@ claude-code/
 | Grep | ⌕ | Yes | No | 正则搜索（≤30匹配） |
 | Glob | ◎ | Yes | No | 文件名搜索（≤100结果） |
 | AskUserQuestion | ◈ | Yes | No | 向用户询问 |
-| TodoCreate | ● | No | No | 创建任务计划（计划模式，超限/空项会提示） |
+| TodoCreate | ● | No | No | 创建任务计划（计划模式，支持 depends_on 依赖关系） |
 | TodoUpdate | ● | No | No | 更新任务状态（计划模式，严格状态机 + 单 in_progress 约束 + 支持暂停回退） |
 | TodoList | ● | Yes | No | 查看当前计划与进度（计划模式） |
 | ProjectContext | ◇ | Yes | No | 项目结构感知（目录扫描+类型识别+符号索引+相关性检索） |
 
 ## 更新日志
+
+### v2.8.37 (2025-05-08)
+**智能优化与架构升级：TodoList统一管理 + 缓存摘要增强 + 上下文自适应调参 + 计划模式依赖 + 工具并行执行 + 对话摘要 + Token预算**
+*   ✅ TodoList 注册到 ToolContext：消除模块级全局变量 `_todo_list`，统一生命周期管理
+*   ✅ 缓存摘要增强 — Python 函数签名：AST 提取函数签名（参数名+类型注解+返回值），类方法同样提取
+*   ✅ 缓存摘要增强 — JSON 值类型：提取 `key_types`（顶层键的值类型）和 `item_keys`（数组元素键）
+*   ✅ 上下文自适应调参：根据使用率动态调整锚定和窗口（>90%极限1+4、80-90%基准3+10、<80%放宽3+20）
+*   ✅ 计划模式依赖关系：`TodoItem` 新增 `depends_on` 字段，启动任务前校验前置依赖已完成
+*   ✅ 工具并行执行：只读工具 ThreadPoolExecutor 并行（最大4线程），写操作顺序执行
+*   ✅ 对话摘要生成：上下文>80%时调用API生成摘要替换中间消息
+*   ✅ Token 预算管理：注入使用率提醒（50%/70%/85%三级），让模型自主精简输出
+*   ✅ 全量测试通过：205 passed
 
 ### v2.8.36 (2025-05-07)
 **长对话质量优化：语义摘要 + 防幻觉提醒 + Edit 新鲜度校验 + autosave 崩溃修复**
@@ -260,28 +272,18 @@ claude-code/
 **API 接入体验优化：原生 tool role + 路径去重 + description 精简 + 变更确认上下文 + 错误增强 + 策略引导 + 增量提醒 + 缓存新鲜度**
 *   ✅ 工具反馈改用原生 tool role：`build_tool_feedback()` 从 XML+user role 改为原生 tool role 消息列表，每条带 `tool_call_id`，模型可精确关联 tool_call 与结果
 *   ✅ 旧 XML 兼容代码清理：移除 `_replay_legacy_tool_results`、`_summarize_tool_results` 及相关检测分支
-*   ✅ 路径规则去重：移除 6 个工具 description 和参数 schema 中的重复路径规则，统一收敛至 system prompt + PathManager
-*   ✅ 工具 description 精简：行为指引移至 system prompt 的 **工具使用规范** 段，description 只保留功能说明
-*   ✅ Edit 返回变更确认上下文：精确匹配成功后附加修改后文件上下文（前后各3行），无需额外 Read
-*   ✅ Write 返回首尾摘要：短文件完整显示，长文件首10+尾5行，一次调用即可确认结果
-*   ✅ Bash 错误增强：失败时附加 exit code + 常见原因提示（127=命令未找到、pip/pytest/git 特定提示）
-*   ✅ 工具组合策略引导：system prompt 新增 **工具组合策略** 段（5 条最佳实践）
-*   ✅ 计划模式提醒增量优化：首轮注入完整规则，后续只注入增量进度，每轮节省 ~200 token
+*   ✅ 路径规则去重：移除 6 个工具重复的 `操作根目录` 描述，统一由 system prompt 注入
+*   ✅ 工具 description 精简：行为指引从工具 description 移至 system prompt 的 **工具使用规范** 段
+*   ✅ Edit 返回变更确认上下文：精确匹配成功后附加修改后文件上下文（前后各3行）
+*   ✅ Write 返回首尾摘要：写入成功后返回文件内容摘要
+*   ✅ Bash 错误增强可操作性：命令失败时附加 exit code + 常见原因提示
+*   ✅ Edit 错误增强可操作性：精确匹配失败时附加文件行数和行号模式建议
+*   ✅ 工具组合策略引导：system prompt 新增 **工具组合策略** 段
+*   ✅ 计划模式提醒增量优化：首轮完整规则，后续只注入增量进度
 *   ✅ Read 缓存新鲜度提示：缓存命中时附加"如 Edit 匹配失败，请重新 Read"提示
 *   ✅ Conversation 增强：Message 新增 `tool_call_id`/`tool_calls` 字段；新增 `add_tool_message()` 等方法
 *   ✅ Todo 状态机回退：新增 `in_progress → pending` 合法转换，任务暂无法推进时可暂停并释放进行中名额
 *   ✅ 全量测试通过：205 passed
-
-### v2.8.34 (2025-05-05)
-**功能性增强：版本统一 + Token精确化 + 统计修正 + ProjectContext增强 + Bash体验 + 崩溃恢复 + 诊断命令**
-*   ✅ 版本号统一：创建 `__version__.py` 单一来源，`defaults.py`/`pyproject.toml`/`__init__.py` 统一引用
-*   ✅ Token 估算精确化：集成 tiktoken 库，主流模型精确计数；不可用时自动降级到字符估算
-*   ✅ 统计累加逻辑修正：`stats.py` 新增 `accumulated_input/output` 字段
-*   ✅ ProjectContext 双重增强：新增 `query` 参数按关键词检索；新增 JS/TS 符号索引
-*   ✅ Bash 体验全面提升：Unix→PowerShell 转换建议；新增 `/last-output`（别名 `/lo`）
-*   ✅ 会话崩溃自动恢复：每 5 轮自动保存检查点，启动时检测并提示恢复
-*   ✅ `/doctor` 诊断命令：一键检查 12 项
-*   ✅ 全量测试通过：199 passed
 
 ---
 

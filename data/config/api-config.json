@@ -1,6 +1,6 @@
 {
-  "base_url": "https://xxxxxxxxxxxxxxxxx/v1",
-  "api_key": "sk-xxxxxxxxxxxxxxxxx",
+  "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
+  "api_key": "f9a9d7677d8e4ba0a14ef6b9e62a79a7.ZD0ssK8iJmCsNGyD",
   "task_models": {
   "summary": "qwen3.6-plus"
   },

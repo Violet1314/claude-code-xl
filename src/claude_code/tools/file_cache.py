@@ -288,6 +288,47 @@ class FileCacheManager:
     # 语义摘要 (v2.8.36) - 供长对话中模型查询文件概览
     # ============================================================
 
+    @staticmethod
+    def _format_python_signature(node) -> Optional[str]:
+        """将 Python AST 函数节点格式化为签名字符串
+        
+        例如：def process(data, config=None) -> str
+        """
+        try:
+            args = []
+            # 普通参数
+            for arg in node.args.args:
+                name = arg.arg
+                if arg.annotation:
+                    ann = ast.unparse(arg.annotation) if hasattr(ast, 'unparse') else ""
+                    args.append(f"{name}: {ann}" if ann else name)
+                else:
+                    args.append(name)
+            # *args
+            if node.args.vararg:
+                args.append(f"*{node.args.vararg.arg}")
+            # keyword-only 参数
+            for arg in node.args.kwonlyargs:
+                name = arg.arg
+                if arg.annotation:
+                    ann = ast.unparse(arg.annotation) if hasattr(ast, 'unparse') else ""
+                    args.append(f"{name}: {ann}" if ann else name)
+                else:
+                    args.append(name)
+            # **kwargs
+            if node.args.kwarg:
+                args.append(f"**{node.args.kwarg.arg}")
+            # 默认值不展开（太长），仅标注参数名和类型注解
+            sig = f"{node.name}({', '.join(args)})"
+            # 返回值注解
+            if node.returns:
+                ret = ast.unparse(node.returns) if hasattr(ast, 'unparse') else ""
+                if ret:
+                    sig = f"{sig} -> {ret}"
+            return sig
+        except Exception:
+            return node.name if hasattr(node, 'name') else None
+
     def _build_summary(self, content: str, file_path: str) -> Optional[Dict[str, Any]]:
         """
         构建文件语义摘要（轻量级，不依赖外部库）
@@ -315,22 +356,30 @@ class FileCacheManager:
             "size": len(content),
         }
         
-        # Python 文件：提取类、函数、import
+        # Python 文件：提取类、函数签名、import
         if ext == ".py":
             try:
                 tree = ast.parse(content)
                 classes = []
                 functions = []
                 imports = []
+                # 收集类定义的行号范围，用于判断顶层函数
+                class_ranges = []
                 for node in ast.walk(tree):
                     if isinstance(node, ast.ClassDef):
-                        methods = [n.name for n in node.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+                        class_ranges.append((node.lineno, node.end_lineno or node.lineno))
+                for node in ast.iter_child_nodes(tree):
+                    if isinstance(node, ast.ClassDef):
+                        methods = []
+                        for n in node.body:
+                            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                                sig = self._format_python_signature(n)
+                                methods.append(sig if sig else n.name)
                         classes.append({"name": node.name, "methods": methods[:8]})
-                    elif isinstance(node, ast.FunctionDef) and not any(
-                        isinstance(p, ast.ClassDef) and node.lineno > p.lineno and node.end_lineno < p.end_lineno
-                        for p in ast.walk(tree) if isinstance(p, ast.ClassDef)
-                    ):
-                        functions.append(node.name)
+                    elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        # 仅收集顶层函数（不在类内部）
+                        sig = self._format_python_signature(node)
+                        functions.append(sig if sig else node.name)
                     elif isinstance(node, (ast.Import, ast.ImportFrom)):
                         for alias in node.names:
                             imports.append(alias.name)
@@ -341,11 +390,9 @@ class FileCacheManager:
                 if imports:
                     summary["imports"] = imports[:10]
             except SyntaxError:
-                pass  # 语法错误时回退到正则提取
-            except Exception:
                 pass
         
-        # JS/TS：正则提取 class/function/export/import
+        # JS/TS：提取 class/function/export
         elif ext in (".js", ".ts", ".jsx", ".tsx"):
             class_pattern = re.compile(r"(?:export\s+)?(?:class|interface)\s+(\w+)")
             func_pattern = re.compile(r"(?:export\s+)?(?:function|const|let|var)\s+(\w+)")
@@ -360,13 +407,24 @@ class FileCacheManager:
             if imports:
                 summary["imports"] = imports[:10]
         
-        # JSON：提取顶层 key
+        # JSON：提取顶层 key 及其值的类型
         elif ext == ".json":
             try:
                 import json
                 data = json.loads(content)
                 if isinstance(data, dict):
-                    summary["keys"] = list(data.keys())[:15]
+                    key_types = {}
+                    for k, v in list(data.items())[:15]:
+                        key_types[k] = type(v).__name__
+                    summary["keys"] = list(key_types.keys())
+                    summary["key_types"] = key_types
+                elif isinstance(data, list) and data:
+                    summary["type"] = "array"
+                    summary["length"] = len(data)
+                    # 采样第一个元素的类型
+                    first = data[0]
+                    if isinstance(first, dict):
+                        summary["item_keys"] = list(first.keys())[:10]
             except Exception:
                 pass
         
@@ -422,15 +480,29 @@ class FileCacheManager:
             
             if "functions" in cached.summary:
                 funcs = cached.summary["functions"]
-                parts.append(f"  函数: {', '.join(funcs)}")
+                # 函数签名可能较长，每行一个
+                if any("(" in f for f in funcs):
+                    parts.append("  函数:")
+                    for f in funcs:
+                        parts.append(f"    def {f}")
+                else:
+                    parts.append(f"  函数: {', '.join(funcs)}")
             
             if "imports" in cached.summary:
                 imps = cached.summary["imports"]
                 parts.append(f"  import: {', '.join(imps)}")
             
-            if "keys" in cached.summary:
+            if "key_types" in cached.summary:
+                # JSON: 显示 key: type 格式
+                kt = cached.summary["key_types"]
+                type_strs = [f"{k}: {v}" for k, v in kt.items()]
+                parts.append(f"  顶层键: {', '.join(type_strs)}")
+            elif "keys" in cached.summary:
                 keys = cached.summary["keys"]
                 parts.append(f"  顶层键: {', '.join(keys)}")
+            
+            if "item_keys" in cached.summary:
+                parts.append(f"  数组元素键: {', '.join(cached.summary['item_keys'])}")
             
             if "shebang" in cached.summary:
                 parts.append(f"  shebang: {cached.summary['shebang']}")

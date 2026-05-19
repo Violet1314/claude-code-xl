@@ -24,6 +24,7 @@ from typing import Optional
 from .base import ToolRegistry
 from .file_cache import FileCacheManager
 from .command_safety import CommandSafetyChecker
+from claude_code.core.todo import TodoList
 
 
 class ToolContext:
@@ -43,6 +44,7 @@ class ToolContext:
         self._permission_manager = None
         self._tool_executor = None
         self._path_manager = None
+        self._todo_list: Optional[TodoList] = None
 
     @property
     def registry(self) -> ToolRegistry:
@@ -77,6 +79,17 @@ class ToolContext:
     def safety_checker(self, value: CommandSafetyChecker) -> None:
         self._safety_checker = value
 
+    @property
+    def todo_list(self) -> TodoList:
+        """全局 TodoList（计划模式核心数据）"""
+        if self._todo_list is None:
+            self._todo_list = TodoList()
+        return self._todo_list
+
+    @todo_list.setter
+    def todo_list(self, value: TodoList) -> None:
+        self._todo_list = value
+
     def register(self, name: str, instance: object) -> None:
         """注册单例到上下文（用于 App 初始化时统一注册）"""
         if name == "registry":
@@ -91,6 +104,8 @@ class ToolContext:
             self._tool_executor = instance
         elif name == "path_manager":
             self._path_manager = instance
+        elif name == "todo_list":
+            self._todo_list = instance
         else:
             setattr(self, f"_{name}", instance)
 
@@ -104,6 +119,7 @@ class ToolContext:
         self._permission_manager = None
         self._tool_executor = None
         self._path_manager = None
+        self._todo_list = None
 
     def reset(self) -> None:
         """重置所有单例（用于测试 teardown 或 App 重启）"""

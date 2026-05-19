@@ -40,12 +40,15 @@ class Message:
 class Conversation:
     """会话管理器"""
     
-    # 上下文优化参数
-    ANCHOR_USER_MSGS = 3        # 锚定前 N 条用户消息（需求锚点）
-    RECENT_WINDOW = 10          # 保留最近 K 条消息（滑动窗口）
-    TOOL_SUMMARY_THRESHOLD = 1500  # 工具输出超过此长度则摘要化
-    TOOL_SUMMARY_MAX = 200      # 摘要化后保留的最大字符数
-    ASSISTANT_SUMMARY_MAX = 500 # assistant 消息截断后保留的最大字符数
+    # 上下文优化参数（基准值，自适应会在此基础上调整）
+    ANCHOR_USER_MSGS_BASE = 3        # 锚定前 N 条用户消息（需求锚点）基准值
+    ANCHOR_USER_MSGS_MIN = 1         # 锚定最小值（极限压缩时仍保留1条）
+    RECENT_WINDOW_BASE = 10          # 保留最近 K 条消息（滑动窗口）基准值
+    RECENT_WINDOW_MIN = 4            # 窗口最小值
+    RECENT_WINDOW_MAX = 20           # 窗口最大值（空间充足时放宽）
+    TOOL_SUMMARY_THRESHOLD = 1500    # 工具输出超过此长度则摘要化
+    TOOL_SUMMARY_MAX = 200           # 摘要化后保留的最大字符数
+    ASSISTANT_SUMMARY_MAX = 500      # assistant 消息截断后保留的最大字符数
     
     def __init__(self, system_prompt: str = ""):
         """
@@ -153,8 +156,13 @@ class Conversation:
         
         # 快速判断：总 token 量远低于限制时，无需优化直接返回
         total_chat_tokens = sum(estimate_tokens(m.content) + 4 for m in chat_msgs)
-        if current_tokens + total_chat_tokens < max_tokens * 0.7:
+        usage_ratio = (current_tokens + total_chat_tokens) / max_tokens if max_tokens > 0 else 0
+        
+        if usage_ratio < 0.7:
             return system_msgs + [m.to_dict() for m in chat_msgs]
+        
+        # === 自适应调参：根据上下文使用率动态调整锚定和窗口 ===
+        anchor_n, window_k = self._adaptive_params(usage_ratio)
         
         # === 阶段 1：需求锚定 — 保留前 N 条用户消息 ===
         anchor_msgs = []
@@ -162,11 +170,11 @@ class Conversation:
         for msg in chat_msgs:
             if msg.role == "user":
                 user_count += 1
-                if user_count <= self.ANCHOR_USER_MSGS:
+                if user_count <= anchor_n:
                     anchor_msgs.append(msg)
                 else:
                     break
-            elif user_count > 0 and user_count <= self.ANCHOR_USER_MSGS:
+            elif user_count > 0 and user_count <= anchor_n:
                 # 锚定用户消息后的助手回复也保留（保持对话连贯性）
                 # 对 tool 大输出进行摘要化，防止锚定区域占用过多 token
                 if msg.role == "tool" and len(msg.content) > self.TOOL_SUMMARY_THRESHOLD:
@@ -177,14 +185,14 @@ class Conversation:
                     ))
                 else:
                     anchor_msgs.append(msg)
-            if user_count > self.ANCHOR_USER_MSGS:
+            if user_count > anchor_n:
                 break
         
         anchor_tokens = sum(estimate_tokens(m.content) + 4 for m in anchor_msgs)
         current_tokens += anchor_tokens
         
         # === 阶段 2：滑动窗口 — 保留最近 K 条消息 ===
-        recent_msgs = chat_msgs[-self.RECENT_WINDOW:] if len(chat_msgs) > self.RECENT_WINDOW else []
+        recent_msgs = chat_msgs[-window_k:] if len(chat_msgs) > window_k else []
         # 去掉与锚定重叠的部分
         if anchor_msgs and recent_msgs:
             anchor_end_idx = len(anchor_msgs) - 1  # 锚定区域在 chat_msgs 中的结束索引
@@ -247,6 +255,35 @@ class Conversation:
             )
         
         return result
+    
+    def _adaptive_params(self, usage_ratio: float) -> tuple:
+        """根据上下文使用率动态调整锚定数量和窗口大小
+        
+        策略：
+        - 使用率 < 80%：空间充足，放宽窗口（最大20），保持基准锚定
+        - 使用率 80-90%：正常模式，使用基准参数
+        - 使用率 > 90%：极限压缩，缩小窗口和锚定
+        
+        Args:
+            usage_ratio: 当前上下文使用率（0.0 ~ 1.0+）
+        
+        Returns:
+            (anchor_n, window_k) 锚定消息数和窗口大小
+        """
+        if usage_ratio >= 0.9:
+            # 极限压缩：最小锚定+最小窗口
+            anchor_n = self.ANCHOR_USER_MSGS_MIN
+            window_k = self.RECENT_WINDOW_MIN
+        elif usage_ratio >= 0.8:
+            # 正常优化：使用基准参数
+            anchor_n = self.ANCHOR_USER_MSGS_BASE
+            window_k = self.RECENT_WINDOW_BASE
+        else:
+            # 空间充足：放宽窗口，保持基准锚定
+            anchor_n = self.ANCHOR_USER_MSGS_BASE
+            window_k = self.RECENT_WINDOW_MAX
+        
+        return anchor_n, window_k
     
     def _compress_history_content(self, content: str, role: str = "") -> str:
         """
@@ -320,3 +357,107 @@ class Conversation:
     def estimate_tokens(self) -> int:
         """估算当前会话总 token 数"""
         return estimate_messages_tokens(self.get_messages())
+    
+    def generate_summary_messages(self) -> List[Dict[str, str]]:
+        """
+        生成用于摘要API调用的消息列表
+        
+        从中间轮次（锚定之后、窗口之前）提取需要摘要的内容，
+        构造一条请求消息，让模型对中间轮次生成摘要。
+        
+        Returns:
+            包含摘要请求的消息列表（用于发送给API）
+            如果中间轮次为空或内容太少，返回空列表
+        """
+        if not self._messages:
+            return []
+        
+        # 分离 system 和 chat
+        chat_msgs = self._messages
+        if self._messages[0].role == "system":
+            chat_msgs = self._messages[1:]
+        
+        if len(chat_msgs) < 10:
+            return []  # 消息太少，不需要摘要
+        
+        # 获取中间轮次（跳过前6条和后4条）
+        skip_head = 6
+        skip_tail = 4
+        if len(chat_msgs) <= skip_head + skip_tail:
+            return []
+        
+        middle = chat_msgs[skip_head:-skip_tail]
+        
+        # 提取中间轮次的对话内容（压缩过长的工具输出）
+        middle_text_parts = []
+        for msg in middle:
+            if msg.role == "tool":
+                # 工具结果：只保留前100字符摘要
+                snippet = msg.content[:100] + ("..." if len(msg.content) > 100 else "")
+                middle_text_parts.append(f"[工具结果] {snippet}")
+            elif msg.role == "assistant":
+                # 助手消息：只保留前200字符
+                snippet = msg.content[:200] + ("..." if len(msg.content) > 200 else "")
+                middle_text_parts.append(f"[助手] {snippet}")
+            elif msg.role == "user" and not msg.content.startswith("[计划模式") and not msg.content.startswith("[计划提醒") and not msg.content.startswith("[系统提醒"):
+                # 用户消息（排除计划提醒等系统消息）
+                snippet = msg.content[:200] + ("..." if len(msg.content) > 200 else "")
+                middle_text_parts.append(f"[用户] {snippet}")
+        
+        if not middle_text_parts:
+            return []
+        
+        middle_text = "\n".join(middle_text_parts)
+        if len(middle_text) < 200:
+            return []  # 内容太少不值得摘要
+        
+        # 构建摘要请求
+        summary_prompt = (
+            "请用简洁的中文总结以下对话片段的关键信息（包括：完成了什么操作、遇到了什么问题、做了什么决策）。"
+            "只输出摘要内容，不要输出其他解释。摘要控制在200字以内。\n\n"
+            f"--- 对话片段 ---\n{middle_text}"
+        )
+        
+        return [
+            {"role": "user", "content": summary_prompt}
+        ]
+    
+    def apply_summary(self, summary_text: str) -> None:
+        """
+        将生成的摘要应用到中间轮次
+        
+        将锚定区域和窗口之间的中间消息替换为一条摘要消息
+        
+        Args:
+            summary_text: 模型生成的摘要文本
+        """
+        if not self._messages or not summary_text.strip():
+            return
+        
+        chat_msgs = self._messages
+        system_msg = None
+        if self._messages[0].role == "system":
+            system_msg = self._messages[0]
+            chat_msgs = self._messages[1:]
+        
+        skip_head = 6
+        skip_tail = 4
+        
+        if len(chat_msgs) <= skip_head + skip_tail:
+            return
+        
+        # 重组：system + 前段 + 摘要 + 后段
+        head = chat_msgs[:skip_head]
+        tail = chat_msgs[-skip_tail:]
+        
+        summary_msg = Message(
+            role="user",
+            content=f"[对话摘要] 以下是对之前对话的摘要：{summary_text.strip()}"
+        )
+        
+        self._messages = []
+        if system_msg:
+            self._messages.append(system_msg)
+        self._messages.extend(head)
+        self._messages.append(summary_msg)
+        self._messages.extend(tail)

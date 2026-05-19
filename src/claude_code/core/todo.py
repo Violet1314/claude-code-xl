@@ -1,6 +1,6 @@
 """TodoList 数据模型 - 计划模式的核心数据结构"""
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 
 from claude_code.config.defaults import PLAN
 
@@ -12,6 +12,7 @@ class TodoItem:
     content: str                     # 任务描述
     status: str = "pending"          # pending | in_progress | completed | failed
     priority: str = "medium"         # high | medium | low
+    depends_on: List[str] = field(default_factory=list)  # 依赖的任务ID列表，如 ["t1", "t2"]
 
     # 合法状态值
     VALID_STATUSES = ("pending", "in_progress", "completed", "failed")
@@ -36,6 +37,9 @@ class TodoItem:
             raise ValueError(f"无效状态: {self.status}，合法值: {self.VALID_STATUSES}")
         if self.priority not in self.VALID_PRIORITIES:
             raise ValueError(f"无效优先级: {self.priority}，合法值: {self.VALID_PRIORITIES}")
+        # 确保 depends_on 是 list
+        if self.depends_on is None:
+            self.depends_on = []
 
     @property
     def is_done(self) -> bool:
@@ -63,13 +67,14 @@ class TodoList:
     # 增删改
     # ============================================================
 
-    def add_item(self, content: str, priority: str = "medium") -> Optional[TodoItem]:
+    def add_item(self, content: str, priority: str = "medium", depends_on: List[str] = None) -> Optional[TodoItem]:
         """
         添加任务项
 
         Args:
             content: 任务描述
             priority: 优先级
+            depends_on: 依赖的任务ID列表
 
         Returns:
             新建的 TodoItem，超出限制或内容为空时返回 None
@@ -86,13 +91,49 @@ class TodoList:
         next_num = len(self.items) + 1
         item_id = f"t{next_num}"
 
-        item = TodoItem(id=item_id, content=content.strip(), priority=priority)
+        # 校验依赖：引用的 ID 必须在当前列表中已存在
+        deps = depends_on or []
+        if deps:
+            valid_ids = {item.id for item in self.items}
+            deps = [d for d in deps if d in valid_ids]  # 忽略无效依赖
+
+        item = TodoItem(id=item_id, content=content.strip(), priority=priority, depends_on=deps)
         self.items.append(item)
         return item
 
+    def check_dependencies(self, item_id: str) -> Tuple[bool, str]:
+        """
+        检查任务的前置依赖是否已全部完成
+
+        Args:
+            item_id: 任务ID
+
+        Returns:
+            (依赖满足与否, 未完成的依赖任务列表描述)
+        """
+        target = self.get_item(item_id)
+        if target is None or not target.depends_on:
+            return True, ""
+
+        incomplete_deps = []
+        for dep_id in target.depends_on:
+            dep_item = self.get_item(dep_id)
+            if dep_item is None:
+                continue  # 不存在的依赖忽略
+            if not dep_item.is_done:
+                incomplete_deps.append(dep_item)
+
+        if incomplete_deps:
+            dep_str = ", ".join(f"{d.id}({d.status})" for d in incomplete_deps)
+            return False, (
+                f"任务 {item_id} 的前置依赖未完成：{dep_str}。"
+                f"请先完成依赖任务再开始此任务。"
+            )
+        return True, ""
+
     def update_status(self, item_id: str, status: str) -> tuple[bool, str]:
         """
-        更新任务状态（带状态机验证）
+        更新任务状态（带状态机验证 + 依赖检查）
 
         Args:
             item_id: 任务ID
@@ -119,6 +160,11 @@ class TodoList:
                     f"TodoUpdate(id=\"{active.id}\", status=\"failed\") 或 "
                     f"TodoUpdate(id=\"{active.id}\", status=\"pending\") 暂停后换任务"
                 )
+
+            # 依赖检查：开始任务前，前置依赖必须全部完成
+            deps_ok, deps_msg = self.check_dependencies(item_id)
+            if not deps_ok:
+                return False, deps_msg
 
         # 状态机验证：检查转换是否合法
         if status not in TodoItem.VALID_TRANSITIONS.get(target.status, ()):
@@ -152,7 +198,13 @@ class TodoList:
                 return item
         return None
     def get_next_pending(self) -> Optional[TodoItem]:
-        """获取下一个待执行的任务"""
+        """获取下一个待执行的任务（优先返回无依赖或依赖已满足的）"""
+        for item in self.items:
+            if item.status == "pending":
+                deps_ok, _ = self.check_dependencies(item.id)
+                if deps_ok:
+                    return item
+        # 没有依赖满足的，返回第一个 pending（兼容旧行为）
         for item in self.items:
             if item.status == "pending":
                 return item
@@ -172,7 +224,7 @@ class TodoList:
         从字典列表批量创建 TodoList
 
         Args:
-            items_data: 字典列表，每个字典包含 content 和可选的 priority
+            items_data: 字典列表，每个字典包含 content 和可选的 priority、depends_on
             max_items: 最大任务数，默认使用配置值
 
         Returns:
@@ -181,6 +233,13 @@ class TodoList:
         todo = cls()
         limit = max_items or PLAN.MAX_ITEMS
 
+        # 先收集所有合法 ID（按顺序 t1, t2, ...）
+        valid_ids = set()
+        for i, data in enumerate(items_data[:limit]):
+            content = data.get("content", "").strip()
+            if content:
+                valid_ids.add(f"t{i + 1}")
+
         for data in items_data:
             if len(todo.items) >= limit:
                 break
@@ -188,7 +247,11 @@ class TodoList:
             if not content:
                 continue  # 跳过空内容
             priority = data.get("priority", "medium")
-            todo.add_item(content=content, priority=priority)
+            depends_on = data.get("depends_on", [])
+            # 过滤无效依赖ID（引用不存在的任务）
+            if depends_on:
+                depends_on = [d for d in depends_on if d in valid_ids]
+            todo.add_item(content=content, priority=priority, depends_on=depends_on)
 
         return todo
 
@@ -252,7 +315,8 @@ class TodoList:
 
         lines = []
         for item in self.items:
-            lines.append(f"  {item.icon} {item.id}  {item.content}  [{item.status}]")
+            dep_str = f" ← {', '.join(item.depends_on)}" if item.depends_on else ""
+            lines.append(f"  {item.icon} {item.id}  {item.content}  [{item.status}]{dep_str}")
         return "\n".join(lines)
 
     def clear(self) -> None:

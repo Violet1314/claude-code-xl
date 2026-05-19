@@ -250,7 +250,12 @@ class ToolExecutor:
         interrupt_check: Optional[Callable[[], bool]] = None
     ) -> ExecutionReport:
         """
-        批量执行工具调用
+        批量执行工具调用（只读工具并行，写操作顺序执行）
+
+        策略：
+        - 只读工具（Read、Grep、Glob、ProjectContext、TodoList、AskUserQuestion）可并行
+        - 写操作工具（Write、Edit、Bash、TodoCreate、TodoUpdate）必须顺序执行
+        - 如果批次中混合了只读和写操作，先并行执行只读，再顺序执行写操作
 
         Args:
             tool_calls: 工具调用列表
@@ -262,12 +267,60 @@ class ToolExecutor:
         if len(tool_calls) > self.MAX_TOOLS_PER_TURN:
             tool_calls = tool_calls[:self.MAX_TOOLS_PER_TURN]
 
-        # 参数错误计数：连续参数错误过多时降级提示
+        # 单个工具直接走串行（避免线程开销）
+        if len(tool_calls) <= 1:
+            for i, tool_call in enumerate(tool_calls, 1):
+                if interrupt_check and interrupt_check():
+                    from claude_code.ui import console
+                    console.print("\n[dim]已中断，跳过后续工具[/]")
+                    break
+                if on_progress:
+                    on_progress(tool_call.name, f"执行 {i}/{len(tool_calls)}")
+                result = self.execute_single(tool_call, on_progress, interrupt_check)
+                report.add(result)
+            self._display_grouped_results(report)
+            return report
+
+        # 分类：只读工具和写操作工具
+        READ_ONLY_TOOLS = {"Read", "Grep", "Glob", "ProjectContext", "TodoList", "AskUserQuestion"}
+
+        read_only_calls = []
+        write_calls = []
+        for tc in tool_calls:
+            if tc.name in READ_ONLY_TOOLS:
+                read_only_calls.append(tc)
+            else:
+                write_calls.append(tc)
+
+        # 如果全部是只读工具，并行执行
+        if write_calls == [] and len(read_only_calls) > 1:
+            return self._execute_parallel(read_only_calls, on_progress, interrupt_check, report)
+
+        # 如果全部是写操作，顺序执行
+        if read_only_calls == []:
+            return self._execute_sequential(tool_calls, on_progress, interrupt_check, report)
+
+        # 混合：先并行只读，再顺序写操作
+        if read_only_calls:
+            par_report = self._execute_parallel(read_only_calls, on_progress, interrupt_check, report)
+            if interrupt_check and interrupt_check():
+                self._display_grouped_results(par_report)
+                return par_report
+
+        return self._execute_sequential(write_calls, on_progress, interrupt_check, report)
+
+    def _execute_sequential(
+        self,
+        tool_calls: List[ToolCall],
+        on_progress: Optional[Callable[[str, str], None]],
+        interrupt_check: Optional[Callable[[], bool]],
+        report: ExecutionReport,
+    ) -> ExecutionReport:
+        """顺序执行工具调用"""
         consecutive_param_errors = 0
         MAX_CONSECUTIVE_PARAM_ERRORS = 3
 
         for i, tool_call in enumerate(tool_calls, 1):
-            # 检查是否被中断
             if interrupt_check and interrupt_check():
                 from claude_code.ui import console
                 console.print("\n[dim]已中断，跳过后续工具[/]")
@@ -279,7 +332,6 @@ class ToolExecutor:
             result = self.execute_single(tool_call, on_progress, interrupt_check)
             report.add(result)
 
-            # 参数验证失败：跳过该工具，继续执行其余工具（降级串行）
             if not result.success and result.error and result.error.startswith("参数错误"):
                 consecutive_param_errors += 1
                 if consecutive_param_errors >= MAX_CONSECUTIVE_PARAM_ERRORS:
@@ -291,14 +343,50 @@ class ToolExecutor:
                     break
                 continue
             else:
-                consecutive_param_errors = 0  # 重置计数
+                consecutive_param_errors = 0
 
             if result.skipped and not result.permission_denied:
                 break
 
-        # 批量执行完成后，分组显示结果
         self._display_grouped_results(report)
+        return report
 
+    def _execute_parallel(
+        self,
+        tool_calls: List[ToolCall],
+        on_progress: Optional[Callable[[str, str], None]],
+        interrupt_check: Optional[Callable[[], bool]],
+        report: ExecutionReport,
+    ) -> ExecutionReport:
+        """并行执行只读工具调用"""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        if on_progress:
+            on_progress("parallel", f"并行执行 {len(tool_calls)} 个只读工具")
+
+        with ThreadPoolExecutor(max_workers=min(len(tool_calls), 4)) as executor:
+            futures = {}
+            for tool_call in tool_calls:
+                if interrupt_check and interrupt_check():
+                    break
+                future = executor.submit(self.execute_single, tool_call, None, interrupt_check)
+                futures[future] = tool_call
+
+            for future in as_completed(futures):
+                if interrupt_check and interrupt_check():
+                    break
+                try:
+                    result = future.result(timeout=60)
+                    report.add(result)
+                except Exception as e:
+                    tool_call = futures[future]
+                    report.add(ExecutionResult(
+                        tool_call=tool_call,
+                        tool_result=ToolResult(success=False, output="", error=f"并行执行异常: {e}"),
+                        duration_ms=0,
+                    ))
+
+        self._display_grouped_results(report)
         return report
 
     def _display_grouped_results(self, report: ExecutionReport) -> None:

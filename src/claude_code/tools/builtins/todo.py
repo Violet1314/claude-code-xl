@@ -2,26 +2,19 @@
 from typing import Any, Dict, List, Optional, Callable
 
 from ..base import Tool, ToolResult
+from ..context import tool_context
 from claude_code.core.todo import TodoList, TodoItem
 from claude_code.config.defaults import PLAN
 
 
-# 全局 TodoList 实例（整个应用共享）
-_todo_list: Optional[TodoList] = None
-
-
 def get_todo_list() -> TodoList:
-    """获取全局 TodoList 实例"""
-    global _todo_list
-    if _todo_list is None:
-        _todo_list = TodoList()
-    return _todo_list
+    """获取全局 TodoList 实例（通过 ToolContext 统一管理）"""
+    return tool_context.todo_list
 
 
 def reset_todo_list() -> None:
     """重置全局 TodoList（新会话时调用）"""
-    global _todo_list
-    _todo_list = TodoList()
+    tool_context.todo_list = TodoList()
 
 
 class TodoCreateTool(Tool):
@@ -41,7 +34,7 @@ class TodoCreateTool(Tool):
             "properties": {
                 "items": {
                     "type": "array",
-                    "description": "任务列表，每项包含 content 和可选的 priority",
+                    "description": "任务列表，每项包含 content 和可选的 priority、depends_on",
                     "items": {
                         "type": "object",
                         "properties": {
@@ -53,6 +46,11 @@ class TodoCreateTool(Tool):
                                 "type": "string",
                                 "description": "优先级：high/medium/low，默认 medium",
                                 "enum": ["high", "medium", "low"],
+                            },
+                            "depends_on": {
+                                "type": "array",
+                                "description": "依赖的任务ID列表（如 [\"t1\", \"t2\"]），被依赖的任务必须先完成才能开始此任务",
+                                "items": {"type": "string"},
                             },
                         },
                         "required": ["content"],
@@ -75,12 +73,10 @@ class TodoCreateTool(Tool):
             )
 
         # 使用 TodoList.create_from_dicts 批量创建（内置校验）
-        # 直接创建新实例替换全局引用，无需先 clear() 旧实例
         todo = TodoList.create_from_dicts(items_data)
 
-        # 替换全局实例
-        global _todo_list
-        _todo_list = todo
+        # 替换全局实例（通过 ToolContext）
+        tool_context.todo_list = todo
 
         # 构建输出
         input_count = len(items_data)
@@ -91,7 +87,8 @@ class TodoCreateTool(Tool):
                 f"⚠ 另有 {skipped_count} 个任务因超过上限或内容为空被忽略（上限 {PLAN.MAX_ITEMS} 个）"
             )
         for item in todo.items:
-            output_lines.append(f"  {item.icon} {item.id}  {item.content}  [{item.priority}]")
+            dep_str = f" ← {', '.join(item.depends_on)}" if item.depends_on else ""
+            output_lines.append(f"  {item.icon} {item.id}  {item.content}  [{item.priority}]{dep_str}")
 
         display_output = f"[bold green]● 计划已创建[/] 共 {todo.total_count} 个任务"
         if skipped_count > 0:

@@ -308,7 +308,8 @@ class Application:
         # 6. 恢复 Todo
         todos_data = data.get("todos", [])
         if todos_data:
-            from claude_code.tools.builtins.todo import get_todo_list, TodoList, TodoItem
+            from claude_code.tools.context import tool_context
+            from claude_code.core.todo import TodoList, TodoItem
             todo_list = TodoList()
             for item_data in todos_data:
                 item = TodoItem(
@@ -316,11 +317,10 @@ class Application:
                     content=item_data.get("content", ""),
                     status=item_data.get("status", "pending"),
                     priority=item_data.get("priority", "medium"),
+                    depends_on=item_data.get("depends_on", []),
                 )
                 todo_list.items.append(item)
-            from claude_code.tools.builtins.todo import _todo_list
-            import claude_code.tools.builtins.todo as todo_module
-            todo_module._todo_list = todo_list
+            tool_context.todo_list = todo_list
 
         # 恢复后清除自动保存文件（避免重复恢复）
         self._autosave.clear()
@@ -434,6 +434,36 @@ class Application:
             if file_context:
                 insert_idx = 1 if messages and messages[0].get("role") == "system" else 0
                 messages.insert(insert_idx, {"role": "user", "content": file_context})
+
+            # v2.8.37：Token 预算管理 — 注入上下文使用率，让模型自主调整输出策略
+            context_usage = self._estimate_context_usage()
+            if self.current_model and self.current_model.context_limit > 0 and context_usage > 0:
+                usage_pct = context_usage / self.current_model.context_limit
+                if usage_pct >= 0.5 and usage_pct < 0.70:
+                    # 中等使用率：温和提示
+                    budget_hint = (
+                        f"[token预算] 上下文已用 {usage_pct:.0%}，"
+                        f"剩余约 {(1 - usage_pct) * self.current_model.context_limit:.0f} token。"
+                        f"正常输出即可。"
+                    )
+                    messages.append({"role": "user", "content": budget_hint})
+                elif usage_pct >= 0.70 and usage_pct < 0.85:
+                    # 较高使用率：建议精简
+                    budget_hint = (
+                        f"[token预算] 上下文已用 {usage_pct:.0%}，"
+                        f"剩余约 {(1 - usage_pct) * self.current_model.context_limit:.0f} token。"
+                        f"请适度精简回复，减少不必要的解释，优先输出关键信息。"
+                    )
+                    messages.append({"role": "user", "content": budget_hint})
+                elif usage_pct >= 0.85:
+                    # 高使用率：强制精简
+                    budget_hint = (
+                        f"[token预算⚠] 上下文已用 {usage_pct:.0%}，"
+                        f"仅剩约 {(1 - usage_pct) * self.current_model.context_limit:.0f} token！"
+                        f"必须极度精简：只输出最关键的代码和指令，不解释，不重复已有内容。"
+                        f"如无法完成，请告知用户使用 /new 开始新会话。"
+                    )
+                    messages.append({"role": "user", "content": budget_hint})
 
             # 不再估算输入 token，完全依赖 API 返回的真实 usage 累加
             response, has_tools, report = self._handle_response(messages)
@@ -605,6 +635,10 @@ class Application:
                             "请先 Read 确认当前内容，不要依赖模糊记忆。"
                             "若 Edit 匹配失败，请先重新 Read 获取最新内容。"
                         )
+
+                # v2.8.37：对话摘要生成（上下文 >80% 时触发）
+                if usage_pct >= 0.80:
+                    self._try_generate_summary()
 
             # 自动保存检查点（每 20 轮保存一次，崩溃恢复用）
             if round_count % 20 == 0:
@@ -987,6 +1021,59 @@ class Application:
         """压缩工具输出（委托给 tool_feedback 模块）"""
         return compress_tool_output(output, tool_name, parameters)
 
+    def _try_generate_summary(self) -> None:
+        """
+        尝试对中间轮次生成对话摘要（上下文 >80% 时触发）
+
+        策略：
+        1. 检查是否已存在摘要（避免重复生成）
+        2. 提取中间轮次内容，构造摘要请求
+        3. 调用 API 生成摘要
+        4. 将摘要应用到对话历史，替换中间消息
+
+        这是一个成本决策：多花一次 API 调用，但节省后续多轮的 token。
+        """
+        # 检查是否已经生成过摘要
+        has_summary = any(
+            m.role == "user" and "[对话摘要]" in (m.content or "")
+            for m in self.conversation._messages
+        )
+        if has_summary:
+            return  # 已有摘要，不重复生成
+
+        # 生成摘要请求消息
+        summary_msgs = self.conversation.generate_summary_messages()
+        if not summary_msgs:
+            return  # 中间轮次内容太少，不值得摘要
+
+        try:
+            console.print(f"[dim]{ICONS['info']} 上下文使用率较高，正在生成对话摘要以节省空间...[/]")
+
+            # 调用 API 生成摘要（非流式，快速获取）
+            summary_response = ""
+            for chunk in self.client.send_message(
+                model_id=self.current_model.id if self.current_model else "",
+                messages=summary_msgs,
+                tools=None,  # 不传工具，纯粹文本生成
+                stream=True,
+            ):
+                if chunk is None:
+                    continue
+                content = self.client.extract_content(chunk)
+                if content:
+                    summary_response += content
+
+            if not summary_response.strip():
+                return
+
+            # 应用摘要到对话历史
+            self.conversation.apply_summary(summary_response.strip())
+
+            console.print(f"[dim]{ICONS['success']} 对话摘要已生成并应用，中间轮次已压缩[/]")
+        except Exception:
+            # 摘要生成失败不影响正常流程
+            pass
+
     def show_tools_history(self) -> None:
         """显示工具执行历史"""
         history = self.tool_executor.get_history()
@@ -1342,8 +1429,8 @@ class Application:
                 # 恢复 Todo 列表
                 todos_data = plan_state.get("todos", [])
                 if todos_data:
-                    from claude_code.tools.builtins.todo import TodoList, TodoItem
-                    import claude_code.tools.builtins.todo as todo_module
+                    from claude_code.tools.context import tool_context
+                    from claude_code.core.todo import TodoList, TodoItem
                     todo_list = TodoList()
                     for item_data in todos_data:
                         item = TodoItem(
@@ -1351,9 +1438,10 @@ class Application:
                             content=item_data.get("content", ""),
                             status=item_data.get("status", "pending"),
                             priority=item_data.get("priority", "medium"),
+                            depends_on=item_data.get("depends_on", []),
                         )
                         todo_list.items.append(item)
-                    todo_module._todo_list = todo_list
+                    tool_context.todo_list = todo_list
 
             # 9. 更新输入状态
             self._update_input_state()
