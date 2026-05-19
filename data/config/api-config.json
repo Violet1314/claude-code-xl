@@ -1,8 +1,8 @@
 {
-  "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
-  "api_key": "f9a9d7677d8e4ba0a14ef6b9e62a79a7.ZD0ssK8iJmCsNGyD",
+  "base_url": "https://api.deepseek.com",
+  "api_key": "sk-e21887be05624e7d8ea5d486518ce4b2",
   "task_models": {
-  "summary": "qwen3.6-plus"
+  "summary": "deepseek-v4-flash"
   },
   "models": [
     {
@@ -34,6 +34,13 @@
       "tool_mode": "native"
     },
     {
+      "id": "deepseek-v4-flash",
+      "name": "DeepSeek V4 Flash",
+      "price": "Input: $2.00/1M Output: $4.00/1M",
+      "context_limit": 1000000,
+      "tool_mode": "native"
+    },
+    {
       "id": "deepseek-v4-pro",
       "name": "DeepSeek V4 Pro",
       "price": "Input: $2.00/1M Output: $4.00/1M",
@@ -41,5 +48,5 @@
       "tool_mode": "native"
     }
   ],
-  "default_model": "glm-5.1"
+  "default_model": "deepseek-v4-pro"
 }

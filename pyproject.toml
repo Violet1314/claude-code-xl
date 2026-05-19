@@ -1,6 +1,6 @@
 [project]
 name = "claude-code"
-version = "2.8.35"
+version = "2.8.38"
 description = "Claude Code Terminal - 仿官方风格的 AI 编程助手"
 readme = "README.md"
 requires-python = ">=3.10"

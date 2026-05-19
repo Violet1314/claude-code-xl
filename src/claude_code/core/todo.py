@@ -319,6 +319,43 @@ class TodoList:
             lines.append(f"  {item.icon} {item.id}  {item.content}  [{item.status}]{dep_str}")
         return "\n".join(lines)
 
+    def to_prompt_diff(self, previous_statuses: dict) -> str:
+        """
+        生成增量任务状态文本（仅包含状态变化的任务项）
+
+        相比 to_prompt_text() 全量输出，此方法只返回状态发生变化的任务行，
+        配合进度文本使用，大幅减少每轮重复注入的 token。
+
+        Args:
+            previous_statuses: 上一轮的任务状态快照 {id: status}
+
+        Returns:
+            增量格式文本，无变化时返回简洁状态行
+        """
+        if not self.items:
+            return "（无任务）"
+
+        changes = []
+        for item in self.items:
+            prev = previous_statuses.get(item.id)
+            if prev != item.status:
+                dep_str = f" ← {', '.join(item.depends_on)}" if item.depends_on else ""
+                changes.append(f"  {item.icon} {item.id}  {item.content}  [{item.status}]{dep_str}")
+
+        if not changes:
+            # 无变化：返回简洁状态行
+            return (
+                f"[计划模式] 进度:{self.progress_text}（无变化）\n"
+                f"（任务状态未变，请继续推进当前任务）"
+            )
+
+        # 有变化：列出变化项 + 进度
+        return f"[计划模式] 进度:{self.progress_text}\n" + "\n".join(changes)
+
+    def get_status_snapshot(self) -> dict:
+        """获取当前所有任务的状态快照 {id: status}，供增量对比使用"""
+        return {item.id: item.status for item in self.items}
+
     def clear(self) -> None:
         """清空所有任务"""
         self.items.clear()

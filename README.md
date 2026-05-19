@@ -2,7 +2,7 @@
 
 仿照官方 Claude Code 风格构建的 CLI AI 编程助手，支持 AI 驱动的文件操作和命令执行。
 
-**版本：v2.8.37**
+**版本：v2.8.38**
 
 ## 功能特性
 
@@ -247,6 +247,18 @@ claude-code/
 
 ## 更新日志
 
+### v2.8.38 (2025-05-09)
+**Token深度优化 + 思考模型兼容：推理压缩 + 增量推送 + 语义摘要 + 重复Read消除 + 窗口渐进调参 + 计划提醒合并**
+*   ✅ reasoning_content 兼容：Message 类新增 reasoning_content 属性，to_dict/from_dict 支持序列化；流式响应收集 thinking_content；_handle_response / _process_response 完整传递链路，解决 "reasoning_content must be passed back" 报错
+*   ✅ 推理链历史压缩：`_compress_reasoning_content()` 对中间/锚定消息的推理链截断至 150 字符（近期窗口保留完整），普通模型零影响
+*   ✅ 任务清单增量推送：`TodoList.to_prompt_diff()` + `get_status_snapshot()`，计划模式后续轮次仅注入状态变化项，首轮保持全量
+*   ✅ 工具反馈语义压缩：`_extract_semantic_summary()` 对 Read 输出提取函数/类签名（Python/JS/TS/Go/Rust/Java），大幅减少历史中冗余代码 Token
+*   ✅ 计划提醒合并：检测上一条消息是否为 `[计划提醒]`，是则替换而非追加，避免历史堆积
+*   ✅ 自适应窗口渐进式：阈值从 80%/90% 两档改为 50%/70%/90% 四档渐进压缩
+*   ✅ 计划模式摘要早触发：计划模式下对话摘要触发阈值从 80% 降至 60%
+*   ✅ 消除重复 Read：`FileCacheManager` 新增最近读取追踪（5分钟窗口），重复 Read 返回缓存摘要而非完整内容
+*   ✅ 全量测试通过：205 passed
+
 ### v2.8.37 (2025-05-08)
 **智能优化与架构升级：TodoList统一管理 + 缓存摘要增强 + 上下文自适应调参 + 计划模式依赖 + 工具并行执行 + 对话摘要 + Token预算**
 *   ✅ TodoList 注册到 ToolContext：消除模块级全局变量 `_todo_list`，统一生命周期管理
@@ -266,23 +278,6 @@ claude-code/
 *   ✅ Edit 缓存新鲜度校验：执行前检查文件是否已缓存/当前版本是否被读取过，未读则附加提示建议先 Read
 *   ✅ autosave 崩溃修复：修复 API 响应含 surrogate 字符时编码崩溃；异常捕获扩展
 *   ✅ 自动保存间隔调整：从每 5 轮调整为每 20 轮
-*   ✅ 全量测试通过：205 passed
-
-### v2.8.35 (2025-05-06)
-**API 接入体验优化：原生 tool role + 路径去重 + description 精简 + 变更确认上下文 + 错误增强 + 策略引导 + 增量提醒 + 缓存新鲜度**
-*   ✅ 工具反馈改用原生 tool role：`build_tool_feedback()` 从 XML+user role 改为原生 tool role 消息列表，每条带 `tool_call_id`，模型可精确关联 tool_call 与结果
-*   ✅ 旧 XML 兼容代码清理：移除 `_replay_legacy_tool_results`、`_summarize_tool_results` 及相关检测分支
-*   ✅ 路径规则去重：移除 6 个工具重复的 `操作根目录` 描述，统一由 system prompt 注入
-*   ✅ 工具 description 精简：行为指引从工具 description 移至 system prompt 的 **工具使用规范** 段
-*   ✅ Edit 返回变更确认上下文：精确匹配成功后附加修改后文件上下文（前后各3行）
-*   ✅ Write 返回首尾摘要：写入成功后返回文件内容摘要
-*   ✅ Bash 错误增强可操作性：命令失败时附加 exit code + 常见原因提示
-*   ✅ Edit 错误增强可操作性：精确匹配失败时附加文件行数和行号模式建议
-*   ✅ 工具组合策略引导：system prompt 新增 **工具组合策略** 段
-*   ✅ 计划模式提醒增量优化：首轮完整规则，后续只注入增量进度
-*   ✅ Read 缓存新鲜度提示：缓存命中时附加"如 Edit 匹配失败，请重新 Read"提示
-*   ✅ Conversation 增强：Message 新增 `tool_call_id`/`tool_calls` 字段；新增 `add_tool_message()` 等方法
-*   ✅ Todo 状态机回退：新增 `in_progress → pending` 合法转换，任务暂无法推进时可暂停并释放进行中名额
 *   ✅ 全量测试通过：205 passed
 
 ---

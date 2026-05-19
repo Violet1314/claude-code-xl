@@ -56,6 +56,9 @@ class FileCacheManager:
     def __init__(self):
         self._cache: Dict[str, CachedFile] = {}
         self._lock = threading.Lock()
+        # v2.8.37+ 优化：最近读取追踪，避免模型重复 Read 同一文件
+        self._recent_reads: Dict[str, float] = {}  # {file_key: timestamp}
+        self._RECENT_READ_WINDOW = 300  # 5 分钟内视为"最近读取"
 
     def _get_file_key(self, file_path: str) -> str:
         """获取文件的缓存 key (绝对路径)"""
@@ -254,6 +257,39 @@ class FileCacheManager:
         key = self._get_file_key(file_path)
         with self._lock:
             return key in self._cache
+
+    def mark_recent_read(self, file_path: str) -> None:
+        """
+        标记文件为"最近已读取"
+
+        配合 is_recent_read() 使用，当模型短时间内重复 Read 同一文件时，
+        返回缓存摘要而非完整内容，大幅节省 Token。
+
+        Args:
+            file_path: 文件路径
+        """
+        key = self._get_file_key(file_path)
+        with self._lock:
+            self._recent_reads[key] = time.time()
+
+    def is_recent_read(self, file_path: str) -> bool:
+        """
+        检查文件是否在最近时间窗口内被读取过
+
+        条件：文件在缓存中 + 最近 _RECENT_READ_WINDOW 秒内被标记过
+
+        Args:
+            file_path: 文件路径
+
+        Returns:
+            True 如果文件最近被读取且内容未变化
+        """
+        key = self._get_file_key(file_path)
+        with self._lock:
+            if key not in self._recent_reads:
+                return False
+            elapsed = time.time() - self._recent_reads[key]
+            return elapsed < self._RECENT_READ_WINDOW and key in self._cache
 
     def get_read_ranges(self, file_path: str) -> List[Tuple[int, int]]:
         """获取当前版本已读取的行范围列表"""

@@ -114,6 +114,31 @@ class ReadTool(Tool):
             was_cached = cache_result["cached"]
             size_kb = file_size / 1024
 
+            # v2.8.37+ 优化：检测重复读取，返回缓存摘要而非完整内容
+            abs_path = str(path.absolute())
+            is_recent = file_cache.is_recent_read(abs_path)
+            if is_recent and was_cached and not (parameters.get("offset") or parameters.get("limit")):
+                cached_summary = file_cache.get_file_summary(abs_path)
+                summary_text = cached_summary or f"{path.name} ({total_lines} lines)"
+                compact_output = (
+                    f"[文件已缓存] {path.name} — 内容未变化，上次已返回完整内容。\n"
+                    f"摘要: {summary_text}\n"
+                    f"提示: 如需重新查看完整内容，请指定行号范围（如 offset=1, limit=100）"
+                )
+                file_cache.mark_recent_read(abs_path)
+                return ToolResult(
+                    success=True,
+                    output=compact_output,
+                    display_output=f"[dim]◇ 重复读取: {escape(str(path))} → 返回缓存摘要[/]",
+                    summary=f"Read {path.name} (cached, recent)",
+                    metadata={
+                        "file_path": abs_path,
+                        "total_lines": total_lines,
+                        "cached": True,
+                        "recent_read": True,
+                    }
+                )
+
             # 构建输出
             output = self._build_model_output(
                 path, lines, total_lines, size_kb, reference, offset, limit, was_cached
@@ -125,7 +150,10 @@ class ReadTool(Tool):
             # 记录读取操作
             start_line = offset
             end_line = min(offset + limit - 1, total_lines)
-            file_cache.record_read(str(path.absolute()), total_lines, start_line, end_line)
+            abs_path_full = str(path.absolute())
+            file_cache.record_read(abs_path_full, total_lines, start_line, end_line)
+            # 标记为最近读取，用于后续重复 Read 检测
+            file_cache.mark_recent_read(abs_path_full)
 
             return ToolResult(
                 success=True,

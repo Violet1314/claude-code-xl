@@ -17,17 +17,20 @@ class Message:
     """单条消息"""
     role: str
     content: str
-    tool_call_id: Optional[str] = None   # tool 角色消息的调用 ID
-    tool_calls: Optional[list] = None     # assistant 消息的原生 tool_calls
-    
+    tool_call_id: Optional[str] = None
+    tool_calls: Optional[list] = None
+    reasoning_content: Optional[str] = None  # 新增
+
     def to_dict(self) -> Dict[str, str]:
         result = {"role": self.role, "content": self.content}
         if self.tool_call_id:
             result["tool_call_id"] = self.tool_call_id
         if self.tool_calls:
             result["tool_calls"] = self.tool_calls
+        if self.reasoning_content:              # 新增
+            result["reasoning_content"] = self.reasoning_content
         return result
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, str]) -> "Message":
         return cls(
@@ -35,6 +38,7 @@ class Message:
             content=data.get("content", ""),
             tool_call_id=data.get("tool_call_id"),
             tool_calls=data.get("tool_calls"),
+            reasoning_content=data.get("reasoning_content"),  # 新增
         )
 
 class Conversation:
@@ -93,10 +97,10 @@ class Conversation:
         """添加用户消息"""
         self._messages.append(Message(role="user", content=content))
     
-    def add_assistant_message(self, content: str, tool_calls: Optional[list] = None) -> None:
-        """添加助手消息（可附带原生 tool_calls）"""
-        self._messages.append(Message(role="assistant", content=content, tool_calls=tool_calls))
-    
+    def add_assistant_message(self, content: str, tool_calls: Optional[list] = None, reasoning_content: Optional[str] = None) -> None:
+        """添加助手消息（可附带原生 tool_calls 和 reasoning_content）"""
+        self._messages.append(Message(role="assistant", content=content, tool_calls=tool_calls, reasoning_content=reasoning_content))
+
     def add_tool_message(self, tool_call_id: str, content: str) -> None:
         """添加工具结果消息（原生 tool role）"""
         self._messages.append(Message(role="tool", content=content, tool_call_id=tool_call_id))
@@ -184,7 +188,19 @@ class Conversation:
                         tool_call_id=msg.tool_call_id,
                     ))
                 else:
-                    anchor_msgs.append(msg)
+                    # 锚定消息中的 assistant 消息也压缩推理内容
+                    if msg.role == "assistant" and getattr(msg, 'reasoning_content', None):
+                        anchor_msgs.append(Message(
+                            role=msg.role,
+                            content=msg.content,
+                            tool_call_id=msg.tool_call_id,
+                            tool_calls=msg.tool_calls,
+                            reasoning_content=self._compress_reasoning_content(
+                                getattr(msg, 'reasoning_content', None)
+                            ),
+                        ))
+                    else:
+                        anchor_msgs.append(msg)
             if user_count > anchor_n:
                 break
         
@@ -221,6 +237,9 @@ class Conversation:
                 content=compressed_content,
                 tool_call_id=msg.tool_call_id,
                 tool_calls=msg.tool_calls,
+                reasoning_content=self._compress_reasoning_content(
+                    getattr(msg, 'reasoning_content', None)
+                ),
             ))
         
         middle_tokens = sum(estimate_tokens(m.content) + 4 for m in middle_compressed)
@@ -274,10 +293,14 @@ class Conversation:
             # 极限压缩：最小锚定+最小窗口
             anchor_n = self.ANCHOR_USER_MSGS_MIN
             window_k = self.RECENT_WINDOW_MIN
-        elif usage_ratio >= 0.8:
-            # 正常优化：使用基准参数
+        elif usage_ratio >= 0.7:
+            # 中高压缩：适度缩减锚定和窗口
+            anchor_n = 2
+            window_k = 8
+        elif usage_ratio >= 0.5:
+            # 轻度压缩：基准锚定，中等窗口
             anchor_n = self.ANCHOR_USER_MSGS_BASE
-            window_k = self.RECENT_WINDOW_BASE
+            window_k = 12
         else:
             # 空间充足：放宽窗口，保持基准锚定
             anchor_n = self.ANCHOR_USER_MSGS_BASE
@@ -333,6 +356,37 @@ class Conversation:
             return f"{head}\n\n... (省略 {omitted} 字符) ...\n\n{tail}"
         
         return content
+    
+    def _compress_reasoning_content(self, reasoning: Optional[str]) -> Optional[str]:
+        """
+        压缩历史轮次的 reasoning_content（思考模型 Token 膨胀的主要来源）
+
+        策略：
+        - None/空字符串 → 原样返回（普通模型无此字段）
+        - 短推理（≤300字符）→ 保留原文（足够短，无需压缩）
+        - 长推理 → 保留前 150 字符 + 省略标记
+
+        重要：绝不返回空字符串。o1 系列 API 要求 reasoning_content
+        非空时必须回传，返回空值可能导致 API 报错。
+
+        Args:
+            reasoning: 原始推理内容
+
+        Returns:
+            压缩后的推理内容，None 保持不变
+        """
+        if not reasoning:
+            return reasoning  # None 或空字符串，不处理
+
+        MAX_REASONING_LEN = 300
+        if len(reasoning) <= MAX_REASONING_LEN:
+            return reasoning  # 短推理保留完整
+
+        # 长推理：保留头部 + 省略标记（API 仍能收到非空值）
+        head = reasoning[:150]
+        omitted = len(reasoning) - 150
+        return f"{head}\n\n... [推理过程已压缩，省略 {omitted} 字符] ..."
+    
     
     def reset(self) -> None:
         """重置会话（保留 system prompt）"""

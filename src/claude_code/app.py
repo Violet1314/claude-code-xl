@@ -104,6 +104,7 @@ class Application:
         self._plan_mode: bool = False            # 是否处于计划模式
         self._plan_task: str = ""                # 计划模式任务描述
         self._plan_reminder_count: int = 0       # 计划模式连续提醒计数（熔断用）
+        self._plan_prev_statuses: dict = {}      # 上轮任务状态快照 {id: status}（增量推送用）
         self._update_input_state()
         self.history_dir = "data/history"
         os.makedirs(self.history_dir, exist_ok=True)
@@ -396,7 +397,7 @@ class Application:
         # 新一轮用户输入，重置工具显示追踪
         self.tool_executor._last_displayed_tool = None
         
-        # 计划模式：注入任务规划提示（首轮注入完整规则，后续只注入增量进度）
+        # 计划模式：注入任务规划提示（首轮注入完整规则，后续只注入增量变化）
         if self._plan_mode:
             from claude_code.tools.builtins.todo import get_todo_list
             todo = get_todo_list()
@@ -405,19 +406,20 @@ class Application:
                 for m in self.conversation._messages
             )
             if not has_rules_injected:
-                # 首轮：注入完整规则
+                # 首轮：注入完整规则 + 全量任务清单（模型需要首次了解全貌）
                 plan_prompt = (
                     f"[计划模式] 进度:{todo.progress_text}\n"
                     f"{todo.to_prompt_text()}\n"
                     f"规则: 1.无清单→TodoCreate创建 2.开始→in_progress 完成→completed 失败→failed "
                     f"3.禁止提前停止，必须调用工具推进"
                 )
+                # 初始化状态快照
+                self._plan_prev_statuses = todo.get_status_snapshot()
             else:
-                # 后续：只注入增量进度（不重复规则，节省 ~200 token/轮）
-                plan_prompt = (
-                    f"[计划模式] 进度:{todo.progress_text}\n"
-                    f"{todo.to_prompt_text()}"
-                )
+                # 后续：只注入状态变化的增量（大幅节省 token，不丢失关键信息）
+                plan_prompt = todo.to_prompt_diff(self._plan_prev_statuses)
+                # 更新快照供下一轮对比
+                self._plan_prev_statuses = todo.get_status_snapshot()
             self.conversation.add_user_message(plan_prompt)
         
         # 【修改点 2】：连续错误追踪状态
@@ -475,6 +477,8 @@ class Application:
                 todo = get_todo_list()
                 # 有工具执行，说明模型在推进，重置提醒计数
                 self._plan_reminder_count = 0
+                # 同步状态快照（工具执行后任务状态可能已变化）
+                self._plan_prev_statuses = todo.get_status_snapshot()
                 if todo.items:
                     # 收集刚完成的任务 ID，用于闪烁高亮
                     flash_ids = []
@@ -554,7 +558,15 @@ class Application:
                             f"（{self._plan_reminder_count}/{PLAN.REMINDER_MAX}）"
                             f"{no_tool_warning}"
                         )
-                        self.conversation.add_user_message(remind)
+                        # 合并策略：替换上一条计划提醒（避免历史中堆积重复提醒）
+                        if self.conversation._messages:
+                            last_msg = self.conversation._messages[-1]
+                            if last_msg.role == "user" and "[计划提醒]" in (last_msg.content or ""):
+                                last_msg.content = remind
+                            else:
+                                self.conversation.add_user_message(remind)
+                        else:
+                            self.conversation.add_user_message(remind)
                         console.print(f"[dim]{ICONS['info']} 计划模式：检测到模型提前停止，已注入行动提醒 ({todo.progress_text}) [{self._plan_reminder_count}/{PLAN.REMINDER_MAX}][/]")
                         continue
                 break
@@ -636,8 +648,9 @@ class Application:
                             "若 Edit 匹配失败，请先重新 Read 获取最新内容。"
                         )
 
-                # v2.8.37：对话摘要生成（上下文 >80% 时触发）
-                if usage_pct >= 0.80:
+                # v2.8.37：对话摘要生成（计划模式更早触发，普通模式 80% 触发）
+                summary_threshold = 0.60 if self._plan_mode else 0.80
+                if usage_pct >= summary_threshold:
                     self._try_generate_summary()
 
             # 自动保存检查点（每 20 轮保存一次，崩溃恢复用）
@@ -668,7 +681,7 @@ class Application:
 
         try:
             # 收集流式响应
-            full_response, native_tool_calls, real_usage, duration = self._collect_streaming_response(
+            full_response, native_tool_calls, real_usage, duration, thinking_content = self._collect_streaming_response(
                 messages, tools_definition, model_name
             )
 
@@ -677,7 +690,7 @@ class Application:
 
             # 处理响应（解析工具、渲染、保存）
             tool_calls = self._process_response(
-                full_response, native_tool_calls, model_name, duration, real_usage
+                full_response, native_tool_calls, model_name, duration, real_usage, thinking_content
             )
 
             # 执行工具调用
@@ -837,7 +850,7 @@ class Application:
         #     self._show_thinking_summary(thinking_content, thinking_tokens)
 
         duration = time.time() - start_time
-        return full_response, native_tool_calls, real_usage, duration
+        return full_response, native_tool_calls, real_usage, duration, thinking_content
 
     def _show_thinking_summary(self, thinking_content: str, thinking_tokens: int) -> None:
         """
@@ -917,20 +930,11 @@ class Application:
         native_tool_calls: list,
         model_name: str,
         duration: float,
-        real_usage: dict
+        real_usage: dict,
+        thinking_content: str = "",               # 新增参数
     ) -> list:
         """
         处理响应（解析工具调用、渲染、保存）
-
-        Args:
-            full_response: 完整响应文本
-            native_tool_calls: 原生工具调用列表
-            model_name: 模型名称
-            duration: 响应耗时
-            real_usage: 真实 token 使用量
-
-        Returns:
-            解析后的工具调用列表
         """
         # 解析工具调用
         tool_calls = tool_calling_manager.parse_tool_calls(native_tool_calls)
@@ -956,9 +960,12 @@ class Application:
             # API 未返回 usage 时，估算 input 和 output
             self.stats.update_input(self.conversation.get_messages())
             self.stats.update_output(full_response)
+
+        # 保存助手消息，带上 reasoning_content
         self.conversation.add_assistant_message(
             full_response,
             tool_calls=native_tool_calls if tool_calls else None,
+            reasoning_content=thinking_content if thinking_content else None,  # 新增
         )
 
         return tool_calls
