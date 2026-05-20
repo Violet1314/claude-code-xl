@@ -442,7 +442,7 @@ class EditTool(Tool):
 
         return results
     def _build_no_match_error(self, content: str, old_string: str, file_path: str, freshness_hint: str = "") -> ToolResult:
-        """精确匹配失败时的错误反馈（含上下文指导）"""
+        """精确匹配失败时的错误反馈（含最接近匹配定位）"""
         # 提供行号模式建议
         line_count = old_string.count('\n') + 1
         mode_hint = ""
@@ -453,29 +453,71 @@ class EditTool(Tool):
                 "  例如: start_line=10, end_line=20, new_string=\"新内容\""
             )
 
-        # 尝试部分匹配，给出最接近的位置
-        first_line = old_string.split('\n')[0].strip()
-        if first_line and len(first_line) >= 10:
-            for i, line in enumerate(content.split('\n'), 1):
-                if first_line in line:
-                    return ToolResult(
-                        success=False, output="",
-                        error=(
-                            f"精确匹配失败: old_string 在文件中未找到完全匹配。\n"
-                            f"但找到部分匹配在第 {i} 行附近。\n\n"
-                            f"可能原因：\n"
-                            f"1. 缩进不一致（空格 vs tab）\n"
-                            f"2. 行尾空格或换行符差异\n"
-                            f"3. 复制时遗漏了部分内容\n\n"
-                            f"建议：\n"
-                            f"1. 重新 Read 文件，精确复制要替换的原文（包括缩进）\n"
-                            f"2. 或缩小 old_string 范围，只匹配最关键的一两行\n"
-                            f"3. 或使用行号范围模式: start_line={i}, end_line={i + line_count - 1}"
-                            f"{mode_hint}"
-                        )
-                    )
-
         total_lines = content.count('\n') + 1
+
+        # 策略 1：用 old_string 的第一行在文件中搜索（子串匹配）
+        first_line = old_string.split('\n')[0].strip()
+        if first_line and len(first_line) >= 5:
+            content_lines = content.split('\n')
+            matches = []
+            for i, line in enumerate(content_lines, 1):
+                if first_line in line:
+                    matches.append((i, line.strip()))
+            if matches:
+                # 找到部分匹配，给出定位信息（最多 3 处）
+                if len(matches) == 1:
+                    loc_str = f"第 {matches[0][0]} 行"
+                    loc_detail = f"  {matches[0][0]:5d} | {matches[0][1][:100]}"
+                elif len(matches) <= 3:
+                    loc_str = " / ".join(f"第 {m[0]} 行" for m in matches)
+                    loc_detail = "\n".join(f"  {m[0]:5d} | {m[1][:100]}" for m in matches)
+                else:
+                    loc_str = f"第 {matches[0][0]} 行 / 第 {matches[1][0]} 行 等 {len(matches)} 处"
+                    loc_detail = "\n".join(f"  {m[0]:5d} | {m[1][:100]}" for m in matches[:3])
+                    loc_detail += f"\n  ... 等 {len(matches)} 处"
+                return ToolResult(
+                    success=False, output="",
+                    error=(
+                        f"精确匹配失败: old_string 在文件中未找到完全匹配（文件共 {total_lines} 行）。\n"
+                        f"但第一行「{first_line[:60]}」出现在: {loc_str}\n\n"
+                        f"文件中对应内容:\n{loc_detail}\n\n"
+                        f"可能原因：缩进/空白/换行差异，或复制时遗漏了部分内容。\n\n"
+                        f"建议：\n"
+                        f"1. 重新 Read 文件，从上述位置精确复制原文（包括缩进）\n"
+                        f"2. 或缩小 old_string 范围，只匹配最关键的一两行\n"
+                        f"3. 或使用行号范围模式直接指定行号"
+                        f"{mode_hint}"
+                        f"{freshness_hint}"
+                    )
+                )
+
+        # 策略 2：尝试按行做归一化模糊匹配（忽略首尾空白）
+        old_lines = [l.strip() for l in old_string.split('\n') if l.strip()]
+        if old_lines:
+            content_lines = content.split('\n')
+            best_line = None
+            for i, line in enumerate(content_lines, 1):
+                stripped = line.strip()
+                if stripped and old_lines[0] in stripped:
+                    best_line = (i, line.strip()[:120])
+                    break
+            if best_line:
+                return ToolResult(
+                    success=False, output="",
+                    error=(
+                        f"精确匹配失败: old_string 在文件中未找到完全匹配（文件共 {total_lines} 行）。\n"
+                        f"最接近的第 {best_line[0]} 行（去空白后匹配）:\n"
+                        f"  {best_line[0]:5d} | {best_line[1]}\n\n"
+                        f"建议：\n"
+                        f"1. 重新 Read 文件，从第 {best_line[0]} 行附近精确复制原文（包括缩进、空白）\n"
+                        f"2. 或缩小 old_string 范围，只匹配最关键的一两行\n"
+                        f"3. 或使用行号范围模式: start_line={best_line[0]}, end_line={best_line[0] + line_count - 1}"
+                        f"{mode_hint}"
+                        f"{freshness_hint}"
+                    )
+                )
+
+        # 策略 3：无法定位，给出通用建议
         return ToolResult(
             success=False, output="",
             error=(

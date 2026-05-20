@@ -411,7 +411,7 @@ class Application:
                     f"[计划模式] 进度:{todo.progress_text}\n"
                     f"{todo.to_prompt_text()}\n"
                     f"规则: 1.无清单→TodoCreate创建 2.开始→in_progress 完成→completed 失败→failed "
-                    f"3.禁止提前停止，必须调用工具推进"
+                    f"3.最多{PLAN.MAX_IN_PROGRESS}个任务并行(批量:TodoUpdate(updates=[...])) 4.禁止提前停止"
                 )
                 # 初始化状态快照
                 self._plan_prev_statuses = todo.get_status_snapshot()
@@ -486,8 +486,12 @@ class Application:
                     for result in report.results:
                         if result.success and result.tool_call.name == "TodoUpdate":
                             metadata = result.metadata or {}
+                            # 兼容批量 flash_ids 和单任务 flash_id
+                            batch_flash = metadata.get('flash_ids')
+                            if batch_flash:
+                                flash_ids.extend(batch_flash)
                             flash_id = metadata.get('flash_id')
-                            if flash_id:
+                            if flash_id and flash_id not in flash_ids:
                                 flash_ids.append(flash_id)
                     
                     console.print()

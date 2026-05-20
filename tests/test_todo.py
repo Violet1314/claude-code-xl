@@ -604,22 +604,25 @@ class TestTodoImprovements:
         from claude_code.tools.builtins.todo import reset_todo_list
         reset_todo_list()
 
-    def test_only_one_in_progress_allowed(self):
-        """同一时间只允许一个任务处于 in_progress"""
+    def test_max_in_progress_enforced(self):
+        """同时最多 PLAN.MAX_IN_PROGRESS 个任务处于 in_progress（支持并行推进）"""
+        from claude_code.config.defaults import PLAN
         todo = TodoList.create_from_dicts([
-            {"content": "任务1"},
-            {"content": "任务2"},
+            {"content": f"任务{i}"} for i in range(PLAN.MAX_IN_PROGRESS + 1)
         ])
 
-        result, error = todo.update_status("t1", "in_progress")
-        assert result is True
-        assert error == ""
+        # 前 MAX_IN_PROGRESS 个可以并行开始
+        for i in range(PLAN.MAX_IN_PROGRESS):
+            tid = f"t{i + 1}"
+            result, error = todo.update_status(tid, "in_progress")
+            assert result is True, f"任务 {tid} 应能并行开始: {error}"
+            assert error == ""
 
-        result, error = todo.update_status("t2", "in_progress")
+        # 第 MAX_IN_PROGRESS + 1 个应被拒绝
+        result, error = todo.update_status(f"t{PLAN.MAX_IN_PROGRESS + 1}", "in_progress")
         assert result is False
-        assert "已有任务 t1 正在进行中" in error
-        assert "TodoUpdate" in error
-        assert todo.get_item("t2").status == "pending"
+        assert "上限" in error
+        assert str(PLAN.MAX_IN_PROGRESS) in error
 
     def test_get_in_progress_item(self):
         """可获取当前进行中任务"""
@@ -716,18 +719,22 @@ class TestTodoImprovements:
         assert result is False
         assert "已完成" in error
 
-    def test_revert_error_message_includes_pending_option(self):
-        """冲突错误提示包含 pending 选项"""
+    def test_max_in_progress_error_message(self):
+        """冲突错误提示包含有意义的上限信息"""
+        from claude_code.config.defaults import PLAN
         todo = TodoList.create_from_dicts([
-            {"content": "任务1"},
-            {"content": "任务2"},
+            {"content": f"任务{i}"} for i in range(PLAN.MAX_IN_PROGRESS + 1)
         ])
-        todo.update_status("t1", "in_progress")
 
-        result, error = todo.update_status("t2", "in_progress")
+        # 填满所有并行槽位
+        for i in range(PLAN.MAX_IN_PROGRESS):
+            todo.update_status(f"t{i + 1}", "in_progress")
+
+        # 超限尝试
+        result, error = todo.update_status(f"t{PLAN.MAX_IN_PROGRESS + 1}", "in_progress")
         assert result is False
-        assert "pending" in error
-        assert "暂停" in error
+        assert "上限" in error
+        assert "先结束" in error
 
 
 class TestPlanCommandImprovements:

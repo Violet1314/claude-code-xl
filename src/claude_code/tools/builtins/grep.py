@@ -182,28 +182,25 @@ class GrepTool(Tool):
         return '\n'.join(parts)
 
     def _build_model_content_output(self, matches: List[tuple], pattern: str, total: int) -> str:
-        """给模型的内容输出"""
+        """给模型的内容输出（截断信息置于首行，确保压缩时不被裁掉）"""
         parts = []
-        parts.append(f"Grep: \"{pattern}\" - {total} matches")
+        if total > self.MAX_MATCHES:
+            parts.append(f"Grep: \"{pattern}\" — 共 {total} 条匹配，显示前 {self.MAX_MATCHES} 条")
+        else:
+            parts.append(f"Grep: \"{pattern}\" — {total} 条匹配")
         parts.append("")
 
         current_file = None
         for match in matches:
-            file_path, line_num, line_content = match[0], match[1], match[2]
-            is_match = match[3] if len(match) > 3 else True
+            file_path, line_num, line_content, is_match = match
             if file_path != current_file:
-                if current_file is not None:
-                    parts.append("")
+                parts.append("")
                 parts.append(f"--- {file_path} ---")
                 current_file = file_path
-
             if len(line_content) > self.PREVIEW_WIDTH:
                 line_content = line_content[:self.PREVIEW_WIDTH - 3] + "..."
             prefix = f"{line_num:5d} |" if is_match else f"{line_num:5d} |"
             parts.append(f"{prefix} {line_content}")
-
-        if total > self.MAX_MATCHES:
-            parts.append(f"\n... ({total} total matches, showing first {self.MAX_MATCHES})")
 
         return '\n'.join(parts)
 
@@ -333,7 +330,7 @@ class GrepTool(Tool):
             with open(file_path, 'r', encoding='utf-8') as f:
                 for line_num, line in enumerate(f, 1):
                     if regex.search(line):
-                        matches.append((str(file_path), line_num, line.rstrip('\n\r')))
+                        matches.append((str(file_path), line_num, line.rstrip('\n\r'), True))
         except (UnicodeDecodeError, PermissionError):
             pass
         return matches

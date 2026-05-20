@@ -2,7 +2,7 @@
 
 仿照官方 Claude Code 风格构建的 CLI AI 编程助手，支持 AI 驱动的文件操作和命令执行。
 
-**版本：v2.8.39**
+**版本：v2.8.40**
 
 ## 功能特性
 
@@ -241,11 +241,23 @@ claude-code/
 | Glob | ◎ | Yes | No | 文件名搜索（≤100结果） |
 | AskUserQuestion | ◈ | Yes | No | 向用户询问 |
 | TodoCreate | ● | No | No | 创建任务计划（计划模式，支持 depends_on 依赖关系） |
-| TodoUpdate | ● | No | No | 更新任务状态（计划模式，严格状态机 + 单 in_progress 约束 + 支持暂停回退） |
+| TodoUpdate | ● | No | No | 更新任务状态（计划模式，严格状态机 + 最多 3 个并行 + 批量更新 + 支持暂停回退） |
 | TodoList | ● | Yes | No | 查看当前计划与进度（计划模式） |
 | ProjectContext | ◇ | Yes | No | 项目结构感知（目录扫描+类型识别+符号索引+相关性检索） |
 
 ## 更新日志
+
+### v2.8.40 (2025-05-11)
+**计划模式并行化 + API 侧体验优化**
+*   ✅ 并行推进：同时 in_progress 上限从 1 提升至 3，模型可并行标记多个任务后一起干活
+*   ✅ TodoUpdate 批量模式：新增 `updates` 参数支持一次调用更新多个任务状态，减少工具调用次数
+*   ✅ 计划提示更新：规则中包含并行能力说明
+*   ✅ Bash 限制声明修正：system prompt 中输出限制从 5000 修正为 3000（与实际默认值一致）
+*   ✅ Grep/Glob 截断信息前置：截断提示移至首行，避免被输出压缩裁掉
+*   ✅ tool_calls 压缩保留关键参数：保留 `file_path`/`pattern`/`command`，帮助模型回溯
+*   ✅ Bash 错误输出结构化：`[exit=N]` + `[STDERR]` + `[STDOUT]` 标签化分离
+*   ✅ Edit 匹配失败三级定位：子串→归一化→通用搜索，返回最接近行号和内容
+*   ✅ 全量测试通过：205 passed，0 回归
 
 ### v2.8.39 (2025-05-10)
 **长对话质量保障 + 工具调度 Token 深度优化：极限压缩保底 + 摘要回溯线索 + 近期窗口压缩 + tool_calls 压缩 + 阈值收紧**
@@ -272,18 +284,6 @@ claude-code/
 *   ✅ 消除重复 Read：`FileCacheManager` 新增 `_recent_reads` 追踪，5 分钟内重复读取返回缓存摘要
 *   ✅ Token 预算不入历史：预算提示追加到临时 messages，天然不入历史
 *   ✅ 全量测试通过：205 passed
-
-### v2.8.37 (2025-05-08)
-**智能优化与架构升级：TodoList统一管理 + 缓存摘要增强 + 上下文自适应调参 + 计划模式依赖关系 + 工具并行执行 + 对话摘要生成 + Token预算管理**
-*   ✅ TodoList 注册到 ToolContext：消除模块级全局变量，统一收敛至 ToolContext 容器管理生命周期
-*   ✅ 缓存摘要增强：Python 函数签名提取 + JSON 值类型提取
-*   ✅ 上下文自适应调参：`_adaptive_params(usage_ratio)` 根据使用率动态调整锚定数和窗口
-*   ✅ 计划模式依赖关系：`TodoItem` 新增 `depends_on` 字段，`update_status()` 启动前校验前置依赖
-*   ✅ 工具并行执行：只读工具使用 ThreadPoolExecutor 并行（最大4线程），写操作顺序执行
-*   ✅ 对话摘要生成：上下文>80%时触发 API 生成摘要，替换中间消息为一条摘要消息
-*   ✅ Token 预算管理：chat 循环中注入三级提醒（50%/70%/85%）
-*   ✅ 全量测试通过：205 passed
-
 ---
 
 ## Windows PowerShell 注意事项

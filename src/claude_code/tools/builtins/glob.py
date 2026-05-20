@@ -127,9 +127,12 @@ class GlobTool(Tool):
     # ============================================================
 
     def _build_model_output(self, matches: List[Path], base_path: Path, pattern: str, total: int) -> str:
-        """给模型的纯文本输出"""
+        """给模型的纯文本输出（截断信息置于首行，确保压缩时不被裁掉）"""
         parts = []
-        parts.append(f"Glob: \"{pattern}\" - {total} results")
+        if total > self.MAX_RESULTS:
+            parts.append(f"Glob: \"{pattern}\" — 共 {total} 条结果，显示前 {self.MAX_RESULTS} 条")
+        else:
+            parts.append(f"Glob: \"{pattern}\" — {total} 条结果")
         parts.append("")
 
         # 文件类型统计
@@ -151,13 +154,8 @@ class GlobTool(Tool):
             parts.append(f"Types: {' | '.join(stats_parts)}")
             parts.append("")
 
-        # 文件列表
         for match in matches:
-            try:
-                rel_path = match.relative_to(base_path)
-            except ValueError:
-                rel_path = match
-
+            rel_path = str(match.relative_to(base_path.parent))
             if match.is_dir():
                 parts.append(f"  {rel_path}/")
             else:
@@ -166,9 +164,6 @@ class GlobTool(Tool):
                     parts.append(f"  {rel_path}  ({format_size(size)})")
                 except Exception:
                     parts.append(f"  {rel_path}")
-
-        if total > self.MAX_RESULTS:
-            parts.append(f"\n... ({total} total, showing first {self.MAX_RESULTS})")
 
         return '\n'.join(parts)
 

@@ -116,10 +116,13 @@ class TodoCreateTool(Tool):
 
 
 class TodoUpdateTool(Tool):
-    """更新任务状态"""
+    """更新任务状态（支持批量）"""
     name = "TodoUpdate"
     description = (
         "更新任务状态。模型执行任务时使用此工具标记进度。\n"
+        "支持两种模式：\n"
+        "- 单任务模式：id + status，一次更新一个任务\n"
+        "- 批量模式：updates 数组，一次更新多个任务（推荐用于并行推进，减少调用次数）\n"
         "状态值：pending（待处理）→ in_progress（进行中）→ completed（已完成）/ failed（失败）\n"
         "\n"
         "⚠ 状态转换规则（强制约束）：\n"
@@ -133,7 +136,8 @@ class TodoUpdateTool(Tool):
         "- pending → failed：必须先标记 in_progress\n"
         "- completed/failed → 任意状态：已结束的任务不可变更\n"
         "\n"
-        "正确示例：TodoUpdate(id=\"t1\", status=\"in_progress\") → 执行工作 → TodoUpdate(id=\"t1\", status=\"completed\")"
+        "正确示例（批量）：TodoUpdate(updates=[{\"id\":\"t1\",\"status\":\"in_progress\"},{\"id\":\"t2\",\"status\":\"in_progress\"}])\n"
+        "正确示例（单任务）：TodoUpdate(id=\"t1\", status=\"completed\")"
     )
 
     def get_parameters_schema(self) -> Dict[str, Any]:
@@ -142,25 +146,54 @@ class TodoUpdateTool(Tool):
             "properties": {
                 "id": {
                     "type": "string",
-                    "description": "任务ID，如 t1、t2",
+                    "description": "任务ID，如 t1、t2（单任务模式，与 updates 互斥）",
                 },
                 "status": {
                     "type": "string",
-                    "description": "新状态：pending / in_progress / completed / failed",
+                    "description": "新状态：pending / in_progress / completed / failed（单任务模式）",
                     "enum": ["pending", "in_progress", "completed", "failed"],
                 },
+                "updates": {
+                    "type": "array",
+                    "description": "批量更新列表（批量模式，与 id/status 互斥）。每项包含 id 和 status",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {
+                                "type": "string",
+                                "description": "任务ID，如 t1",
+                            },
+                            "status": {
+                                "type": "string",
+                                "description": "新状态：pending / in_progress / completed / failed",
+                                "enum": ["pending", "in_progress", "completed", "failed"],
+                            },
+                        },
+                        "required": ["id", "status"],
+                    },
+                },
             },
-            "required": ["id", "status"],
             "errorMessage": {
-                "id": "必须提供 id（任务ID），如 id=\"t1\"",
-                "status": "必须提供 status（新状态），可选值：pending / in_progress / completed / failed"
+                "id": "单任务模式：必须提供 id（任务ID），如 id=\"t1\"",
+                "status": "单任务模式：必须提供 status（新状态），可选值：pending / in_progress / completed / failed",
+                "updates": "批量模式：必须提供 updates 数组，如 updates=[{\"id\":\"t1\",\"status\":\"completed\"}]",
             },
         }
 
     def execute(self, parameters: Dict[str, Any], interrupt_check: Callable[[], bool] = None) -> ToolResult:
+        updates = parameters.get("updates")
         item_id = parameters.get("id", "")
         status = parameters.get("status", "")
 
+        # 批量模式
+        if updates and isinstance(updates, list):
+            return self._execute_batch(updates)
+        
+        # 单任务模式
+        return self._execute_single(item_id, status)
+
+    def _execute_single(self, item_id: str, status: str) -> ToolResult:
+        """单任务更新（向后兼容）"""
         todo = get_todo_list()
 
         if not todo.items:
@@ -208,12 +241,77 @@ class TodoUpdateTool(Tool):
             metadata=metadata,
         )
 
+    def _execute_batch(self, updates: List[Dict[str, str]]) -> ToolResult:
+        """批量更新多个任务状态"""
+        todo = get_todo_list()
+
+        if not todo.items:
+            return ToolResult(
+                success=False,
+                output="",
+                error="当前没有任务计划，请先使用 TodoCreate 创建",
+            )
+
+        results = []
+        success_count = 0
+        fail_count = 0
+        flash_ids = []
+
+        for update in updates:
+            uid = update.get("id", "")
+            ustatus = update.get("status", "")
+            
+            item = todo.get_item(uid)
+            if item is None:
+                results.append(f"  ✗ {uid}: 未找到")
+                fail_count += 1
+                continue
+
+            old_status = item.status
+            success, error_msg = todo.update_status(uid, ustatus)
+            if not success:
+                results.append(f"  ✗ {uid} [{item.content}]: {error_msg}")
+                fail_count += 1
+            else:
+                results.append(f"  {item.icon} {uid} [{item.content}]: {old_status} → {ustatus}")
+                success_count += 1
+                if ustatus == "completed":
+                    flash_ids.append(uid)
+
+        output_lines = [f"批量更新完成: ✓{success_count}  ✗{fail_count}"]
+        output_lines.extend(results)
+        output_lines.append(f"进度: {todo.progress_text}")
+
+        metadata = {}
+        if flash_ids:
+            metadata["flash_ids"] = flash_ids
+
+        return ToolResult(
+            success=fail_count == 0,
+            output="\n".join(output_lines),
+            summary=f"批量更新: ✓{success_count} ✗{fail_count} | 进度 {todo.progress_text}",
+            display_output=f"[bold]● 批量更新[/] ✓{success_count} ✗{fail_count} | {todo.progress_text}",
+            metadata=metadata,
+        )
+
     def is_read_only(self) -> bool:
         return False
 
     def validate_parameters(self, parameters: Dict[str, Any]) -> Optional[str]:
+        updates = parameters.get("updates")
+        # 批量模式
+        if updates:
+            if not isinstance(updates, list):
+                return "updates 必须是数组"
+            for i, update in enumerate(updates):
+                if not update.get("id"):
+                    return f"updates[{i}] 缺少 id"
+                if not update.get("status"):
+                    return f"updates[{i}] 缺少 status"
+            return None
+        # 单任务模式
         if not parameters.get("id"):
-            return "缺少 id 参数"
+            return "缺少 id 参数（单任务模式）或 updates 参数（批量模式）"
         if not parameters.get("status"):
             return "缺少 status 参数"
         return None

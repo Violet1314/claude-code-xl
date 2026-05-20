@@ -300,37 +300,46 @@ class BashTool(Tool):
         stdout_lines: List[str],
         stderr_lines: List[str],
         success: bool,
+        return_code: int = 0,
         max_output_length: int = None
     ) -> str:
         """
-        构建最终输出（含截断）
+        构建最终输出（含截断 + 结构化标签）
+
+        成功时：stdout + stderr（如有），标记 [exit=0]
+        失败时：[exit=N] + [STDERR] + [STDOUT]，错误信息优先展示
         """
         max_len = max_output_length or self.DEFAULT_MAX_OUTPUT_LENGTH
-        # 成功：stdout + stderr（如有）
-        # 失败：stderr + stdout（如有）
+
         if success:
             output = '\n'.join(stdout_lines)
             if stderr_lines:
-                output += '\n[stderr]\n' + '\n'.join(stderr_lines)
+                stderr_text = '\n'.join(stderr_lines)
+                output += f'\n[STDERR]\n{stderr_text}'
         else:
+            # 失败：exit code + 结构化标签，stderr 优先
+            parts = [f"[exit={return_code}]"]
             if stderr_lines:
-                output = '[stderr]\n' + '\n'.join(stderr_lines)
-                if stdout_lines:
-                    output += '\n[stdout]\n' + '\n'.join(stdout_lines)
-            else:
-                output = '\n'.join(stdout_lines) if stdout_lines else "(命令执行失败，无输出)"
+                stderr_text = '\n'.join(stderr_lines)
+                parts.append(f"[STDERR]\n{stderr_text}")
+            if stdout_lines:
+                stdout_text = '\n'.join(stdout_lines)
+                parts.append(f"[STDOUT]\n{stdout_text}")
+            if not stderr_lines and not stdout_lines:
+                parts.append(f"(命令执行失败，无输出)")
+            output = '\n'.join(parts)
 
         # 截断处理：优先保留错误信息
         if len(output) > max_len:
             if not success and stderr_lines:
                 stderr_text = '\n'.join(stderr_lines)
                 if len(stderr_text) > max_len:
-                    output = stderr_text[:max_len] + f"\n... (stderr 已截断，共 {len(stderr_text)} 字符)"
+                    output = stderr_text[:max_len] + f"\n... (STDERR 已截断，共 {len(stderr_text)} 字符)"
                 else:
                     stdout_text = '\n'.join(stdout_lines) if stdout_lines else ""
                     remaining = max_len - len(stderr_text) - 10
                     if stdout_text and remaining > 0:
-                        output = stderr_text + '\n[stdout]\n' + stdout_text[:remaining] + f"\n... (stdout 已截断)"
+                        output = stderr_text + f'\n[STDOUT]\n{stdout_text[:remaining]}' + f"\n... (STDOUT 已截断)"
                     else:
                         output = stderr_text
             else:
@@ -442,6 +451,7 @@ class BashTool(Tool):
             success = return_code == 0
             output = self._build_final_output(
                 stdout_lines, stderr_lines, success,
+                return_code=return_code,
                 max_output_length=self._get_output_limit(command, max_output)
             )
 

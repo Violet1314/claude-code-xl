@@ -150,16 +150,18 @@ class TodoList:
         if target is None:
             return False, f"未找到任务: {item_id}"
 
-        # 同一时间只允许一个任务处于 in_progress，避免计划模式并行漂移。
+        # 同一时间最多 PLAN.MAX_IN_PROGRESS 个任务处于 in_progress（支持并行推进）
         if status == "in_progress":
-            active = self.get_in_progress_item()
-            if active is not None and active.id != item_id:
-                return False, (
-                    f"已有任务 {active.id} 正在进行中，请先结束当前任务："
-                    f"TodoUpdate(id=\"{active.id}\", status=\"completed\") 或 "
-                    f"TodoUpdate(id=\"{active.id}\", status=\"failed\") 或 "
-                    f"TodoUpdate(id=\"{active.id}\", status=\"pending\") 暂停后换任务"
-                )
+            # 如果该任务当前已是 in_progress，不重复计数（允许重复标记）
+            if target.status != "in_progress":
+                active_count = self.in_progress_count
+                if active_count >= PLAN.MAX_IN_PROGRESS:
+                    active_items = [item for item in self.items if item.status == "in_progress"]
+                    active_ids = ", ".join(item.id for item in active_items)
+                    return False, (
+                        f"已有 {active_count} 个任务正在进行中（上限 {PLAN.MAX_IN_PROGRESS}）：{active_ids}。"
+                        f"请先结束某个进行中的任务后再开始新任务。"
+                    )
 
             # 依赖检查：开始任务前，前置依赖必须全部完成
             deps_ok, deps_msg = self.check_dependencies(item_id)

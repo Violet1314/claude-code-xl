@@ -414,32 +414,38 @@ class Conversation:
         head = reasoning[:150]
         omitted = len(reasoning) - 150
         return f"{head}\n\n... [推理过程已压缩，省略 {omitted} 字符] ..."
-    
     @staticmethod
     def _compress_tool_calls(tool_calls: list) -> list:
         """
-        压缩历史轮次 assistant 消息的 tool_calls：仅保留工具名和 id，丢弃完整参数
-        
-        模型在历史轮次中已不需要 tool_calls 的参数（结果在对应的 tool 消息中），
-        仅需知道"调了哪些工具"即可维持对话连贯性。
-        
-        Args:
-            tool_calls: 原始 tool_calls 列表
-        
-        Returns:
-            压缩后的 tool_calls 列表（保留 id 和 name，参数置空）
+        压缩历史轮次 assistant 消息的 tool_calls：保留工具名/id/关键参数，丢弃冗长参数
+
+        保留的关键参数（帮助模型回溯操作，每条仅数十字节）：
+        - file_path: Read/Write/Edit/Glob 的文件路径
+        - pattern: Grep/Glob 的搜索模式
+        - command: Bash 的命令（截断至 80 字符）
         """
-        if not tool_calls:
-            return tool_calls
+        KEEP_KEYS = {"file_path", "pattern", "command"}
+        import json as _json
+
         compressed = []
         for tc in tool_calls:
-            if isinstance(tc, dict) and "function" in tc:
+            if isinstance(tc, dict) and tc.get("type") == "function":
+                name = tc.get("function", {}).get("name", "")
+                args_str = tc.get("function", {}).get("arguments", "{}")
+                try:
+                    args = _json.loads(args_str)
+                    keep = {k: v for k, v in args.items() if k in KEEP_KEYS}
+                    # command 截断至 80 字符（通常只需知道是什么命令即可）
+                    if "command" in keep and len(keep["command"]) > 80:
+                        keep["command"] = keep["command"][:80] + "..."
+                except Exception:
+                    keep = {}
                 compressed.append({
                     "id": tc.get("id", ""),
-                    "type": tc.get("type", "function"),
+                    "type": "function",
                     "function": {
-                        "name": tc["function"].get("name", ""),
-                        "arguments": "{}",  # 参数置空，节省 token
+                        "name": name,
+                        "arguments": _json.dumps(keep, ensure_ascii=False),
                     },
                 })
             else:

@@ -47,6 +47,7 @@ class PlanDefaults:
     MAX_ITEMS: int = 20                       # 单个计划最大任务数
     MIN_ITEMS: int = 1                        # 最小任务数
     MAX_CONTENT_LEN: int = 200                # 任务描述最大长度
+    MAX_IN_PROGRESS: int = 3                  # 同时进行中的任务数上限（支持并行推进）
     REMINDER_MAX: int = 3                     # 计划模式最大连续提醒次数（熔断阈值）
     NO_TOOL_ROUNDS_MAX: int = 2               # 连续无工具调用轮次阈值
 
