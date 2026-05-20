@@ -83,7 +83,7 @@ def compress_tool_output(
     Returns:
         压缩后的输出
     """
-    MAX_OUTPUT_LEN = 2000  # 压缩阈值（从 3000 收紧为 2000）
+    MAX_OUTPUT_LEN = 1000  # 压缩阈值（从 2000 收紧为 1000，大部分工具输出在此区间）
 
     if len(output) <= MAX_OUTPUT_LEN:
         return output

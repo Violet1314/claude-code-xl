@@ -6,6 +6,7 @@ v2.8.17 优化要点：
 3. 中间压缩：对中间轮次的大输出进行摘要化，节省 token
 4. 工具输出摘要化：历史轮次的工具大输出替换为摘要
 """
+import re
 from typing import List, Dict, Optional
 from dataclasses import dataclass, field
 
@@ -46,13 +47,14 @@ class Conversation:
     
     # 上下文优化参数（基准值，自适应会在此基础上调整）
     ANCHOR_USER_MSGS_BASE = 3        # 锚定前 N 条用户消息（需求锚点）基准值
-    ANCHOR_USER_MSGS_MIN = 1         # 锚定最小值（极限压缩时仍保留1条）
+    ANCHOR_USER_MSGS_MIN = 2         # 锚定最小值（极限压缩时仍保留2条，防止需求丢失）
     RECENT_WINDOW_BASE = 10          # 保留最近 K 条消息（滑动窗口）基准值
-    RECENT_WINDOW_MIN = 4            # 窗口最小值
+    RECENT_WINDOW_MIN = 6            # 窗口最小值（极限压缩时保留6条，避免上下文断裂）
     RECENT_WINDOW_MAX = 20           # 窗口最大值（空间充足时放宽）
     TOOL_SUMMARY_THRESHOLD = 1500    # 工具输出超过此长度则摘要化
     TOOL_SUMMARY_MAX = 200           # 摘要化后保留的最大字符数
     ASSISTANT_SUMMARY_MAX = 500      # assistant 消息截断后保留的最大字符数
+    RECENT_TOOL_COMPRESS_THRESHOLD = 1000  # 近期窗口 tool 消息轻量压缩阈值
     
     def __init__(self, system_prompt: str = ""):
         """
@@ -217,6 +219,26 @@ class Conversation:
                 # 锚定和窗口重叠，窗口从锚定后开始
                 recent_msgs = chat_msgs[anchor_end_idx + 1:]
         
+        # 近期窗口 tool 消息轻量压缩：保留首尾摘要，节省近期窗口占用
+        # 这是近期窗口完全不压缩的最大盲区，tool 消息可能占窗口 50%+ 体积
+        recent_compressed = []
+        for msg in recent_msgs:
+            if msg.role == "tool" and len(msg.content) > self.RECENT_TOOL_COMPRESS_THRESHOLD:
+                head = msg.content[:300]
+                tail = msg.content[-200:]
+                omitted = len(msg.content) - 500
+                compressed_content = f"{head}\n\n... (省略 {omitted} 字符) ...\n\n{tail}"
+                recent_compressed.append(Message(
+                    role=msg.role,
+                    content=compressed_content,
+                    tool_call_id=msg.tool_call_id,
+                    tool_calls=msg.tool_calls,
+                    reasoning_content=msg.reasoning_content,
+                ))
+            else:
+                recent_compressed.append(msg)
+        recent_msgs = recent_compressed
+        
         recent_tokens = sum(estimate_tokens(m.content) + 4 for m in recent_msgs)
         current_tokens += recent_tokens
         
@@ -232,11 +254,16 @@ class Conversation:
         middle_compressed = []
         for msg in middle_msgs:
             compressed_content = self._compress_history_content(msg.content, msg.role)
+            # 历史轮次 assistant 消息的 tool_calls 压缩：仅保留工具名，丢弃完整参数
+            # 模型已不需要历史 tool_calls 的参数（结果在 tool 消息中），5个工具调用从~1000 token压到~100 token
+            compressed_tool_calls = msg.tool_calls
+            if msg.role == "assistant" and msg.tool_calls:
+                compressed_tool_calls = self._compress_tool_calls(msg.tool_calls)
             middle_compressed.append(Message(
                 role=msg.role,
                 content=compressed_content,
                 tool_call_id=msg.tool_call_id,
-                tool_calls=msg.tool_calls,
+                tool_calls=compressed_tool_calls,
                 reasoning_content=self._compress_reasoning_content(
                     getattr(msg, 'reasoning_content', None)
                 ),
@@ -278,10 +305,11 @@ class Conversation:
     def _adaptive_params(self, usage_ratio: float) -> tuple:
         """根据上下文使用率动态调整锚定数量和窗口大小
         
-        策略：
-        - 使用率 < 80%：空间充足，放宽窗口（最大20），保持基准锚定
-        - 使用率 80-90%：正常模式，使用基准参数
-        - 使用率 > 90%：极限压缩，缩小窗口和锚定
+        策略（v2.8.38+ 四档自适应）：
+        - 使用率 < 50%：空间充足，放宽窗口（最大20），保持基准锚定
+        - 使用率 50-70%：轻度压缩，基准锚定，中等窗口（12）
+        - 使用率 70-90%：中高压缩，锚定2，窗口8
+        - 使用率 ≥ 90%：极限压缩，最小锚定（2）+最小窗口（6）
         
         Args:
             usage_ratio: 当前上下文使用率（0.0 ~ 1.0+）
@@ -387,6 +415,36 @@ class Conversation:
         omitted = len(reasoning) - 150
         return f"{head}\n\n... [推理过程已压缩，省略 {omitted} 字符] ..."
     
+    @staticmethod
+    def _compress_tool_calls(tool_calls: list) -> list:
+        """
+        压缩历史轮次 assistant 消息的 tool_calls：仅保留工具名和 id，丢弃完整参数
+        
+        模型在历史轮次中已不需要 tool_calls 的参数（结果在对应的 tool 消息中），
+        仅需知道"调了哪些工具"即可维持对话连贯性。
+        
+        Args:
+            tool_calls: 原始 tool_calls 列表
+        
+        Returns:
+            压缩后的 tool_calls 列表（保留 id 和 name，参数置空）
+        """
+        if not tool_calls:
+            return tool_calls
+        compressed = []
+        for tc in tool_calls:
+            if isinstance(tc, dict) and "function" in tc:
+                compressed.append({
+                    "id": tc.get("id", ""),
+                    "type": tc.get("type", "function"),
+                    "function": {
+                        "name": tc["function"].get("name", ""),
+                        "arguments": "{}",  # 参数置空，节省 token
+                    },
+                })
+            else:
+                compressed.append(tc)  # 非标准格式原样保留
+        return compressed
     
     def reset(self) -> None:
         """重置会话（保留 system prompt）"""
@@ -434,9 +492,9 @@ class Conversation:
         if len(chat_msgs) < 10:
             return []  # 消息太少，不需要摘要
         
-        # 获取中间轮次（跳过前6条和后4条）
-        skip_head = 6
-        skip_tail = 4
+        # 动态计算 skip_head/skip_tail（与 apply_summary 保持一致）
+        skip_head = min(30, max(6, len(chat_msgs) // 10))
+        skip_tail = min(15, max(4, len(chat_msgs) // 15))
         if len(chat_msgs) <= skip_head + skip_tail:
             return []
         
@@ -476,11 +534,48 @@ class Conversation:
             {"role": "user", "content": summary_prompt}
         ]
     
+    @staticmethod
+    def _extract_entities_from_messages(messages: list) -> str:
+        """
+        从消息列表中提取文件路径和代码位置实体，供摘要回溯使用
+        
+        从被摘要替换的中间消息中提取涉及文件路径和代码位置引用，
+        让模型在需要细节时知道去哪查找，而非盲猜。
+        
+        Args:
+            messages: 被摘要替换的中间消息列表
+        
+        Returns:
+            回溯线索文本，无实体时返回空字符串
+        """
+        file_refs = set()
+        # 匹配 Read/Edit/Write 工具输出中的文件路径（如 "File: xxx.py" 或 "Path: xxx.py"）
+        _file_path_pattern = re.compile(
+            r'(?:file_path|path|File|Path)["\s:=]+["\']?'
+            r'([^\s"\'<>\n]+\.\w+)',  # 匹配 xxx.yyy 形式的文件路径
+        )
+        # 匹配代码位置引用（如 app.py:120-180 或 conversation.py:50）
+        _location_pattern = re.compile(r'(\w[\w.-]+\.\w+:\d+(?:-\d+)?)')
+        
+        for msg in messages:
+            content = msg.content or ""
+            for m in _file_path_pattern.finditer(content):
+                file_refs.add(m.group(1))
+            for m in _location_pattern.finditer(content):
+                file_refs.add(m.group(1))
+        
+        if not file_refs:
+            return ""
+        # 最多保留8个引用，控制 token
+        refs_str = ", ".join(sorted(file_refs)[:8])
+        return f"\n[回溯线索] 涉及: {refs_str} — 如需细节请 Read 对应文件"
+    
     def apply_summary(self, summary_text: str) -> None:
         """
         将生成的摘要应用到中间轮次
         
-        将锚定区域和窗口之间的中间消息替换为一条摘要消息
+        将锚定区域和窗口之间的中间消息替换为一条摘要消息，
+        并附带回溯线索（文件路径/代码位置），让模型知道去哪找回细节。
         
         Args:
             summary_text: 模型生成的摘要文本
@@ -494,19 +589,26 @@ class Conversation:
             system_msg = self._messages[0]
             chat_msgs = self._messages[1:]
         
-        skip_head = 6
-        skip_tail = 4
+        # 动态计算 skip_head/skip_tail（长对话保留更多头部上下文）
+        skip_head = min(30, max(6, len(chat_msgs) // 10))
+        skip_tail = min(15, max(4, len(chat_msgs) // 15))
         
         if len(chat_msgs) <= skip_head + skip_tail:
             return
+        
+        # 提取中间消息的回溯线索（文件路径/代码位置）
+        middle = chat_msgs[skip_head:-skip_tail]
+        trace_hint = self._extract_entities_from_messages(middle)
         
         # 重组：system + 前段 + 摘要 + 后段
         head = chat_msgs[:skip_head]
         tail = chat_msgs[-skip_tail:]
         
+        summary_content = f"[对话摘要] 以下是对之前对话的摘要：{summary_text.strip()}{trace_hint}"
+        
         summary_msg = Message(
             role="user",
-            content=f"[对话摘要] 以下是对之前对话的摘要：{summary_text.strip()}"
+            content=summary_content
         )
         
         self._messages = []

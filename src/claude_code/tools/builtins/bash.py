@@ -17,12 +17,12 @@ class BashTool(Tool):
     description = (
         "执行 shell 命令。"
         "⚠️ 不支持交互式命令（如 python -i、vim 等），会卡住直到超时。"
-        "输出限制：默认 5000 字符，测试/构建类命令自动提升至 10000。"
+        "输出限制：默认 3000 字符，测试/构建类命令自动提升至 10000。"
         "沙箱：工作目录限制在操作根目录内，禁止访问系统关键路径，命令执行前自动安全扫描。"
     )
 
     # 输出限制
-    DEFAULT_MAX_OUTPUT_LENGTH = 5000
+    DEFAULT_MAX_OUTPUT_LENGTH = 3000
     MAX_EXECUTION_TIME = 120  # 秒
 
     # 动态输出限制：根据命令类型调整
@@ -70,7 +70,7 @@ class BashTool(Tool):
                 },
                 "max_output_length": {
                     "type": "integer",
-                    "description": "最大输出字符数，默认 5000（测试/构建命令自动 10000）",
+                    "description": "最大输出字符数，默认 3000（测试/构建命令自动 10000）",
                     "default": 0
                 },
                 "cwd": {

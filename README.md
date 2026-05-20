@@ -2,7 +2,7 @@
 
 仿照官方 Claude Code 风格构建的 CLI AI 编程助手，支持 AI 驱动的文件操作和命令执行。
 
-**版本：v2.8.38**
+**版本：v2.8.39**
 
 ## 功能特性
 
@@ -247,37 +247,41 @@ claude-code/
 
 ## 更新日志
 
+### v2.8.39 (2025-05-10)
+**长对话质量保障 + 工具调度 Token 深度优化：极限压缩保底 + 摘要回溯线索 + 近期窗口压缩 + tool_calls 压缩 + 阈值收紧**
+*   ✅ 极限压缩保底：`ANCHOR_USER_MSGS_MIN` 1→2、`RECENT_WINDOW_MIN` 4→6，>90% 时多保留 3 条消息，防止长对话质量断崖
+*   ✅ 摘要回溯线索：新增 `_extract_entities_from_messages()` 正则提取文件路径/代码位置实体，`apply_summary()` 摘要尾部追加 `[回溯线索]`，模型不再盲猜
+*   ✅ 动态 skip_head/skip_tail：从硬编码 6/4 改为按消息总量比例计算，长对话保留更多头部上下文
+*   ✅ Token 预算提醒措辞优化：≥85% 时从"必须极度精简：不解释"改为"精简但保留关键代码和决策逻辑，如信息不足请 Read 确认"
+*   ✅ 摘要成本对冲：计划模式仅剩 ≤2 个未完成任务时跳过摘要生成，避免"先花后省"反亏
+*   ✅ 近期窗口 tool 消息轻量压缩：阶段2对 >1000 字符的 tool 消息做轻量压缩（首 300+尾 200），修复近期窗口完全不压缩的盲区
+*   ✅ compress_tool_output 阈值收紧：压缩阈值从 2000 降至 1000，2000-5000 字符的工具输出不再完整进入历史
+*   ✅ assistant 消息 tool_calls 历史压缩：新增 `_compress_tool_calls()` 对中间区域 assistant 消息的 tool_calls 仅保留工具名和 id，参数置空
+*   ✅ Bash 默认截断收紧：`DEFAULT_MAX_OUTPUT_LENGTH` 从 5000 降至 3000，verbose 模式保持 10000
+*   ✅ 全量测试通过：205 passed
+
 ### v2.8.38 (2025-05-09)
 **Token深度优化 + 思考模型兼容：推理压缩 + 增量推送 + 语义摘要 + 重复Read消除 + 窗口渐进调参 + 计划提醒合并**
-*   ✅ reasoning_content 兼容：Message 类新增 reasoning_content 属性，to_dict/from_dict 支持序列化；流式响应收集 thinking_content；_handle_response / _process_response 完整传递链路，解决 "reasoning_content must be passed back" 报错
-*   ✅ 推理链历史压缩：`_compress_reasoning_content()` 对中间/锚定消息的推理链截断至 150 字符（近期窗口保留完整），普通模型零影响
-*   ✅ 任务清单增量推送：`TodoList.to_prompt_diff()` + `get_status_snapshot()`，计划模式后续轮次仅注入状态变化项，首轮保持全量
-*   ✅ 工具反馈语义压缩：`_extract_semantic_summary()` 对 Read 输出提取函数/类签名（Python/JS/TS/Go/Rust/Java），大幅减少历史中冗余代码 Token
-*   ✅ 计划提醒合并：检测上一条消息是否为 `[计划提醒]`，是则替换而非追加，避免历史堆积
-*   ✅ 自适应窗口渐进式：阈值从 80%/90% 两档改为 50%/70%/90% 四档渐进压缩
-*   ✅ 计划模式摘要早触发：计划模式下对话摘要触发阈值从 80% 降至 60%
-*   ✅ 消除重复 Read：`FileCacheManager` 新增最近读取追踪（5分钟窗口），重复 Read 返回缓存摘要而非完整内容
+*   ✅ reasoning_content 兼容：Message 类新增 reasoning_content 属性，完全向后兼容
+*   ✅ 推理链历史压缩：`_compress_reasoning_content()` 对中间/锚定消息的推理链截断至 150 字符，普通模型零影响
+*   ✅ 任务清单增量推送：`TodoList.to_prompt_diff()` + `get_status_snapshot()`，后续轮次仅注入状态变化项
+*   ✅ 工具反馈语义压缩：`_extract_semantic_summary()` 对 Read 输出提取函数/类签名，大幅减少历史中冗余代码 Token
+*   ✅ 计划提醒合并：检测上一条消息是否为 `[计划提醒]`，是则替换而非追加
+*   ✅ 自适应窗口渐进式：从 80%/90% 两档改为 50%/70%/90% 四档渐进压缩
+*   ✅ 计划模式摘要早触发：摘要触发阈值从 80% 降至 60%
+*   ✅ 消除重复 Read：`FileCacheManager` 新增 `_recent_reads` 追踪，5 分钟内重复读取返回缓存摘要
+*   ✅ Token 预算不入历史：预算提示追加到临时 messages，天然不入历史
 *   ✅ 全量测试通过：205 passed
 
 ### v2.8.37 (2025-05-08)
-**智能优化与架构升级：TodoList统一管理 + 缓存摘要增强 + 上下文自适应调参 + 计划模式依赖 + 工具并行执行 + 对话摘要 + Token预算**
-*   ✅ TodoList 注册到 ToolContext：消除模块级全局变量 `_todo_list`，统一生命周期管理
-*   ✅ 缓存摘要增强 — Python 函数签名：AST 提取函数签名（参数名+类型注解+返回值），类方法同样提取
-*   ✅ 缓存摘要增强 — JSON 值类型：提取 `key_types`（顶层键的值类型）和 `item_keys`（数组元素键）
-*   ✅ 上下文自适应调参：根据使用率动态调整锚定和窗口（>90%极限1+4、80-90%基准3+10、<80%放宽3+20）
-*   ✅ 计划模式依赖关系：`TodoItem` 新增 `depends_on` 字段，启动任务前校验前置依赖已完成
-*   ✅ 工具并行执行：只读工具 ThreadPoolExecutor 并行（最大4线程），写操作顺序执行
-*   ✅ 对话摘要生成：上下文>80%时调用API生成摘要替换中间消息
-*   ✅ Token 预算管理：注入使用率提醒（50%/70%/85%三级），让模型自主精简输出
-*   ✅ 全量测试通过：205 passed
-
-### v2.8.36 (2025-05-07)
-**长对话质量优化：语义摘要 + 防幻觉提醒 + Edit 新鲜度校验 + autosave 崩溃修复**
-*   ✅ 文件内容语义摘要：`FileCacheManager` 对 Python/JS/TS/JSON/YAML 提取结构化摘要（类名、函数、import、顶层键），长对话可快速查询文件概览
-*   ✅ 长对话防幻觉提醒：上下文窗口使用 ≥70% 时自动注入 user 角色提醒，建议先 Read 确认
-*   ✅ Edit 缓存新鲜度校验：执行前检查文件是否已缓存/当前版本是否被读取过，未读则附加提示建议先 Read
-*   ✅ autosave 崩溃修复：修复 API 响应含 surrogate 字符时编码崩溃；异常捕获扩展
-*   ✅ 自动保存间隔调整：从每 5 轮调整为每 20 轮
+**智能优化与架构升级：TodoList统一管理 + 缓存摘要增强 + 上下文自适应调参 + 计划模式依赖关系 + 工具并行执行 + 对话摘要生成 + Token预算管理**
+*   ✅ TodoList 注册到 ToolContext：消除模块级全局变量，统一收敛至 ToolContext 容器管理生命周期
+*   ✅ 缓存摘要增强：Python 函数签名提取 + JSON 值类型提取
+*   ✅ 上下文自适应调参：`_adaptive_params(usage_ratio)` 根据使用率动态调整锚定数和窗口
+*   ✅ 计划模式依赖关系：`TodoItem` 新增 `depends_on` 字段，`update_status()` 启动前校验前置依赖
+*   ✅ 工具并行执行：只读工具使用 ThreadPoolExecutor 并行（最大4线程），写操作顺序执行
+*   ✅ 对话摘要生成：上下文>80%时触发 API 生成摘要，替换中间消息为一条摘要消息
+*   ✅ Token 预算管理：chat 循环中注入三级提醒（50%/70%/85%）
 *   ✅ 全量测试通过：205 passed
 
 ---

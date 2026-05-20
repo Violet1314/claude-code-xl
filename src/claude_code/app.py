@@ -458,11 +458,12 @@ class Application:
                     )
                     messages.append({"role": "user", "content": budget_hint})
                 elif usage_pct >= 0.85:
-                    # 高使用率：强制精简
+                    # 高使用率：精简但保留关键信息
                     budget_hint = (
                         f"[token预算⚠] 上下文已用 {usage_pct:.0%}，"
                         f"仅剩约 {(1 - usage_pct) * self.current_model.context_limit:.0f} token！"
-                        f"必须极度精简：只输出最关键的代码和指令，不解释，不重复已有内容。"
+                        f"请精简输出，但必须保留关键代码和决策逻辑，省略冗余解释。"
+                        f"如信息不足请 Read 确认，不要猜测。"
                         f"如无法完成，请告知用户使用 /new 开始新会话。"
                     )
                     messages.append({"role": "user", "content": budget_hint})
@@ -1047,6 +1048,19 @@ class Application:
         )
         if has_summary:
             return  # 已有摘要，不重复生成
+
+        # 计划模式成本对冲：仅剩≤2个未完成任务时跳过摘要生成
+        # 此时对话即将结束，花一次 API 生成摘要的"先花后省"反而亏了
+        if self._plan_mode:
+            try:
+                from claude_code.tools.builtins.todo import get_todo_list
+                todo = get_todo_list()
+                if todo and todo.items:
+                    remaining = todo.total_count - todo.done_count
+                    if remaining <= 2:
+                        return  # 快结束了，跳过摘要
+            except Exception:
+                pass  # 获取失败时安全放行
 
         # 生成摘要请求消息
         summary_msgs = self.conversation.generate_summary_messages()
