@@ -84,13 +84,13 @@ class ReadTool(Tool):
                 # 文件不存在时，自动回退到 Glob 搜索同名文件
                 return self._handle_file_not_found(file_path, pm)
             if not path.is_file():
-                return ToolResult(success=False, output="", error=f"不是文件: {file_path}")
+                return ToolResult(success=False, output="", error=f"不是文件: {file_path}\n下一步: 确认路径指向文件而非目录，或使用 Glob 搜索正确路径")
 
             file_size = path.stat().st_size
             if file_size > self.MAX_FILE_SIZE:
                 return ToolResult(
                     success=False, output="",
-                    error=f"文件过大 ({file_size / 1024:.1f}KB)，超过 1MB 限制"
+                    error=f"文件过大 ({file_size / 1024:.1f}KB)，超过 1MB 限制\n下一步: 使用 offset+limit 分段读取，或使用 Grep 搜索关键内容"
                 )
 
             # 统一由 executor 的 Spinner 显示进度，工具内部不再显示
@@ -143,8 +143,11 @@ class ReadTool(Tool):
             output = self._build_model_output(
                 path, lines, total_lines, size_kb, reference, offset, limit, was_cached
             )
+            # 判断是否为精确行段读取（用户指定了 offset/limit）
+            has_explicit_range = (offset > 1) or (limit < total_lines)
             display_output = self._build_terminal_display(
-                path, lines, total_lines, size_kb, reference, version, was_cached
+                path, lines, total_lines, size_kb, reference, version, was_cached,
+                has_explicit_range=has_explicit_range
             )
 
             # 记录读取操作
@@ -172,9 +175,9 @@ class ReadTool(Tool):
             )
 
         except PermissionError:
-            return ToolResult(success=False, output="", error=f"权限不足，无法读取: {file_path}")
+            return ToolResult(success=False, output="", error=f"权限不足，无法读取: {file_path}\n下一步: 检查文件权限，或使用 Bash 执行 Get-Acl 查看")
         except Exception as e:
-            return ToolResult(success=False, output="", error=f"读取失败: {str(e)}")
+            return ToolResult(success=False, output="", error=f"读取失败: {str(e)}\n下一步: 检查文件路径和编码，或使用 Bash cat/type 命令读取")
 
     # ============================================================
     # 模型输出（纯文本，无 Rich markup）
@@ -188,13 +191,18 @@ class ReadTool(Tool):
 
         # 文件元信息
         parts.append(f"File: {path.name} ({total_lines} lines, {size_kb:.1f}KB)")
-        parts.append(f"Path: {path}")
-        parts.append(f"Cache: {reference}")
-        if was_cached:
-            parts.append("⚠ 缓存内容：如 Edit 匹配失败，请重新 Read 获取最新内容")
-        parts.append("")
+        parts.append(f"Path: {path.absolute()}")
 
-        # 计算读取范围
+        # 结构概览：提取关键符号位置，帮助 API 一次定位精准读取
+        if offset <= 1:  # 仅首次全量读取时展示结构概览，精确行段不重复
+            symbol_header = self._build_symbol_header(lines, str(path))
+            if symbol_header:
+                parts.append(symbol_header)
+
+        if was_cached:
+            parts.append(f"Cache: [{reference}]")
+
+        # 内容区
         start_line = max(1, offset)
         end_line = min(total_lines, start_line + limit)
 
@@ -209,20 +217,180 @@ class ReadTool(Tool):
         return '\n'.join(parts)
 
     # ============================================================
+    # 结构概览提取
+    # ============================================================
+
+    def _build_symbol_header(self, lines: list, file_path: str) -> str:
+        """
+        从文件内容提取关键符号位置，生成结构概览头部
+
+        让 API 一次就能知道文件有哪些类/函数、在哪一行，
+        避免盲目分段读取浪费 2-3 轮工具调用。
+
+        Returns:
+            结构概览字符串，无法提取时返回空字符串
+        """
+        symbols = self._extract_symbol_positions(lines, file_path)
+        if not symbols:
+            return ""
+
+        # 限制符号数量，避免 token 膨胀（最多 15 个，优先顶层）
+        MAX_SYMBOLS = 15
+        if len(symbols) > MAX_SYMBOLS:
+            symbols = symbols[:MAX_SYMBOLS]
+
+        # 格式：class App L42 | def chat L520 | def run L1577
+        symbol_parts = []
+        for kind, name, line_no in symbols:
+            symbol_parts.append(f"{kind} {name} L{line_no}")
+
+        return "[结构] " + " | ".join(symbol_parts)
+
+    def _extract_symbol_positions(self, lines: list, file_path: str) -> list:
+        """
+        提取文件中的关键符号位置（类/函数定义 + 行号）
+
+        Args:
+            lines: 文件行列表
+            file_path: 文件路径（用于判断文件类型）
+
+        Returns:
+            [(kind, name, line_no), ...] 列表，如 [("class", "App", 42)]
+        """
+        import re
+
+        ext = Path(file_path).suffix.lower()
+        symbols = []
+
+        if ext == ".py":
+            symbols = self._extract_python_symbols(lines)
+        elif ext in (".js", ".ts", ".jsx", ".tsx", ".mjs"):
+            symbols = self._extract_js_symbols(lines)
+        elif ext in (".go",):
+            symbols = self._extract_go_symbols(lines)
+        elif ext in (".rs",):
+            symbols = self._extract_rust_symbols(lines)
+        elif ext in (".java", ".kt"):
+            symbols = self._extract_java_symbols(lines)
+
+        return symbols
+
+    def _extract_python_symbols(self, lines: list) -> list:
+        """Python: 使用 AST 提取顶层 class/function 定义"""
+        try:
+            import ast
+            source = "\n".join(lines)
+            tree = ast.parse(source)
+            symbols = []
+            for node in ast.iter_child_nodes(tree):
+                if isinstance(node, ast.ClassDef):
+                    symbols.append(("class", node.name, node.lineno))
+                elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    symbols.append(("def", node.name, node.lineno))
+            return symbols
+        except Exception:
+            # AST 解析失败，回退到正则
+            return self._extract_by_regex(lines, [
+                r'^(\s*)(class\s+\w+)',
+                r'^(\s*)(def\s+\w+)',
+                r'^(\s*)(async\s+def\s+\w+)',
+            ])
+
+    def _extract_js_symbols(self, lines: list) -> list:
+        """JS/TS: 正则提取顶层 function/class/export 定义"""
+        return self._extract_by_regex(lines, [
+            r'^(export\s+)?(default\s+)?(class\s+\w+)',
+            r'^(export\s+)?(default\s+)?(function\s+\w+)',
+            r'^(export\s+)?(default\s+)?(async\s+function\s+\w+)',
+            r'^(export\s+)?(const\s+\w+\s*=\s*(?:async\s+)?\()',  # const foo = () =>
+        ])
+
+    def _extract_go_symbols(self, lines: list) -> list:
+        """Go: 正则提取 func/type/struct 定义"""
+        return self._extract_by_regex(lines, [
+            r'^func\s+(\w+)',
+            r'^type\s+(\w+)\s+struct',
+            r'^type\s+(\w+)\s+interface',
+        ])
+
+    def _extract_rust_symbols(self, lines: list) -> list:
+        """Rust: 正则提取 fn/struct/impl/trait 定义"""
+        return self._extract_by_regex(lines, [
+            r'^(pub\s+)?(async\s+)?fn\s+(\w+)',
+            r'^(pub\s+)?struct\s+(\w+)',
+            r'^impl\s+(\w+)',
+            r'^(pub\s+)?trait\s+(\w+)',
+        ])
+
+    def _extract_java_symbols(self, lines: list) -> list:
+        """Java/Kotlin: 正则提取 class/interface/object 定义"""
+        return self._extract_by_regex(lines, [
+            r'^(public\s+)?(abstract\s+)?(class\s+\w+)',
+            r'^(public\s+)?(interface\s+\w+)',
+            r'^(public\s+)?(enum\s+\w+)',
+            r'^(public\s+)?(static\s+)?\w+\s+\w+\s*\(',  # method
+        ])
+
+    def _extract_by_regex(self, lines: list, patterns: list) -> list:
+        """
+        通用正则提取：遍历行，匹配模式，提取符号名和行号
+
+        仅提取顶层符号（缩进 <= 4 空格），避免嵌套符号膨胀 token
+        """
+        import re
+        symbols = []
+        for i, line in enumerate(lines):
+            stripped = line.lstrip()
+            indent = len(line) - len(stripped)
+            if indent > 4:  # 跳过深层嵌套
+                continue
+            for pattern in patterns:
+                m = re.match(pattern, line)
+                if m:
+                    # 提取最后一个匹配组作为符号名（去掉关键字）
+                    name = m.group(m.lastindex or 0).strip().split()[-1].rstrip('(')
+                    # 推断类型
+                    raw = m.group(0)
+                    if 'class' in raw:
+                        kind = 'class'
+                    elif 'struct' in raw:
+                        kind = 'struct'
+                    elif 'interface' in raw or 'trait' in raw:
+                        kind = 'interface'
+                    elif 'impl' in raw:
+                        kind = 'impl'
+                    else:
+                        kind = 'def'
+                    symbols.append((kind, name, i + 1))
+                    break  # 一行只匹配一个模式
+        return symbols
+
+    # ============================================================
     # 终端显示（省略模式）
     # ============================================================
 
     def _build_terminal_display(
-        self, path, lines, total_lines, size_kb, reference, version, was_cached
+        self, path, lines, total_lines, size_kb, reference, version, was_cached,
+        has_explicit_range=False
     ) -> str:
-        """构建给终端的摘要行（文件内容通过 output 传给模型，终端只显示摘要）"""
+        """构建给终端的摘要行（文件内容通过 output 传给模型，终端只显示摘要）
+        
+        Args:
+            has_explicit_range: 用户指定了 offset/limit，精确行段模式，终端显示完整行段不省略
+        """
         # 格式化大小
         if size_kb < 1024:
             size_str = f"{size_kb:.1f}KB"
         else:
             size_str = f"{size_kb / 1024:.1f}MB"
 
-        return f"  {ICONS.get('read', '◇')} Read [cyan]{escape(path.name)}[/]  [dim]{total_lines} lines · {size_str}[/]"
+        base = f"  {ICONS.get('read', '◇')} Read [cyan]{escape(path.name)}[/]  [dim]{total_lines} lines · {size_str}[/]"
+        
+        # 精确行段模式：显示行段范围，提示不省略
+        if has_explicit_range:
+            return f"{base} [dim](精确行段，不省略)[/]"
+        
+        return base
 
     # ============================================================
     # 文件读取

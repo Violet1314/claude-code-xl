@@ -4,5 +4,5 @@
 避免 pyproject.toml / defaults.py / 文档之间的版本不一致。
 """
 
-__version__ = "2.8.40"
+__version__ = "2.8.41"
 __author__ = "XieLong"

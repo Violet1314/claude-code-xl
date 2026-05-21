@@ -2,7 +2,7 @@
 
 仿照官方 Claude Code 风格构建的 CLI AI 编程助手，支持 AI 驱动的文件操作和命令执行。
 
-**版本：v2.8.40**
+**版本：v2.8.41**
 
 ## 功能特性
 
@@ -247,6 +247,22 @@ claude-code/
 
 ## 更新日志
 
+### v2.8.41 (2025-05-12)
+**工具质量加固 + API 侧体验优化：Grep 崩溃修复 + 工具输出增强 + 智能压缩 + 长对话质量保障**
+*   ✅ Grep context 崩溃修复：`_add_context_to_matches()` 3 元组解包改为 `match[0:3]` 安全取值
+*   ✅ 工具错误提示增加"下一步"建议：Grep/Read/Glob 共 7 处错误追加可执行建议
+*   ✅ Bash Windows 统一 UTF-8：PowerShell 前缀扩展 OutputEncoding + InputEncoding + `$OutputEncoding`
+*   ✅ Read 精确行段模式：用户指定 offset/limit 时终端标记"精确行段，不省略"
+*   ✅ Todo 批量模式部分成功提示：区分全部成功/部分成功/全部失败三种状态
+*   ✅ Read 结构概览头部：首次全量 Read 注入 `[结构] class App L42 | def chat L520 | ...` 符号位置索引，一次定位精准读取
+*   ✅ Grep 醒目行号 + 上下文范围标注：匹配行 `▸L42  ✎Edit(L42)` 格式，context 模式标注 `(上下文 L38-40)`
+*   ✅ Edit 三级匹配容错自动降级：精确→模糊→行级归一化，找到唯一匹配自动执行，失败时给出具体行号建议
+*   ✅ Bash 智能截断 + CWD 跟踪：失败时 stderr 优先保留+stdout 关键行提取，成功时语义关键行+首尾保留；跨调用 cd 目录追踪
+*   ✅ 工具反馈语义压缩：Read/Grep/Glob/Edit/Bash 按工具类型定制压缩策略，长对话中保留操作意图而非简单头尾截断
+*   ✅ 长对话操作摘要链：中间压缩阶段将连续工具操作替换为 `[操作摘要链] Read→Edit L42→Bash pytest ✓→Write`，Token 极低信息密度极高
+*   ✅ 回归测试覆盖增强：新增 15 个测试覆盖 Grep/Glob/Bash/Read/Todo
+*   ✅ 全量测试通过：220 passed，0 回归
+
 ### v2.8.40 (2025-05-11)
 **计划模式并行化 + API 侧体验优化**
 *   ✅ 并行推进：同时 in_progress 上限从 1 提升至 3，模型可并行标记多个任务后一起干活
@@ -254,23 +270,10 @@ claude-code/
 *   ✅ 计划提示更新：规则中包含并行能力说明
 *   ✅ Bash 限制声明修正：system prompt 中输出限制从 5000 修正为 3000（与实际默认值一致）
 *   ✅ Grep/Glob 截断信息前置：截断提示移至首行，避免被输出压缩裁掉
-*   ✅ tool_calls 压缩保留关键参数：保留 `file_path`/`pattern`/`command`，帮助模型回溯
+*   ✅ tool_calls 压缩保留关键参数：保留 `file_path`/`pattern`/`command`，帮助模型回溯历史操作
 *   ✅ Bash 错误输出结构化：`[exit=N]` + `[STDERR]` + `[STDOUT]` 标签化分离
 *   ✅ Edit 匹配失败三级定位：子串→归一化→通用搜索，返回最接近行号和内容
 *   ✅ 全量测试通过：205 passed，0 回归
-
-### v2.8.39 (2025-05-10)
-**长对话质量保障 + 工具调度 Token 深度优化：极限压缩保底 + 摘要回溯线索 + 近期窗口压缩 + tool_calls 压缩 + 阈值收紧**
-*   ✅ 极限压缩保底：`ANCHOR_USER_MSGS_MIN` 1→2、`RECENT_WINDOW_MIN` 4→6，>90% 时多保留 3 条消息，防止长对话质量断崖
-*   ✅ 摘要回溯线索：新增 `_extract_entities_from_messages()` 正则提取文件路径/代码位置实体，`apply_summary()` 摘要尾部追加 `[回溯线索]`，模型不再盲猜
-*   ✅ 动态 skip_head/skip_tail：从硬编码 6/4 改为按消息总量比例计算，长对话保留更多头部上下文
-*   ✅ Token 预算提醒措辞优化：≥85% 时从"必须极度精简：不解释"改为"精简但保留关键代码和决策逻辑，如信息不足请 Read 确认"
-*   ✅ 摘要成本对冲：计划模式仅剩 ≤2 个未完成任务时跳过摘要生成，避免"先花后省"反亏
-*   ✅ 近期窗口 tool 消息轻量压缩：阶段2对 >1000 字符的 tool 消息做轻量压缩（首 300+尾 200），修复近期窗口完全不压缩的盲区
-*   ✅ compress_tool_output 阈值收紧：压缩阈值从 2000 降至 1000，2000-5000 字符的工具输出不再完整进入历史
-*   ✅ assistant 消息 tool_calls 历史压缩：新增 `_compress_tool_calls()` 对中间区域 assistant 消息的 tool_calls 仅保留工具名和 id，参数置空
-*   ✅ Bash 默认截断收紧：`DEFAULT_MAX_OUTPUT_LENGTH` 从 5000 降至 3000，verbose 模式保持 10000
-*   ✅ 全量测试通过：205 passed
 
 ### v2.8.38 (2025-05-09)
 **Token深度优化 + 思考模型兼容：推理压缩 + 增量推送 + 语义摘要 + 重复Read消除 + 窗口渐进调参 + 计划提醒合并**
@@ -279,7 +282,7 @@ claude-code/
 *   ✅ 任务清单增量推送：`TodoList.to_prompt_diff()` + `get_status_snapshot()`，后续轮次仅注入状态变化项
 *   ✅ 工具反馈语义压缩：`_extract_semantic_summary()` 对 Read 输出提取函数/类签名，大幅减少历史中冗余代码 Token
 *   ✅ 计划提醒合并：检测上一条消息是否为 `[计划提醒]`，是则替换而非追加
-*   ✅ 自适应窗口渐进式：从 80%/90% 两档改为 50%/70%/90% 四档渐进压缩
+*   ✅ 窗口渐进调参：`get_optimized_messages()` 根据上下文使用率动态调整锚定数和窗口大小
 *   ✅ 计划模式摘要早触发：摘要触发阈值从 80% 降至 60%
 *   ✅ 消除重复 Read：`FileCacheManager` 新增 `_recent_reads` 追踪，5 分钟内重复读取返回缓存摘要
 *   ✅ Token 预算不入历史：预算提示追加到临时 messages，天然不入历史

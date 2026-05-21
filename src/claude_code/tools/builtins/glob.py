@@ -66,7 +66,8 @@ class GlobTool(Tool):
                     error=(
                         f"目录不存在: {search_path}\n"
                         f"ℹ 当前操作根目录: {pm.active_path}\n"
-                        f"请确保路径在操作根目录下，如: path=\"{pm.active_path}\\src\""
+                        f"请确保路径在操作根目录下，如: path=\"{pm.active_path}\\src\"\n"
+                        f"下一步: 使用 /pwd 查看当前操作根目录，或使用 Read 读取目录结构"
                     )
                 )
 
@@ -120,7 +121,7 @@ class GlobTool(Tool):
             )
 
         except Exception as e:
-            return ToolResult(success=False, output="", error=f"搜索失败: {str(e)}")
+            return ToolResult(success=False, output="", error=f"搜索失败: {str(e)}\n下一步: 检查 pattern 语法，或缩小 path 范围后重试")
 
     # ============================================================
     # 模型输出（纯文本）

@@ -278,7 +278,18 @@ class TodoUpdateTool(Tool):
                 if ustatus == "completed":
                     flash_ids.append(uid)
 
-        output_lines = [f"批量更新完成: ✓{success_count}  ✗{fail_count}"]
+        # 判断批量更新结果状态
+        if fail_count == 0:
+            batch_success = True
+            status_label = "全部成功"
+        elif success_count > 0:
+            batch_success = True  # 部分成功也算成功（已生效的不可回滚）
+            status_label = "部分成功"
+        else:
+            batch_success = False
+            status_label = "全部失败"
+
+        output_lines = [f"批量更新{status_label}: ✓{success_count}  ✗{fail_count}"]
         output_lines.extend(results)
         output_lines.append(f"进度: {todo.progress_text}")
 
@@ -287,10 +298,10 @@ class TodoUpdateTool(Tool):
             metadata["flash_ids"] = flash_ids
 
         return ToolResult(
-            success=fail_count == 0,
+            success=batch_success,
             output="\n".join(output_lines),
-            summary=f"批量更新: ✓{success_count} ✗{fail_count} | 进度 {todo.progress_text}",
-            display_output=f"[bold]● 批量更新[/] ✓{success_count} ✗{fail_count} | {todo.progress_text}",
+            summary=f"批量更新{status_label}: ✓{success_count} ✗{fail_count} | 进度 {todo.progress_text}",
+            display_output=f"[bold]● 批量更新[/] {status_label} ✓{success_count} ✗{fail_count} | {todo.progress_text}",
             metadata=metadata,
         )
 

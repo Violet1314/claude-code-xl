@@ -164,9 +164,9 @@ class GrepTool(Tool):
             )
 
         except re.error as e:
-            return ToolResult(success=False, output="", error=f"正则表达式错误: {str(e)}")
+            return ToolResult(success=False, output="", error=f"正则表达式错误: {str(e)}\n下一步: 检查正则语法，或简化 pattern 后重试")
         except Exception as e:
-            return ToolResult(success=False, output="", error=f"搜索失败: {str(e)}")
+            return ToolResult(success=False, output="", error=f"搜索失败: {str(e)}\n下一步: 尝试缩小搜索范围(path参数)或使用更简单的 pattern")
 
     # ============================================================
     # 模型输出（纯文本）
@@ -191,24 +191,37 @@ class GrepTool(Tool):
         parts.append("")
 
         current_file = None
+        prev_context_start = None
+        prev_context_end = None
+
         for match in matches:
             file_path, line_num, line_content, is_match = match
             if file_path != current_file:
                 parts.append("")
                 parts.append(f"--- {file_path} ---")
                 current_file = file_path
-            if len(line_content) > self.PREVIEW_WIDTH:
-                line_content = line_content[:self.PREVIEW_WIDTH - 3] + "..."
-            prefix = f"{line_num:5d} |" if is_match else f"{line_num:5d} |"
-            parts.append(f"{prefix} {line_content}")
+                prev_context_start = None
+                prev_context_end = None
+
+            if is_match:
+                if prev_context_start is not None:
+                    if prev_context_start == prev_context_end:
+                        parts.append(f"    (上下文 L{prev_context_start})")
+                    else:
+                        parts.append(f"    (上下文 L{prev_context_start}-{prev_context_end})")
+                    prev_context_start = None
+                    prev_context_end = None
+                parts.append(f"  ▸{line_num:5d} | {line_content}  ✎Edit(L{line_num})")
+            else:
+                parts.append(f"    {line_num:5d} | {line_content}")
+                if prev_context_start is None:
+                    prev_context_start = line_num
+                prev_context_end = line_num
 
         return '\n'.join(parts)
 
-    # ============================================================
-    # 终端显示（统一格式）
-    # ============================================================
-
     def _build_terminal_display(self, pattern: str, matches: List[tuple], total: int) -> str:
+
         """给终端的统一格式显示"""
         parts = []
 
@@ -340,7 +353,7 @@ class GrepTool(Tool):
 
         Args:
             file_path: 文件路径
-            matches: 原始匹配列表 [(file_path_str, line_num, line_content), ...]
+            matches: 原始匹配列表 [(file_path_str, line_num, line_content, is_match), ...]
             context_lines: 上下文行数
 
         Returns:
@@ -361,7 +374,8 @@ class GrepTool(Tool):
         seen_lines = set()
         match_line_nums = {m[1] for m in matches}
 
-        for file_path_str, line_num, line_content in matches:
+        for match in matches:
+            file_path_str, line_num, line_content = match[0], match[1], match[2]
             # 添加匹配行之前的上下文
             for ctx_num in range(max(1, line_num - context_lines), line_num):
                 if ctx_num not in seen_lines:
@@ -401,7 +415,7 @@ class GrepTool(Tool):
         try:
             re.compile(pattern, re.DOTALL)
         except re.error as e:
-            return f"无效的正则表达式: {str(e)}"
+            return f"无效的正则表达式: {str(e)}\n下一步: 检查正则语法，或简化 pattern 后重试"
         return None
     
     def get_security_context(self) -> Dict[str, Any]:

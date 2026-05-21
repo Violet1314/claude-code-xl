@@ -162,7 +162,14 @@ class EditTool(Tool):
                     # 模糊匹配多处，仍报错
                     return self._build_no_match_error(original_content, old_string, file_path, freshness_hint)
                 else:
-                    # 模糊匹配也失败，返回精确匹配的错误
+                    # 模糊匹配也失败，尝试行级归一化匹配降级到行号模式
+                    line_match = self._try_line_normalized_match(original_content, old_string)
+                    if line_match:
+                        # 找到唯一行级匹配，自动降级为行号范围模式执行
+                        start_line, end_line = line_match
+                        return self._execute_line_range_mode(
+                            file_path, start_line, end_line, new_string, pm, freshness_hint
+                        )
                     return self._build_no_match_error(original_content, old_string, file_path, freshness_hint)
 
             match_count = len(positions)
@@ -441,6 +448,47 @@ class EditTool(Tool):
                 results.append((start_char, end_char))
 
         return results
+
+    def _try_line_normalized_match(self, content: str, old_string: str) -> Optional[Tuple[int, int]]:
+        """
+        行级归一化匹配：精确匹配和字符级模糊匹配都失败后的第三道防线
+
+        策略：按行 strip 后匹配首行，如果唯一匹配则返回行号范围，
+        由调用方自动降级为行号范围模式执行替换。
+
+        Returns:
+            (start_line, end_line) 元组，无法定位时返回 None
+        """
+        old_lines = [l.strip() for l in old_string.split('\n') if l.strip()]
+        if not old_lines:
+            return None
+
+        content_lines = content.split('\n')
+        first_old_line = old_lines[0]
+        matches = []
+
+        for i, line in enumerate(content_lines, 1):
+            stripped = line.strip()
+            if stripped and first_old_line in stripped:
+                # 首行匹配，验证后续行是否也匹配
+                match_len = len(old_lines)
+                all_match = True
+                for j in range(1, match_len):
+                    if i - 1 + j >= len(content_lines):
+                        all_match = False
+                        break
+                    if old_lines[j] not in content_lines[i - 1 + j].strip():
+                        all_match = False
+                        break
+                if all_match:
+                    end_line = min(i + match_len - 1, len(content_lines))
+                    matches.append((i, end_line))
+
+        # 唯一匹配才自动降级，多处匹配仍返回 None 让错误提示处理
+        if len(matches) == 1:
+            return matches[0]
+        return None
+
     def _build_no_match_error(self, content: str, old_string: str, file_path: str, freshness_hint: str = "") -> ToolResult:
         """精确匹配失败时的错误反馈（含最接近匹配定位）"""
         # 提供行号模式建议
@@ -517,7 +565,19 @@ class EditTool(Tool):
                     )
                 )
 
-        # 策略 3：无法定位，给出通用建议
+        # 策略 3：无法定位，尝试从首行关键词给出具体行号建议
+        # 即使完全无法匹配，也尝试从 old_string 首行提取关键词定位
+        first_line_hint = ""
+        if old_lines:
+            keyword = old_lines[0][:60]
+            for i, line in enumerate(content_lines, 1):
+                if keyword in line.strip():
+                    first_line_hint = (
+                        f"\n\n💡 可能的位置: 第 {i} 行包含相似内容 \"{line.strip()[:60]}\"\n"
+                        f"可使用行号范围模式: Edit(file_path=\"{file_path}\", start_line={i}, end_line={i + line_count - 1}, new_string=...)"
+                    )
+                    break
+
         return ToolResult(
             success=False, output="",
             error=(
@@ -527,6 +587,7 @@ class EditTool(Tool):
                 f"2. 或缩小 old_string 范围，只匹配最关键的一两行\n"
                 f"3. 或使用行号范围模式直接指定行号"
                 f"{mode_hint}"
+                f"{first_line_hint}"
                 f"{freshness_hint}"
             )
         )

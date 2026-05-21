@@ -251,24 +251,14 @@ class Conversation:
         middle_msgs = chat_msgs[anchor_end + 1:recent_start] if anchor_end + 1 < recent_start else []
         
         # 对中间消息的工具大输出进行摘要化
-        middle_compressed = []
-        for msg in middle_msgs:
-            compressed_content = self._compress_history_content(msg.content, msg.role)
-            # 历史轮次 assistant 消息的 tool_calls 压缩：仅保留工具名，丢弃完整参数
-            # 模型已不需要历史 tool_calls 的参数（结果在 tool 消息中），5个工具调用从~1000 token压到~100 token
-            compressed_tool_calls = msg.tool_calls
-            if msg.role == "assistant" and msg.tool_calls:
-                compressed_tool_calls = self._compress_tool_calls(msg.tool_calls)
-            middle_compressed.append(Message(
-                role=msg.role,
-                content=compressed_content,
-                tool_call_id=msg.tool_call_id,
-                tool_calls=compressed_tool_calls,
-                reasoning_content=self._compress_reasoning_content(
-                    getattr(msg, 'reasoning_content', None)
-                ),
-            ))
-        
+        # v2.8.42+: 先尝试生成操作摘要链，将连续工具操作压缩为因果链
+        middle_compressed = self._build_operation_chain(middle_msgs)
+        if middle_compressed is None:
+            # 回退：逐条压缩（原逻辑）
+            middle_compressed = []
+            for msg in middle_msgs:
+                compressed_content = self._compress_history_content(msg.content, msg.role)
+                compressed_tool_calls = self._compress_tool_calls(msg.tool_calls) if msg.tool_calls else None
         middle_tokens = sum(estimate_tokens(m.content) + 4 for m in middle_compressed)
         
         # 如果中间轮次加入后超限，从中间前面开始丢弃
@@ -623,3 +613,106 @@ class Conversation:
         self._messages.extend(head)
         self._messages.append(summary_msg)
         self._messages.extend(tail)
+
+    # ============================================================
+    # 操作摘要链
+    # ============================================================
+
+    def _build_operation_chain(self, middle_msgs: list) -> Optional[list]:
+        """
+        将中间轮次的工具操作压缩为轻量操作摘要链
+
+        策略：扫描连续的 tool + assistant 消息组，提取每步操作的因果摘要：
+        Read app.py → Edit app.py L42-45 → Bash pytest ✓ → Write test.py
+
+        比逐条压缩更节省 token，且保留操作因果关系，避免长对话中信息衰减。
+
+        Returns:
+            压缩后的消息列表，消息太少不值得压缩时返回 None
+        """
+        if len(middle_msgs) < 6:
+            return None  # 太少不值得
+
+        # 提取操作链
+        chain_items = []
+        for msg in middle_msgs:
+            if msg.role == "tool" and msg.content:
+                # 从 tool 消息中提取操作摘要
+                summary = self._extract_tool_summary(msg.content)
+                if summary:
+                    chain_items.append(summary)
+            elif msg.role == "assistant" and msg.tool_calls:
+                # 从 assistant 的 tool_calls 中提取操作名
+                for tc in msg.tool_calls:
+                    if hasattr(tc, 'function'):
+                        name = tc.function.get('name', '')
+                        args = tc.function.get('arguments', {})
+                        if name:
+                            arg_hint = self._extract_key_arg(name, args)
+                            chain_items.append(f"{name}({arg_hint})" if arg_hint else name)
+
+        if len(chain_items) < 3:
+            return None  # 操作太少，不值得压缩为链
+
+        # 生成摘要链消息
+        chain_text = " → ".join(chain_items)
+        chain_msg = Message(
+            role="user",
+            content=f"[操作摘要链] 之前执行的操作: {chain_text}"
+        )
+
+        # 保留用户消息（非计划模式提醒），丢弃 tool/assistant 消息
+        result = []
+        for msg in middle_msgs:
+            if msg.role == "user":
+                content = msg.content or ""
+                # 丢弃计划模式提醒和系统提醒
+                if content.startswith("[计划模式]") or content.startswith("[系统提醒]"):
+                    continue
+                result.append(msg)
+
+        # 插入摘要链到最前面
+        result.insert(0, chain_msg)
+        return result
+
+    def _extract_tool_summary(self, content: str) -> str:
+        """从 tool 输出中提取简短操作摘要"""
+        if not content:
+            return ""
+
+        # 取第一行有意义的内容
+        for line in content.split('\n'):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            # 截断到 60 字符
+            if len(stripped) > 60:
+                return stripped[:57] + "..."
+            return stripped
+        return ""
+
+    @staticmethod
+    def _extract_key_arg(tool_name: str, args: dict) -> str:
+        """从工具参数中提取关键参数值，用于摘要链"""
+        if not args:
+            return ""
+
+        # 按工具类型提取最关键的参数
+        key_map = {
+            "Read": "file_path",
+            "Write": "file_path",
+            "Edit": "file_path",
+            "Bash": "command",
+            "Grep": "pattern",
+            "Glob": "pattern",
+            "TodoCreate": "",
+            "TodoUpdate": "id",
+            "ProjectContext": "query",
+        }
+        key = key_map.get(tool_name)
+        if key and key in args:
+            val = str(args[key])
+            if len(val) > 40:
+                val = val[:37] + "..."
+            return val
+        return ""

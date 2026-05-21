@@ -111,7 +111,7 @@ class APIClient:
             "stream": stream,
             "temperature": temperature or API.TEMPERATURE,
             "max_tokens": max_tokens or API.MAX_TOKENS,
-            "reasoning_effort": "max",
+            "reasoning_effort": "xhigh",
         }
 
         if tools:

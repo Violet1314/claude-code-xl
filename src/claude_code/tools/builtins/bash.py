@@ -42,6 +42,9 @@ class BashTool(Tool):
     # 安全检查器（独立模块）
     _safety_checker = CommandSafetyChecker()
 
+    # 跨调用 CWD 跟踪：记录上次 cd 命令的目标目录
+    _last_cwd: Optional[str] = None
+
     # 沙箱配置
     SANDBOX_ENABLED = True
     # 禁止访问的系统路径（Windows）
@@ -141,12 +144,23 @@ class BashTool(Tool):
 
         if is_windows:
             win_command = command.replace(' &&', ';')
-            ps_command = f"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; {win_command}"
+            # 统一 UTF-8 编码：OutputEncoding + InputEncoding + $OutputEncoding
+            utf8_prefix = (
+                "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
+                "[Console]::InputEncoding = [System.Text.Encoding]::UTF8; "
+                "$OutputEncoding = [System.Text.Encoding]::UTF8; "
+            )
+            ps_command = f"{utf8_prefix}{win_command}"
+            # 注入 UTF-8 环境变量，确保子进程也使用 UTF-8
+            env = os.environ.copy()
+            env["PYTHONIOENCODING"] = "utf-8"
+            env["PYTHONUTF8"] = "1"
             process = subprocess.Popen(
                 ["powershell", "-NoProfile", "-Command", ps_command],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                cwd=str(work_dir)
+                cwd=str(work_dir),
+                env=env
             )
         else:
             process = subprocess.Popen(
@@ -329,23 +343,75 @@ class BashTool(Tool):
                 parts.append(f"(命令执行失败，无输出)")
             output = '\n'.join(parts)
 
-        # 截断处理：优先保留错误信息
+        # 截断处理：智能保留关键信息
         if len(output) > max_len:
             if not success and stderr_lines:
+                # 失败时：stderr 全文保留 + stdout 提取语义关键行
                 stderr_text = '\n'.join(stderr_lines)
-                if len(stderr_text) > max_len:
-                    output = stderr_text[:max_len] + f"\n... (STDERR 已截断，共 {len(stderr_text)} 字符)"
+                stdout_text = '\n'.join(stdout_lines) if stdout_lines else ""
+                key_lines = self._extract_key_lines(stdout_text)
+                if key_lines:
+                    key_section = f"\n[STDOUT 关键行]\n" + "\n".join(key_lines)
+                    output = f"[exit={return_code}]\n[STDERR]\n{stderr_text}{key_section}"
                 else:
-                    stdout_text = '\n'.join(stdout_lines) if stdout_lines else ""
-                    remaining = max_len - len(stderr_text) - 10
-                    if stdout_text and remaining > 0:
-                        output = stderr_text + f'\n[STDOUT]\n{stdout_text[:remaining]}' + f"\n... (STDOUT 已截断)"
+                    output = f"[exit={return_code}]\n[STDERR]\n{stderr_text}"
+                # 如果仍然超长，截断 stderr 保留尾部（错误信息通常在末尾）
+                if len(output) > max_len:
+                    head_room = max_len // 4
+                    tail_room = max_len - head_room - 50
+                    output = (
+                        f"[exit={return_code}]\n[STDERR]\n"
+                        f"{stderr_text[:head_room]}\n"
+                        f"... (省略 {len(stderr_text) - head_room - tail_room} 字符) ...\n"
+                        f"{stderr_text[-tail_room:]}"
+                    )
+            elif success and stdout_lines:
+                # 成功时：提取语义关键行 + 首尾保留
+                stdout_text = '\n'.join(stdout_lines)
+                key_lines = self._extract_key_lines(stdout_text)
+                if key_lines:
+                    key_section = "[关键行]\n" + "\n".join(key_lines) + "\n"
+                    # 首尾各保留一部分
+                    head_len = (max_len - len(key_section)) // 2
+                    tail_len = max_len - len(key_section) - head_len - 30
+                    if head_len > 0 and tail_len > 0:
+                        output = key_section + stdout_text[:head_len] + f"\n... (省略中间) ...\n" + stdout_text[-tail_len:]
                     else:
-                        output = stderr_text
+                        output = key_section + stdout_text[:max_len - len(key_section)]
+                else:
+                    output = output[:max_len] + f"\n... (输出过长，已截断，共 {len(output)} 字符)"
             else:
                 output = output[:max_len] + f"\n... (输出过长，已截断，共 {len(output)} 字符)"
 
         return output
+
+    def _extract_key_lines(self, text: str, max_lines: int = 10) -> List[str]:
+        """
+        从输出中提取语义关键行（测试结果、错误、警告等）
+
+        帮助 API 在截断后仍能获取关键信息，避免盲目重试。
+        """
+        if not text:
+            return []
+
+        key_patterns = [
+            r'FAILED', r'ERROR', r'PASSED', r'TESTS FAILED',
+            r'assert', r'AssertionError', r'Traceback',
+            r'Error:', r'Exception:', r'Warning:',
+            r'✗', r'✓', r'×', r'√',
+            r'FAILED\s+\d+', r'passed\s+\d+', r'failed\s+\d+',
+            r'Build FAILED', r'BUILD SUCCESS',
+        ]
+        key_re = re.compile('|'.join(key_patterns), re.IGNORECASE)
+
+        key_lines = []
+        for line in text.split('\n'):
+            if key_re.search(line):
+                key_lines.append(line.strip())
+                if len(key_lines) >= max_lines:
+                    break
+
+        return key_lines
 
     def _check_sandbox(self, command: str, work_dir: Path) -> Optional[ToolResult]:
         """沙箱安全检查：限制工作目录和禁止访问系统路径"""
@@ -458,9 +524,13 @@ class BashTool(Tool):
             progress.stop(success, return_code)
 
             if success:
+                # CWD 跟踪：解析 cd 命令目标目录
+                self._track_cwd(command, str(work_dir))
+                # 在输出末尾附加当前工作目录提示
+                cwd_hint = f"\n[cwd: {self._last_cwd or str(work_dir)}]" if output else ""
                 return ToolResult(
                     success=True,
-                    output=output if output else "(命令执行完成，无输出)",
+                    output=(output if output else "(命令执行完成，无输出)") + cwd_hint,
                     metadata={
                         "command": command,
                         "return_code": return_code,
@@ -489,6 +559,25 @@ class BashTool(Tool):
             return ToolResult(success=False, output="", error=f"命令执行超时（{timeout}秒）")
         except Exception as e:
             return ToolResult(success=False, output="", error=f"执行失败: {str(e)}")
+
+    @classmethod
+    def _track_cwd(cls, command: str, base_dir: str) -> None:
+        """
+        追踪 cd 命令目标目录，更新 _last_cwd 供后续调用参考
+
+        解析 PowerShell 的 cd/Set-Location 命令，提取目标路径。
+        """
+        # 匹配 cd / Set-Location 命令
+        cd_match = re.match(
+            r'^(?:cd|Set-Location|chdir)\s+(.+)$',
+            command.strip(), re.IGNORECASE
+        )
+        if cd_match:
+            target = cd_match.group(1).strip().strip('"').strip("'")
+            # 相对路径：基于 base_dir 解析
+            if not os.path.isabs(target):
+                target = os.path.normpath(os.path.join(base_dir, target))
+            cls._last_cwd = target
 
     @staticmethod
     def _get_exit_code_hint(return_code: int, command: str) -> str:

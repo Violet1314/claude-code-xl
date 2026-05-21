@@ -768,6 +768,7 @@ class TestBashToolBasics:
         tool = BashTool()
         assert tool._safety_checker is checker or isinstance(tool._safety_checker, CommandSafetyChecker)
 
+
     def test_bash_security_context(self):
         """测试 Bash 工具的安全上下文"""
         from claude_code.tools.builtins import BashTool
@@ -777,6 +778,261 @@ class TestBashToolBasics:
         context = tool.get_security_context()
         assert "command_preview" in context
         assert context["command_preview"] == "ls"
+
+
+# ============================================================
+# v2.8.41 回归测试：Grep context / Glob / Bash 结构化输出 / Read 精确行段 / Todo 批量部分成功
+# ============================================================
+
+class TestGrepContextFix:
+    """Grep context 模式修复回归测试"""
+
+    def test_grep_with_context_no_crash(self):
+        """Grep context>0 不崩溃，输出包含上下文行"""
+        from claude_code.tools.builtins import GrepTool
+        tool = GrepTool()
+        # 创建临时文件
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as f:
+            for i in range(20):
+                f.write(f"line {i+1}: def func_{i}(): pass\n")
+            temp_path = f.name
+        try:
+            result = tool.execute({
+                "pattern": r"func_5",
+                "path": temp_path,
+                "context": 2,
+            })
+            assert result.success is True
+            assert "func_5" in result.output
+            # 上下文行也应出现（func_3, func_4, func_6, func_7）
+            assert "func_3" in result.output or "func_4" in result.output
+        finally:
+            os.unlink(temp_path)
+
+    def test_grep_context_zero_no_change(self):
+        """Grep context=0 行为不变"""
+        from claude_code.tools.builtins import GrepTool
+        tool = GrepTool()
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as f:
+            for i in range(10):
+                f.write(f"line {i+1}: value_{i}\n")
+            temp_path = f.name
+        try:
+            result = tool.execute({
+                "pattern": r"value_5",
+                "path": temp_path,
+                "context": 0,
+            })
+            assert result.success is True
+            assert "value_5" in result.output
+        finally:
+            os.unlink(temp_path)
+
+    def test_grep_files_with_matches_mode(self):
+        """Grep output_mode=files_with_matches 只返回文件名"""
+        from claude_code.tools.builtins import GrepTool
+        tool = GrepTool()
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as f:
+            f.write("import os\nimport sys\n")
+            temp_path = f.name
+        try:
+            result = tool.execute({
+                "pattern": r"import",
+                "path": temp_path,
+                "output_mode": "files_with_matches",
+            })
+            assert result.success is True
+            # files_with_matches 模式不应包含行内容
+            assert "import os" not in result.output or "found in" in result.output
+        finally:
+            os.unlink(temp_path)
+
+    def test_grep_error_hint(self):
+        """Grep 错误提示包含下一步建议"""
+        from claude_code.tools.builtins import GrepTool
+        tool = GrepTool()
+        result = tool.execute({
+            "pattern": r"[invalid",
+            "path": ".",
+        })
+        assert result.success is False
+        assert "下一步" in result.error
+
+
+class TestGlobRegression:
+    """Glob 回归测试"""
+
+    def test_glob_no_match(self):
+        """Glob 无匹配返回成功+提示"""
+        from claude_code.tools.builtins import GlobTool
+        tool = GlobTool()
+        result = tool.execute({
+            "pattern": "*.xyz_no_such_ext_12345",
+            "path": ".",
+        })
+        assert result.success is True
+        assert "未找到" in result.display_output or "No files" in result.output
+
+    def test_glob_truncation_prefix(self):
+        """Glob 截断提示在首行"""
+        from claude_code.tools.builtins import GlobTool
+        tool = GlobTool()
+        # 使用一个会匹配很多文件的 pattern
+        result = tool.execute({
+            "pattern": "**/*.py",
+        })
+        if result.output and "共" in result.output:
+            # 截断提示应在首行
+            first_line = result.output.split('\n')[0]
+            assert "共" in first_line or "条结果" in first_line
+
+    def test_glob_error_hint(self):
+        """Glob 目录不存在时包含下一步建议"""
+        from claude_code.tools.builtins import GlobTool
+        tool = GlobTool()
+        result = tool.execute({
+            "pattern": "*.py",
+            "path": r"C:\no_such_dir_12345",
+        })
+        assert result.success is False
+        assert "下一步" in result.error
+
+
+class TestBashStructuredOutput:
+    """Bash 结构化输出回归测试"""
+
+    def test_bash_structured_error_output(self):
+        """Bash 失败输出含 [exit=N] [STDERR] [STDOUT] 标签"""
+        from claude_code.tools.builtins import BashTool
+        tool = BashTool()
+        result = tool.execute({
+            "command": "python -c \"import sys; print('err', file=sys.stderr); sys.exit(1)\"",
+            "timeout": 10,
+        })
+        assert result.success is False
+        # 失败时结构化标签在 error 字段中
+        error_text = result.error
+        assert "[exit=" in error_text
+        assert "[STDERR]" in error_text
+
+    def test_bash_success_output(self):
+        """Bash 成功输出包含内容"""
+        from claude_code.tools.builtins import BashTool
+        tool = BashTool()
+        result = tool.execute({
+            "command": "python -c \"print('hello')\"",
+            "timeout": 10,
+        })
+        assert result.success is True
+        assert "hello" in result.output
+
+
+class TestReadExactRange:
+    """Read 精确行段模式回归测试"""
+
+    def test_read_with_offset_terminal_hint(self):
+        """Read 指定 offset 时终端显示包含精确行段提示"""
+        from claude_code.tools.builtins import ReadTool
+        tool = ReadTool()
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as f:
+            for i in range(100):
+                f.write(f"line {i+1}\n")
+            temp_path = f.name
+        try:
+            result = tool.execute({
+                "file_path": temp_path,
+                "offset": 10,
+                "limit": 5,
+            })
+            assert result.success is True
+            assert "精确行段" in result.display_output
+        finally:
+            os.unlink(temp_path)
+
+    def test_read_full_file_no_exact_hint(self):
+        """Read 不指定 offset/limit 时终端不显示精确行段提示"""
+        from claude_code.tools.builtins import ReadTool
+        tool = ReadTool()
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as f:
+            f.write("short file\n")
+            temp_path = f.name
+        try:
+            result = tool.execute({
+                "file_path": temp_path,
+            })
+            assert result.success is True
+            assert "精确行段" not in result.display_output
+        finally:
+            os.unlink(temp_path)
+
+    def test_read_error_hint_not_file(self):
+        """Read 路径为目录时包含下一步建议"""
+        from claude_code.tools.builtins import ReadTool
+        tool = ReadTool()
+        result = tool.execute({
+            "file_path": ".",
+        })
+        assert result.success is False
+        assert "下一步" in result.error
+
+
+class TestTodoBatchPartialSuccess:
+    """Todo 批量模式部分成功提示回归测试"""
+
+    def setup_method(self):
+        from claude_code.tools.builtins.todo import reset_todo_list, TodoCreateTool
+        reset_todo_list()
+        tool = TodoCreateTool()
+        tool.execute({
+            "items": [
+                {"content": "任务1"},
+                {"content": "任务2"},
+                {"content": "任务3"},
+            ]
+        })
+
+    def test_batch_all_success(self):
+        """批量更新全部成功"""
+        from claude_code.tools.builtins.todo import TodoUpdateTool
+        tool = TodoUpdateTool()
+        result = tool.execute({
+            "updates": [
+                {"id": "t1", "status": "in_progress"},
+                {"id": "t2", "status": "in_progress"},
+            ]
+        })
+        assert result.success is True
+        assert "全部成功" in result.output
+        assert "全部成功" in result.summary
+
+    def test_batch_partial_success(self):
+        """批量更新部分成功，success=True，提示部分成功"""
+        from claude_code.tools.builtins.todo import TodoUpdateTool
+        tool = TodoUpdateTool()
+        # t1 可以 in_progress，t99 不存在
+        result = tool.execute({
+            "updates": [
+                {"id": "t1", "status": "in_progress"},
+                {"id": "t99", "status": "in_progress"},
+            ]
+        })
+        assert result.success is True  # 部分成功
+        assert "部分成功" in result.output
+        assert "部分成功" in result.summary
+
+    def test_batch_all_fail(self):
+        """批量更新全部失败"""
+        from claude_code.tools.builtins.todo import TodoUpdateTool
+        tool = TodoUpdateTool()
+        result = tool.execute({
+            "updates": [
+                {"id": "t99", "status": "in_progress"},
+                {"id": "t98", "status": "in_progress"},
+            ]
+        })
+        assert result.success is False
+        assert "全部失败" in result.output
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

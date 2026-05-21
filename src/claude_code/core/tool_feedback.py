@@ -93,20 +93,28 @@ def compress_tool_output(
         # 检查是否是摘要输出（结构概览等已精简内容）
         if "○" in output or "结构概览" in output:
             return output  # 摘要已经很精简
-        # 尝试语义提取：保留函数/类签名，丢弃具体实现
+        # 尝试语义提取：保留函数/类签名 + 行号映射，丢弃具体实现
         semantic = _extract_semantic_summary(output, parameters)
         if semantic and len(semantic) < len(output):
             return semantic
-        # 语义提取失败，回退到普通大输出压缩
-        return compress_large_output(output, MAX_OUTPUT_LEN)
+        # 语义提取失败，保留行号映射的头尾压缩
+        return _compress_read_fallback(output, MAX_OUTPUT_LEN)
 
-    # Grep/Glob：保留结果但压缩
-    if tool_name in ("Grep", "Glob"):
-        return compress_large_output(output, MAX_OUTPUT_LEN)
+    # Grep：保留匹配摘要 + 关键匹配行
+    if tool_name == "Grep":
+        return _compress_grep(output, MAX_OUTPUT_LEN)
 
-    # Bash：保留前后部分
+    # Glob：保留文件列表摘要
+    if tool_name == "Glob":
+        return _compress_glob(output, MAX_OUTPUT_LEN)
+
+    # Edit：保留修改摘要（行号 + 修改前后对比）
+    if tool_name == "Edit":
+        return _compress_edit(output, MAX_OUTPUT_LEN)
+
+    # Bash：保留 exit code + stderr + stdout 关键行
     if tool_name == "Bash":
-        return compress_large_output(output, MAX_OUTPUT_LEN)
+        return _compress_bash(output, MAX_OUTPUT_LEN)
 
     # 其他工具：通用压缩
     return compress_large_output(output, MAX_OUTPUT_LEN)
@@ -190,5 +198,180 @@ def compress_large_output(output: str, max_len: int = 3000) -> str:
     head = output[:half]
     tail = output[-half:]
     omitted = len(output) - max_len
-
     return f"{head}\n\n... (省略 {omitted} 字符) ...\n\n{tail}"
+
+
+# ============================================================
+# 按工具类型定制的压缩策略
+# ============================================================
+
+def _compress_read_fallback(output: str, max_len: int) -> str:
+    """
+    Read 压缩回退：保留行号映射的头尾，确保 API 仍能定位符号位置
+
+    策略：保留头部（文件元信息+结构概览）+ 尾部，中间只保留行号前缀
+    """
+    if len(output) <= max_len:
+        return output
+
+    lines = output.split('\n')
+    # 头部：文件元信息 + 结构概览（通常前 5-20 行）
+    head_lines = []
+    for line in lines:
+        head_lines.append(line)
+        if line.startswith('Content') or line.startswith('[结构]'):
+            # 保留到 Content 行或结构行之后几行
+            break
+
+    # 保留头部的行号映射区域
+    head_section = '\n'.join(head_lines[:max(len(head_lines), 15)])
+    tail_section = '\n'.join(lines[-(max_len // 80):])  # 估算尾部行数
+
+    result = head_section + f"\n\n... (省略中间 {len(lines) - len(head_lines) - max_len // 80} 行) ...\n\n" + tail_section
+    if len(result) > max_len * 1.5:
+        # 仍然太长，回退到通用压缩
+        return compress_large_output(output, max_len)
+    return result
+
+
+def _compress_grep(output: str, max_len: int) -> str:
+    """
+    Grep 压缩：保留匹配摘要 + 关键匹配行（含 ✎Edit 提示）
+
+    策略：保留标题行 + 匹配行（▸开头），丢弃上下文行
+    """
+    if len(output) <= max_len:
+        return output
+
+    lines = output.split('\n')
+    result_lines = []
+    for line in lines:
+        # 保留标题、文件分隔、匹配行（▸开头）
+        if (line.startswith('Grep:') or line.startswith('---') or
+            line.strip().startswith('▸') or not line.strip()):
+            result_lines.append(line)
+
+    result = '\n'.join(result_lines)
+    if len(result) <= max_len:
+        return result
+    # 匹配行仍然太多，截断
+    return compress_large_output(result, max_len)
+
+
+def _compress_glob(output: str, max_len: int) -> str:
+    """
+    Glob 压缩：保留文件列表摘要
+
+    策略：保留标题 + 前后各部分文件，中间省略
+    """
+    if len(output) <= max_len:
+        return output
+
+    lines = output.split('\n')
+    # 保留标题行
+    title = lines[0] if lines else ""
+    file_lines = [l for l in lines[1:] if l.strip() and not l.startswith('Glob:')]
+
+    if len(file_lines) <= 20:
+        return output
+
+    head = '\n'.join(file_lines[:10])
+    tail = '\n'.join(file_lines[-5:])
+    omitted = len(file_lines) - 15
+    return f"{title}\n{head}\n... (省略 {omitted} 个文件) ...\n{tail}"
+
+
+def _compress_edit(output: str, max_len: int) -> str:
+    """
+    Edit 压缩：保留修改摘要（行号 + 修改前后对比）
+
+    策略：保留 File/Path 行 + 修改行范围 + 修改后上下文确认区域
+    """
+    if len(output) <= max_len:
+        return output
+
+    lines = output.split('\n')
+    result_lines = []
+    in_context = False
+
+    for line in lines:
+        # 保留元信息行
+        if line.startswith('File:') or line.startswith('Path:') or line.startswith('Cache:'):
+            result_lines.append(line)
+        # 保留修改摘要行（L42-45: old → new）
+        elif '→' in line or line.strip().startswith('▼'):
+            result_lines.append(line)
+            in_context = True
+        # 保留修改后上下文区域（标记行）
+        elif in_context and ('→' in line or line.strip().startswith('  ')):
+            result_lines.append(line)
+        elif line.strip() == '':
+            in_context = False
+
+    result = '\n'.join(result_lines)
+    if len(result) <= max_len:
+        return result
+    return compress_large_output(output, max_len)
+
+
+def _compress_bash(output: str, max_len: int) -> str:
+    """
+    Bash 压缩：保留 exit code + stderr 全文 + stdout 关键行
+
+    策略：失败时 stderr 不截断，成功时提取关键行
+    """
+    if len(output) <= max_len:
+        return output
+
+    # 失败输出：[exit=N] + [STDERR] + [STDOUT] 结构
+    if output.startswith('[exit='):
+        # 保留 [exit=N] 行 + [STDERR] 全文 + [STDOUT] 关键行
+        stderr_start = output.find('[STDERR]\n')
+        stdout_start = output.find('[STDOUT]\n')
+
+        exit_line = output[:output.find('\n')]
+
+        if stderr_start >= 0 and stdout_start >= 0:
+            stderr_text = output[stderr_start + 9:stdout_start].strip()
+            stdout_text = output[stdout_start + 9:].strip()
+            # 提取 stdout 关键行
+            key_lines = _extract_bash_key_lines(stdout_text)
+            key_section = '\n'.join(key_lines) if key_lines else stdout_text[:200]
+            result = f"{exit_line}\n[STDERR]\n{stderr_text}\n[STDOUT 关键行]\n{key_section}"
+            if len(result) <= max_len:
+                return result
+        elif stderr_start >= 0:
+            stderr_text = output[stderr_start + 9:].strip()
+            result = f"{exit_line}\n[STDERR]\n{stderr_text}"
+            if len(result) <= max_len:
+                return result
+
+    # 成功输出：提取关键行 + 首尾保留
+    key_lines = _extract_bash_key_lines(output)
+    if key_lines:
+        key_section = "[关键行]\n" + '\n'.join(key_lines) + "\n"
+        remaining = max_len - len(key_section)
+        if remaining > 200:
+            head = output[:remaining // 2]
+            tail = output[-(remaining // 2):]
+            return f"{key_section}{head}\n... (省略中间) ...\n{tail}"
+
+    return compress_large_output(output, max_len)
+
+
+def _extract_bash_key_lines(text: str, max_lines: int = 8) -> list:
+    """从 Bash 输出中提取语义关键行"""
+    import re
+    if not text:
+        return []
+    key_re = re.compile(
+        r'FAILED|ERROR|PASSED|assert|Traceback|Exception:|Error:|Warning:|✗|✓',
+        re.IGNORECASE
+    )
+    key_lines = []
+    for line in text.split('\n'):
+        if key_re.search(line):
+            key_lines.append(line.strip())
+            if len(key_lines) >= max_lines:
+                break
+    return key_lines
