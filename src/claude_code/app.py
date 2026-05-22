@@ -106,6 +106,7 @@ class Application:
         self._plan_mode: bool = False            # 是否处于计划模式
         self._plan_task: str = ""                # 计划模式任务描述
         self._plan_reminder_count: int = 0       # 计划模式连续提醒计数（熔断用）
+        self._plan_round_count: int = 0          # 计划模式总轮次计数（梯度衰减用）
         self._plan_prev_statuses: dict = {}      # 上轮任务状态快照 {id: status}（增量推送用）
         self._plan_started_at: str = ""
         self._plan_completed_at: str = ""
@@ -274,6 +275,7 @@ class Application:
             "plan_completed_at": getattr(self, '_plan_completed_at', ""),
             "plan_final_summary": getattr(self, '_plan_final_summary', ""),
             "plan_prev_statuses": getattr(self, '_plan_prev_statuses', {}),
+            "plan_round_count": getattr(self, '_plan_round_count', 0),
             "todos": [item.__dict__ for item in todo.items] if todo.items else [],
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
@@ -337,6 +339,7 @@ class Application:
         self._plan_completed_at = data.get("plan_completed_at", "")
         self._plan_final_summary = data.get("plan_final_summary", "")
         self._plan_prev_statuses = data.get("plan_prev_statuses", {}) or {}
+        self._plan_round_count = data.get("plan_round_count", 0)
         self._update_input_state()
 
         # 6. 恢复工具执行历史
@@ -436,11 +439,39 @@ class Application:
     # 对话功能
     # ============================================================
     def _build_plan_prompt(self, todo, first_injection: bool) -> str:
-        """构建紧凑计划模式提示，减少重复 token。"""
-        rules = f"规则:无任务先TodoCreate; pending→in_progress→completed/failed; 并行≤{PLAN.MAX_IN_PROGRESS}; 不要提前停止。"
+        """构建紧凑计划模式提示，随轮次梯度衰减以减少重复 token。
+        
+        阶段 1（第 1 轮）：完整规则 + 全量任务清单
+        阶段 2（第 2-15 轮）：增量差异 + 紧凑规则行
+        阶段 3（第 16+ 轮）：仅进度 + 活跃任务，规则缩减为一行约束
+        """
+        rules_compact = (
+            f"规则:预估>2步时先TodoCreate，简单问答直接回答+调工具; "
+            f"pending→in_progress→completed/failed; "
+            f"并行≤{PLAN.MAX_IN_PROGRESS}; 不要提前停止。"
+        )
         if first_injection:
-            return f"[PLAN] {todo.progress_text}\n{todo.to_prompt_text()}\n{rules}"
-        return todo.to_prompt_diff(self._plan_prev_statuses)
+            return f"[PLAN] {todo.progress_text}\n{todo.to_prompt_text()}\n{rules_compact}"
+
+        # 梯度衰减：根据轮次决定信息密度
+        round_num = self._plan_round_count
+
+        if round_num <= 15:
+            # 阶段 2：增量差异 + 紧凑规则
+            diff = todo.to_prompt_diff(self._plan_prev_statuses)
+            return f"[PLAN] {todo.progress_text} (R{round_num})\n{diff}\n{rules_compact}"
+        else:
+            # 阶段 3：仅进度 + 活跃任务 + 一行约束
+            active_items = [t for t in todo.items if t.status == "in_progress"]
+            pending_items = [t for t in todo.items if t.status == "pending"]
+            active_str = ", ".join(f"{t.id}:{t.content[:30]}" for t in active_items) if active_items else "无"
+            pending_str = ", ".join(t.id for t in pending_items[:5]) if pending_items else "无"
+            more_pending = f" +{len(pending_items) - 5}" if len(pending_items) > 5 else ""
+            return (
+                f"[PLAN] {todo.progress_text} (R{round_num}) "
+                f"active={active_str} pending={pending_str}{more_pending}\n"
+                f"规则:遵守计划模式约束(简单问答可跳过TodoCreate)，持续使用工具推进直至完成。"
+            )
 
     def _build_plan_reminder(self, todo, action_hint: str) -> str:
         """构建紧凑计划提醒。"""
@@ -487,23 +518,23 @@ class Application:
         # 新一轮用户输入，重置工具显示追踪
         self.tool_executor._last_displayed_tool = None
         
-        # 计划模式：注入任务规划提示（首轮注入完整规则，后续只注入增量变化）
+        # 计划模式：注入任务规划提示（梯度衰减：首轮完整 → 中段精简 → 后期仅进度）
         if self._plan_mode:
             from claude_code.tools.builtins.todo import get_todo_list
             todo = get_todo_list()
             has_rules_injected = any(
-                m.role == "user" and "规则:" in (m.content or "") and "计划模式" in (m.content or "")
+                m.role == "user" and "规则:" in (m.content or "") and "[PLAN]" in (m.content or "")
                 for m in self.conversation._messages
             )
             if not has_rules_injected:
-                # 首轮：注入完整规则 + 全量任务清单（模型需要首次了解全貌）
+                # 阶段 1（首轮）：完整规则 + 全量任务清单
+                self._plan_round_count = 1
                 plan_prompt = self._build_plan_prompt(todo, first_injection=True)
-                # 初始化状态快照
                 self._plan_prev_statuses = todo.get_status_snapshot()
             else:
-                # 后续：只注入状态变化的增量（大幅节省 token，不丢失关键信息）
+                # 阶段 2/3（后续）：增量 + 梯度衰减
+                self._plan_round_count += 1
                 plan_prompt = self._build_plan_prompt(todo, first_injection=False)
-                # 更新快照供下一轮对比
                 self._plan_prev_statuses = todo.get_status_snapshot()
             self.conversation.add_user_message(plan_prompt)
         
@@ -590,6 +621,7 @@ class Application:
                         self._plan_final_summary = f"计划完成：{todo.progress_text}，共 {todo.total_count} 个任务。"
                         self._plan_mode = False
                         self._plan_task = ""
+                        self._plan_round_count = 0
                         self._update_input_state()
                         break
 
@@ -615,6 +647,7 @@ class Application:
                             self._plan_mode = False
                             self._plan_task = ""
                             self._plan_reminder_count = 0
+                            self._plan_round_count = 0
                             self._update_input_state()
                             break
 
@@ -1331,6 +1364,7 @@ class Application:
         self._plan_mode = False
         self._plan_task = ""
         self._plan_reminder_count = 0
+        self._plan_round_count = 0
         self._setup_system_prompt()  # 重新设置系统提示词（含路径环境）
         self._update_input_state()
 
@@ -1489,11 +1523,11 @@ class Application:
                 capabilities={
                     **(model.capabilities or {}),
                     "tools": False,
-                    "thinking": False,
+                    "thinking": True,             # 保留thinking能力，显式传disabled
                     "reasoning_effort": False,
                     "stream_usage": False,
                 },
-                thinking=None,
+                thinking={"type": "disabled"},
                 reasoning_effort=None,
                 max_output_tokens=64,
             )

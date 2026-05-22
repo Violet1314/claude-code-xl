@@ -293,6 +293,15 @@ claude-code/
 
 ## 更新日志
 
+### v2.8.44 (2026-05-15)
+**Plan 模式轻量化与标题生成修复**
+*   ✅ Plan 场景分级：简单问答（≤2步）跳过 TodoCreate 直接执行，消除仪式性开销
+*   ✅ Plan 梯度衰减：首轮完整 → R2-15 增量+紧凑 → R16+ 仅进度，长对话累计省数千 token
+*   ✅ TodoUpdate description 精简：21行→6行，每轮 tool definition 省 ~600 token
+*   ✅ `/save` 标题生成修复：显式传 `thinking={"type":"disabled"}` 避免 Flash 空响应
+*   ✅ extract_content 防御：增加 `reasoning_content` 兜底
+*   ✅ 全量测试通过：253 passed，0 回归
+
 ### v2.8.43 (2026-05-14)
 **历史会话与计划模式可靠性增强**
 *   ✅ `/save` 标题生成升级：使用 DeepSeek 官方 Flash 生成标题，并记录 `title_error` 诊断信息
@@ -315,22 +324,7 @@ claude-code/
 *   ✅ `/doctor` 增强：显示当前 Active Profile、Provider 状态与 DeepSeek 官方满血模式
 *   ✅ 回归测试覆盖：新增/更新 API config、profile、payload 测试
 *   ✅ 全量测试通过：232 passed，0 回归
-
-### v2.8.41 (2026-05-12)
-**工具质量加固 + API 侧体验优化：Grep 崩溃修复 + 工具输出增强 + 智能压缩 + 长对话质量保障**
-*   ✅ Grep context 崩溃修复：`_add_context_to_matches()` 3 元组解包改为 `match[0:3]` 安全取值
-*   ✅ 工具错误提示增加"下一步"建议：Grep/Read/Glob 共 7 处错误追加可执行建议
-*   ✅ Bash Windows 统一 UTF-8：PowerShell 前缀扩展 OutputEncoding + InputEncoding + `$OutputEncoding`
-*   ✅ Read 精确行段模式：用户指定 offset/limit 时终端标记"精确行段，不省略"
-*   ✅ Todo 批量模式部分成功提示：区分全部成功/部分成功/全部失败三种状态
-*   ✅ Read 结构概览头部：首次全量 Read 注入 `[结构] class App L42 | def chat L520 | ...` 符号位置索引，一次定位精准读取
-*   ✅ Grep 醒目行号 + 上下文范围标注：匹配行 `▸L42  ✎Edit(L42)` 格式，context 模式标注 `(上下文 L38-40)`
-*   ✅ Edit 三级匹配容错自动降级：精确→模糊→行级归一化，找到唯一匹配自动执行，失败时给出具体行号建议
-*   ✅ Bash 智能截断 + CWD 跟踪：失败时 stderr 优先保留+stdout 关键行提取，成功时语义关键行+首尾保留；跨调用 cd 目录追踪
-*   ✅ 工具反馈语义压缩：Read/Grep/Glob/Edit/Bash 按工具类型定制压缩策略，长对话中保留操作意图而非简单头尾截断
-*   ✅ 长对话操作摘要链：中间压缩阶段将连续工具操作替换为 `[操作摘要链] Read→Edit L42→Bash pytest ✓→Write`，Token 极低信息密度极高
-*   ✅ 回归测试覆盖增强：新增 15 个测试覆盖 Grep/Glob/Bash/Read/Todo
-*   ✅ 全量测试通过：220 passed，0 回归
+---
 ---
 
 ## Windows PowerShell 注意事项

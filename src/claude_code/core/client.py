@@ -388,7 +388,7 @@ class APIClient:
             return ""
 
         delta = choices[0].get("delta", {})
-        return delta.get("content") or delta.get("text") or ""
+        return delta.get("content") or delta.get("text") or delta.get("reasoning_content", "")
 
     @staticmethod
     def extract_thinking(chunk: Optional[Dict[str, Any]]) -> str:

@@ -197,10 +197,10 @@ def test_generate_history_title_uses_clean_deepseek_config(tmp_path, monkeypatch
     assert meta["title_error"] == ""
     assert title_model.id == "deepseek-v4-flash"
     assert title_model.capabilities["tools"] is False
-    assert title_model.capabilities["thinking"] is False
+    assert title_model.capabilities["thinking"] is True
     assert title_model.capabilities["reasoning_effort"] is False
     assert title_model.capabilities["stream_usage"] is False
-    assert title_model.thinking is None
+    assert title_model.thinking == {"type": "disabled"}
     assert title_model.reasoning_effort is None
     assert title_model.max_output_tokens == 64
     assert captured["max_tokens"] == 64

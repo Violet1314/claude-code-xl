@@ -126,7 +126,7 @@ def test_build_plan_prompt_is_compact():
     prompt = app._build_plan_prompt(todo, first_injection=True)
 
     assert prompt.startswith("[PLAN]")
-    assert "无任务先TodoCreate" in prompt
+    assert "预估>2步时先TodoCreate" in prompt
     assert len(prompt) < 300
 
 

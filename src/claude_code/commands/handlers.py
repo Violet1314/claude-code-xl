@@ -219,6 +219,7 @@ class PlanCommand(Command):
                 self.app._plan_mode = False
                 self.app._plan_task = ""
                 self.app._plan_reminder_count = 0
+                self.app._plan_round_count = 0
                 self.app._update_input_state()
                 from claude_code.ui.components import show_plan_stopped
                 show_plan_stopped(todo)
@@ -255,6 +256,7 @@ class PlanCommand(Command):
         self.app._plan_completed_at = ""
         self.app._plan_final_summary = ""
         self.app._plan_reminder_count = 0
+        self.app._plan_round_count = 0
         self.app._update_input_state()
 
         # 直接调用 chat()，模型会通过 TodoCreate 工具创建计划
