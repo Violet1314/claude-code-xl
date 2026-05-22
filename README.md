@@ -2,16 +2,17 @@
 
 仿照官方 Claude Code 风格构建的 CLI AI 编程助手，支持 AI 驱动的文件操作和命令执行。
 
-**版本：v2.8.41**
+**版本：v2.8.43**
 
 ## 功能特性
 
 ### 核心能力
-*   **多模型支持** - 支持 GPT、Claude、Gemini、DeepSeek、Qwen 等多种模型
+*   **多模型支持** - 支持 GPT、GLM、Kimi、DeepSeek 等模型，支持 `/provider` 在公司中转与 DeepSeek 官方 API 间切换
 *   **多风格切换** - 5 种 AI 人格（Expert、02、麻衣学姐、吹雪、薇尔莉特）
 *   **文件操作** - AI 可直接读取、创建、编辑本地文件
 *   **命令执行** - 安全的 Shell 命令执行，敏感/危险命令分级处理
 *   **流式输出** - SSE 流式响应，实时显示生成进度
+*   **Provider Profile** - `active_profile + profiles` 配置结构，`/provider` 菜单式切换公司中转/DeepSeek 官方接入
 
 ### 智能优化
 *   **Token 优化** - tiktoken 精确估算 + 文件缓存系统，减少重复传输
@@ -19,6 +20,8 @@
 *   **版本隔离** - 写入后版本递增，新版本计数器重置，避免误拦截
 *   **智能防死循环** - 连续 3 次同质错误自动熔断，80轮/50工具上限
 *   **上下文优化** - 需求锚定 + 滑动窗口 + 工具输出摘要 + assistant差异化截断 + token快速判断
+*   **历史回放增强** - `/save` 保存 assistant metadata、tool replay 与 active_profile，`/history recent/full` 支持轻量恢复或完整回放
+*   **计划感知摘要** - 长任务自动保存 plan_state、执行证据与失败记录，压缩摘要保留 `[PLAN]` / `[PLAN_REMINDER]` 关键状态
 *   **长对话防幻觉** - 上下文使用 ≥70% 时自动提醒模型先 Read 确认，不依赖模糊记忆
 
 ### 安全与权限
@@ -29,7 +32,7 @@
 *   **路径范围检查** - Bash 文件操作检测是否在项目目录外
 
 ### 交互体验
-*   **计划模式** - `/plan <任务>` 自主规划并逐步执行；`/plan status` 查看状态；`/plan stop` 主动退出并展示未完成摘要；单任务进行约束（WIP=1）+ 任务暂停回退（in_progress→pending） + Unicode 进度面板 + 完成/熔断总结
+*   **计划模式** - `/plan <任务>` 自主规划并逐步执行；`/plan status` 查看状态；`/plan stop` 主动退出并展示未完成摘要；最多 3 个并行 in_progress + Todo evidence/error 执行证据 + 失败恢复记录 + 紧凑 `[PLAN]` / `[PLAN_REMINDER]` 提示 + plan-aware summary
 *   **命令隐藏** - 低频命令（如 `/tools`）设为 hidden，不在帮助和补全中显示但仍可执行
 *   **CTRL+C 中断** - 单击中断当前操作，双击退出程序
 *   **主动交互** - AI 可向用户询问选择，澄清需求
@@ -79,19 +82,57 @@ pip install -e .[dev]
 
 ```json
 {
-  "base_url": "https://your-api-endpoint.com/v1",
-  "api_key": "your-api-key",
-  "default_model": "claude-sonnet-4-20250514",
-  "models": [
-    {
-      "id": "claude-sonnet-4-20250514",
-      "name": "Claude Sonnet 4",
-      "context_limit": 200000,
-      "price": "Input: 3$/1M Output: 15$/1M"
+  "active_profile": "company",
+  "profiles": {
+    "company": {
+      "name": "Company Gateway",
+      "provider": {
+        "id": "company",
+        "base_url": "https://your-company-gateway/v1",
+        "api_key": "your-company-key",
+        "api_style": "openai_compatible",
+        "profile": "generic_openai_compatible"
+      },
+      "default_model": "glm-5.1",
+      "models": [
+        {
+          "id": "glm-5.1",
+          "name": "GLM 5.1",
+          "context_limit": 200000,
+          "price": "Input: $9.14/1M Output: $28.71/1M"
+        }
+      ]
+    },
+    "deepseek": {
+      "name": "DeepSeek Official",
+      "provider": {
+        "id": "deepseek",
+        "base_url": "https://api.deepseek.com",
+        "api_key": "your-deepseek-key",
+        "api_style": "openai_compatible",
+        "profile": "deepseek_official"
+      },
+      "default_model": "deepseek-v4-flash",
+      "models": [
+        {
+          "id": "deepseek-v4-flash",
+          "name": "DeepSeek V4 Flash",
+          "context_limit": 1000000,
+          "price": "Input: $2.00/1M Output: $4.00/1M",
+          "capabilities": {
+            "thinking": true,
+            "reasoning_effort": true
+          },
+          "thinking": {"type": "enabled"},
+          "reasoning_effort": "max"
+        }
+      ]
     }
-  ]
+  }
 }
 ```
+
+> 旧格式 `base_url/api_key/models/default_model` 仍兼容；新配置推荐用 `/provider` 在 profile 间切换。
 
 ### 系统提示词 (`data/config/system-prompts.json`)
 
@@ -137,14 +178,15 @@ python -m pytest tests/test_tools.py -v
 | /help | h, ? | 显示命令帮助（扩充版） |
 | /new | reset, clear | 开始新会话 |
 | /model | m | 切换 AI 模型 |
+| /provider | profile | 切换 API Provider Profile（菜单式选择或 `/provider <id>` 直切） |
 | /style | persona | 切换 AI 风格 |
 | /plan | p | 计划模式：`/plan <任务描述>` 启动执行，`/plan status` 或 `/plan` 无参数 查看状态，`/plan stop` 主动退出 |
 | /cd | chdir | 切换操作根目录（必须绝对路径） |
 | /pwd | - | 显示当前路径信息 |
 | /last-output | lo | 查看最后一次 Bash 工具的完整输出 |
-| /doctor | - | 一键系统诊断（12 项检查） |
+| /doctor | - | 一键系统诊断（含 Provider Profile 检查） |
 | /save | s | 保存当前会话 |
-| /history | hist | 加载历史会话 |
+| /history | hist | 加载历史会话（支持 `recent` 轻量恢复与 `full` 完整回放） |
 | /tools | tool | 查看工具执行历史 |
 | /quit | exit, q | 退出程序 |
 
@@ -173,9 +215,9 @@ claude-code/
 │   ├── app.py                  # 主应用类
 │   ├── config/
 │   │   ├── defaults.py         # 常量配置（dataclass 分组）
-│   │   └ settings.py            # 配置加载器
+│   │   └ settings.py            # 配置加载器（Provider Profile + 旧格式兼容）
 │   ├── core/
-│   │   ├── client.py           # APIClient（流式+错误建议）
+│   │   ├── client.py           # APIClient（OpenAI兼容适配+参数白名单+流式）
 │   │   ├── conversation.py     # 会话管理（需求锚定+滑动窗口+摘要压缩）
 │   │   ├── files.py            # 文件挂载管理
 │   │   ├── path_manager.py     # PathManager（统一路径管理+安全边界）
@@ -205,7 +247,7 @@ claude-code/
 │   ├── commands/
 │   │   ├── base.py             # Command 基类
 │   │   ├── registry.py         # 命令注册表
-│   │   └ handlers.py           # 13 个命令（12 可见 + 1 hidden）
+│   │   └ handlers.py           # 14 个命令（13 可见 + 1 hidden）
 │   ├── ui/
 │   │   ├── theme.py            # 颜色 + 图标 + Panel层级
 │   │   ├── console.py          # Rich 封装（含Markup安全猴子补丁）
@@ -225,6 +267,10 @@ claude-code/
 │   ├── test_conversation.py    # 会话测试
 │   ├── test_path_manager.py    # 路径管理器测试
 │   ├── test_todo.py              # 计划模式测试
+│   ├── test_history.py           # 会话保存/历史回放测试
+│   ├── test_plan_mode.py         # Plan 状态机与恢复测试
+│   ├── test_api_config.py      # API配置/Profile测试
+│   ├── test_api_client.py      # API payload 参数白名单测试
 │   └ test_project_memory.py    # 项目记忆测试
 └── workplace/                  # 命令执行隔离目录
 ```
@@ -241,13 +287,36 @@ claude-code/
 | Glob | ◎ | Yes | No | 文件名搜索（≤100结果） |
 | AskUserQuestion | ◈ | Yes | No | 向用户询问 |
 | TodoCreate | ● | No | No | 创建任务计划（计划模式，支持 depends_on 依赖关系） |
-| TodoUpdate | ● | No | No | 更新任务状态（计划模式，严格状态机 + 最多 3 个并行 + 批量更新 + 支持暂停回退） |
+| TodoUpdate | ● | No | No | 更新任务状态（计划模式，幂等 no-op + 最多 3 个并行 + 批量更新 + evidence/files/tests/error 失败记录） |
 | TodoList | ● | Yes | No | 查看当前计划与进度（计划模式） |
 | ProjectContext | ◇ | Yes | No | 项目结构感知（目录扫描+类型识别+符号索引+相关性检索） |
 
 ## 更新日志
 
-### v2.8.41 (2025-05-12)
+### v2.8.43 (2026-05-14)
+**历史会话与计划模式可靠性增强**
+*   ✅ `/save` 标题生成升级：使用 DeepSeek 官方 Flash 生成标题，并记录 `title_error` 诊断信息
+*   ✅ `/history full/recent`：支持完整回放与轻量恢复，保留 assistant metadata 与 tool replay
+*   ✅ Profile 状态恢复：会话保存/恢复包含 `active_profile` 与 `provider_profile`，跨会话保持 Provider 选择
+*   ✅ Todo 可靠性增强：幂等更新变为 no-op，新增 evidence/files/tests/error 执行证据与失败恢复记录
+*   ✅ Plan 长任务状态增强：autosave 保存扩展状态、`plan_state` 元数据、紧凑 `[PLAN]` / `[PLAN_REMINDER]` 提示与 plan-aware summary
+*   ✅ 回归测试覆盖：新增/更新历史会话、Plan 状态机与恢复测试
+*   ✅ 全量测试通过：253 passed，0 回归
+
+### v2.8.42 (2026-05-13)
+**Provider Profile 接入重构：公司中转/DeepSeek 官方一键切换 + 参数白名单 + 满血推理**
+*   ✅ Provider Profile 配置：新增 `active_profile + profiles`，当前支持 `company` 与 `deepseek`，未来可扩展更多官方/中转 profile
+*   ✅ `/provider` 菜单式切换：无参数打开与 `/model` 一致的交互菜单，仍保留 `/provider <id>` 直接切换
+*   ✅ 模型列表按 profile 隔离：company 显示 5 个中转模型，deepseek 仅显示 `deepseek-v4-flash` / `deepseek-v4-pro`
+*   ✅ DeepSeek 官方满血接入：官方 profile 自动发送顶级 `thinking={"type":"enabled"}` 与 `reasoning_effort=max`
+*   ✅ 公司中转保守兼容：默认不发送 DeepSeek 专属 `thinking/reasoning_effort`，避免中转参数不兼容
+*   ✅ OpenAI-compatible 参数构建层：按模型 capabilities 白名单控制 `tools`、`max_tokens`、`stream_options`、`reasoning_effort`
+*   ✅ 旧配置兼容：保留旧格式 `base_url/api_key/models/default_model` 与 P0 `providers + models` 加载能力
+*   ✅ `/doctor` 增强：显示当前 Active Profile、Provider 状态与 DeepSeek 官方满血模式
+*   ✅ 回归测试覆盖：新增/更新 API config、profile、payload 测试
+*   ✅ 全量测试通过：232 passed，0 回归
+
+### v2.8.41 (2026-05-12)
 **工具质量加固 + API 侧体验优化：Grep 崩溃修复 + 工具输出增强 + 智能压缩 + 长对话质量保障**
 *   ✅ Grep context 崩溃修复：`_add_context_to_matches()` 3 元组解包改为 `match[0:3]` 安全取值
 *   ✅ 工具错误提示增加"下一步"建议：Grep/Read/Glob 共 7 处错误追加可执行建议
@@ -262,31 +331,6 @@ claude-code/
 *   ✅ 长对话操作摘要链：中间压缩阶段将连续工具操作替换为 `[操作摘要链] Read→Edit L42→Bash pytest ✓→Write`，Token 极低信息密度极高
 *   ✅ 回归测试覆盖增强：新增 15 个测试覆盖 Grep/Glob/Bash/Read/Todo
 *   ✅ 全量测试通过：220 passed，0 回归
-
-### v2.8.40 (2025-05-11)
-**计划模式并行化 + API 侧体验优化**
-*   ✅ 并行推进：同时 in_progress 上限从 1 提升至 3，模型可并行标记多个任务后一起干活
-*   ✅ TodoUpdate 批量模式：新增 `updates` 参数支持一次调用更新多个任务状态，减少工具调用次数
-*   ✅ 计划提示更新：规则中包含并行能力说明
-*   ✅ Bash 限制声明修正：system prompt 中输出限制从 5000 修正为 3000（与实际默认值一致）
-*   ✅ Grep/Glob 截断信息前置：截断提示移至首行，避免被输出压缩裁掉
-*   ✅ tool_calls 压缩保留关键参数：保留 `file_path`/`pattern`/`command`，帮助模型回溯历史操作
-*   ✅ Bash 错误输出结构化：`[exit=N]` + `[STDERR]` + `[STDOUT]` 标签化分离
-*   ✅ Edit 匹配失败三级定位：子串→归一化→通用搜索，返回最接近行号和内容
-*   ✅ 全量测试通过：205 passed，0 回归
-
-### v2.8.38 (2025-05-09)
-**Token深度优化 + 思考模型兼容：推理压缩 + 增量推送 + 语义摘要 + 重复Read消除 + 窗口渐进调参 + 计划提醒合并**
-*   ✅ reasoning_content 兼容：Message 类新增 reasoning_content 属性，完全向后兼容
-*   ✅ 推理链历史压缩：`_compress_reasoning_content()` 对中间/锚定消息的推理链截断至 150 字符，普通模型零影响
-*   ✅ 任务清单增量推送：`TodoList.to_prompt_diff()` + `get_status_snapshot()`，后续轮次仅注入状态变化项
-*   ✅ 工具反馈语义压缩：`_extract_semantic_summary()` 对 Read 输出提取函数/类签名，大幅减少历史中冗余代码 Token
-*   ✅ 计划提醒合并：检测上一条消息是否为 `[计划提醒]`，是则替换而非追加
-*   ✅ 窗口渐进调参：`get_optimized_messages()` 根据上下文使用率动态调整锚定数和窗口大小
-*   ✅ 计划模式摘要早触发：摘要触发阈值从 80% 降至 60%
-*   ✅ 消除重复 Read：`FileCacheManager` 新增 `_recent_reads` 追踪，5 分钟内重复读取返回缓存摘要
-*   ✅ Token 预算不入历史：预算提示追加到临时 messages，天然不入历史
-*   ✅ 全量测试通过：205 passed
 ---
 
 ## Windows PowerShell 注意事项

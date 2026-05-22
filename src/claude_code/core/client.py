@@ -9,6 +9,7 @@ from typing import Generator, Optional, Dict, List, Any, Callable
 import httpx
 
 from claude_code.config.defaults import API
+from claude_code.config.settings import ModelConfig, ProviderConfig
 from claude_code.ui import console
 
 
@@ -36,6 +37,88 @@ def _get_http_error_suggestion(status_code: int) -> str:
         422: "请求参数验证失败，检查模型 ID 和参数",
     }
     return suggestions.get(status_code, "")
+
+class OpenAICompatibleAdapter:
+    """OpenAI 兼容 API 参数构建器"""
+
+    def __init__(self, base_url: str, api_key: str):
+        self.base_url = base_url.strip().rstrip('/')
+        self.api_key = api_key.strip()
+
+    @classmethod
+    def from_provider(cls, fallback_base_url: str, fallback_api_key: str, provider_config: Optional[ProviderConfig] = None):
+        if provider_config:
+            return cls(
+                base_url=provider_config.base_url or fallback_base_url,
+                api_key=provider_config.api_key or fallback_api_key,
+            )
+        return cls(fallback_base_url, fallback_api_key)
+
+    @property
+    def endpoint(self) -> str:
+        return f"{self.base_url}/chat/completions"
+
+    def build_headers(self) -> Dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+    def build_payload(
+        self,
+        model_id: str,
+        messages: List[Dict[str, str]],
+        tools: List[Dict[str, Any]] = None,
+        stream: bool = True,
+        temperature: float = None,
+        max_tokens: int = None,
+        model_config: Optional[ModelConfig] = None,
+    ) -> Dict[str, Any]:
+        if model_config is None:
+            payload = {
+                "model": model_id,
+                "messages": messages,
+                "stream": stream,
+                "temperature": temperature or API.TEMPERATURE,
+                "max_tokens": max_tokens or API.MAX_TOKENS,
+                "reasoning_effort": "xhigh",
+            }
+            if tools:
+                payload["tools"] = tools
+            if stream:
+                payload["stream_options"] = {"include_usage": True}
+            return payload
+
+        capabilities = model_config.capabilities or {}
+        payload = {
+            "model": model_id,
+            "messages": messages,
+            "stream": stream,
+        }
+
+        if capabilities.get("temperature", True):
+            payload["temperature"] = temperature if temperature is not None else API.TEMPERATURE
+
+        if capabilities.get("max_tokens", True):
+            token_limit = max_tokens or model_config.max_output_tokens or API.MAX_TOKENS
+            if token_limit:
+                payload["max_tokens"] = token_limit
+
+        if tools and model_config.tool_mode == "native" and capabilities.get("tools", True):
+            payload["tools"] = tools
+
+        if stream and capabilities.get("stream_usage", False):
+            payload["stream_options"] = {"include_usage": True}
+
+        if capabilities.get("thinking", False) and model_config.thinking:
+            payload["thinking"] = model_config.thinking
+
+        if capabilities.get("reasoning_effort", False):
+            effort = model_config.reasoning_effort or "xhigh"
+            payload["reasoning_effort"] = effort
+
+        return payload
+
 
 class APIClient:
     """统一 API 客户端"""
@@ -96,35 +179,30 @@ class APIClient:
         stream: bool = True,
         temperature: float = None,
         max_tokens: int = None,
+        model_config: Optional[ModelConfig] = None,
+        provider_config: Optional[ProviderConfig] = None,
     ) -> Generator[Dict[str, Any], None, None]:
         """
         发送消息并流式返回响应 (静默重试版)
         """
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-
-        payload = {
-            "model": model_id,
-            "messages": messages,
-            "stream": stream,
-            "temperature": temperature or API.TEMPERATURE,
-            "max_tokens": max_tokens or API.MAX_TOKENS,
-            "reasoning_effort": "xhigh",
-        }
-
-        if tools:
-            payload["tools"] = tools
-
-        if stream:
-            payload["stream_options"] = {"include_usage": True}
+        adapter = OpenAICompatibleAdapter.from_provider(self.base_url, self.api_key, provider_config)
+        headers = adapter.build_headers()
+        payload = adapter.build_payload(
+            model_id=model_id,
+            messages=messages,
+            tools=tools,
+            stream=stream,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            model_config=model_config,
+        )
+        endpoint = adapter.endpoint
 
         last_error: Optional[str] = None
 
         for attempt in range(self.max_retries):
             try:
-                yield from self._do_request(headers, payload)
+                yield from self._do_request(endpoint, headers, payload)
                 return  # 成功则退出
 
             except httpx.HTTPError as e:
@@ -211,6 +289,7 @@ class APIClient:
 
     def _do_request(
         self,
+        endpoint: str,
         headers: Dict[str, str],
         payload: Dict[str, Any],
     ) -> Generator[Optional[Dict[str, Any]], None, None]:
@@ -231,7 +310,7 @@ class APIClient:
         def _do_stream():
             """后台线程：完成连接建立 + 流式读取，全部通过队列传递"""
             try:
-                with self._client.stream("POST", self.endpoint, headers=headers, content=body) as resp:
+                with self._client.stream("POST", endpoint, headers=headers, content=body) as resp:
                     if resp.status_code != 200:
                         err_msg = resp.read().decode('utf-8', errors='replace')
                         chunk_queue.put(httpx.HTTPStatusError(

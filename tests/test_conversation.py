@@ -42,6 +42,21 @@ class TestMessage:
 
         assert msg.content == ""
         assert msg.to_dict() == {"role": "user", "content": ""}
+    def test_metadata_serialization(self):
+        """测试 metadata 序列化/反序列化"""
+        msg = Message(role="assistant", content="Hi", metadata={"model_name": "Test", "duration": 1.2})
+
+        data = msg.to_dict()
+        loaded = Message.from_dict(data)
+
+        assert data["metadata"]["model_name"] == "Test"
+        assert loaded.metadata == {"model_name": "Test", "duration": 1.2}
+
+    def test_from_dict_without_metadata(self):
+        """测试旧消息无 metadata 时兼容"""
+        msg = Message.from_dict({"role": "assistant", "content": "Hi"})
+
+        assert msg.metadata is None
 
 
 class TestConversationInit:
@@ -83,7 +98,16 @@ class TestConversationMessages:
 
         assert conv.message_count == 1
 
-    def test_add_multiple_messages(self):
+    def test_add_assistant_message_with_metadata(self):
+        """测试添加带 metadata 的助手消息"""
+        conv = Conversation()
+
+        conv.add_assistant_message("Hi", metadata={"model_name": "Test", "duration": 0.5})
+
+        messages = conv.get_messages()
+        assert messages[0]["metadata"] == {"model_name": "Test", "duration": 0.5}
+
+
         """测试添加多条消息"""
         conv = Conversation()
 

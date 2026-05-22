@@ -609,6 +609,7 @@ class ToolExecutor:
         """记录执行历史"""
         from datetime import datetime
         self.execution_history.append({
+            "tool_call_id": tool_call.id,
             "tool": tool_call.name,
             "parameters": tool_call.parameters,
             "success": result.success,

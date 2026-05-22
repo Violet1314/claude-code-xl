@@ -1,24 +1,134 @@
 {
-  "base_url": "https://api.deepseek.com",
-  "api_key": "sk-e21887be05624e7d8ea5d486518ce4b2",
-  "task_models": {
-  "summary": "deepseek-v4-flash"
-  },
-  "models": [
-    {
-      "id": "deepseek-v4-flash",
-      "name": "DeepSeek V4 Flash",
-      "price": "Input: $2.00/1M Output: $4.00/1M",
-      "context_limit": 1000000,
-      "tool_mode": "native"
+  "active_profile": "deepseek",
+  "profiles": {
+    "company": {
+      "name": "Company Gateway",
+      "provider": {
+        "id": "company",
+        "name": "MThreads OpenAI Compatible Gateway",
+        "base_url": "https://new-api.aiplan.mthreads.com/v1",
+        "api_key": "sk-mtcode-Cm1aUWR8u-shKYIEcH6h6xDDzzKsLJS4Cj-pHAbnGxI",
+        "api_style": "openai_compatible",
+        "profile": "generic_openai_compatible"
+      },
+      "task_models": {
+        "summary": "deepseek-v4-flash"
+      },
+      "models": [
+        {
+          "id": "gpt-5.5",
+          "name": "GPT 5.5",
+          "price": "Input: $36.25/1M Output: $217.50/1M",
+          "context_limit": 1000000,
+          "tool_mode": "native",
+          "capabilities": {
+            "stream_usage": true,
+            "reasoning_effort": false
+          }
+        },
+        {
+          "id": "glm-5.1",
+          "name": "GLM 5.1",
+          "price": "Input: $9.14/1M Output: $28.71/1M",
+          "context_limit": 200000,
+          "tool_mode": "native",
+          "capabilities": {
+            "stream_usage": true,
+            "reasoning_effort": false
+          }
+        },
+        {
+          "id": "kimi-k2.6",
+          "name": "Kimi K2.6",
+          "price": "Input: $5.44/1M Output: $25.38/1M",
+          "context_limit": 256000,
+          "tool_mode": "native",
+          "capabilities": {
+            "stream_usage": true,
+            "reasoning_effort": false
+          }
+        },
+        {
+          "id": "deepseek-v4-flash",
+          "name": "DeepSeek V4 Flash",
+          "price": "Input: $2.00/1M Output: $4.00/1M",
+          "context_limit": 1000000,
+          "tool_mode": "native",
+          "capabilities": {
+            "stream_usage": true,
+            "reasoning_effort": false
+          }
+        },
+        {
+          "id": "deepseek-v4-pro",
+          "name": "DeepSeek V4 Pro",
+          "price": "Input: $2.00/1M Output: $4.00/1M",
+          "context_limit": 1000000,
+          "tool_mode": "native",
+          "capabilities": {
+            "stream_usage": true,
+            "reasoning_effort": false
+          }
+        }
+      ],
+      "default_model": "glm-5.1"
     },
-    {
-      "id": "deepseek-v4-pro",
-      "name": "DeepSeek V4 Pro",
-      "price": "Input: $2.00/1M Output: $4.00/1M",
-      "context_limit": 1000000,
-      "tool_mode": "native"
+    "deepseek": {
+      "name": "DeepSeek Official",
+      "provider": {
+        "id": "deepseek",
+        "name": "DeepSeek Official API",
+        "base_url": "https://api.deepseek.com",
+        "api_key": "sk-e21887be05624e7d8ea5d486518ce4b2",
+        "api_style": "openai_compatible",
+        "profile": "deepseek_official"
+      },
+      "task_models": {
+        "summary": "deepseek-v4-flash"
+      },
+      "models": [
+        {
+          "id": "deepseek-v4-flash",
+          "name": "DeepSeek V4 Flash",
+          "price": "Input: $2.00/1M Output: $4.00/1M",
+          "context_limit": 1000000,
+          "max_output_tokens": 393216,
+          "tool_mode": "native",
+          "capabilities": {
+            "temperature": true,
+            "max_tokens": true,
+            "tools": true,
+            "stream_usage": false,
+            "reasoning_effort": true,
+            "thinking": true
+          },
+          "thinking": {
+            "type": "enabled"
+          },
+          "reasoning_effort": "max"
+        },
+        {
+          "id": "deepseek-v4-pro",
+          "name": "DeepSeek V4 Pro",
+          "price": "Input: $2.00/1M Output: $4.00/1M",
+          "context_limit": 1000000,
+          "max_output_tokens": 393216,
+          "tool_mode": "native",
+          "capabilities": {
+            "temperature": true,
+            "max_tokens": true,
+            "tools": true,
+            "stream_usage": false,
+            "reasoning_effort": true,
+            "thinking": true
+          },
+          "thinking": {
+            "type": "enabled"
+          },
+          "reasoning_effort": "max"
+        }
+      ],
+      "default_model": "deepseek-v4-flash"
     }
-  ],
-  "default_model": "deepseek-v4-pro"
+  }
 }

@@ -1,5 +1,6 @@
 """内置命令实现"""
 import os
+from datetime import datetime
 from typing import List, Optional
 
 from claude_code.commands.base import Command
@@ -85,6 +86,58 @@ class ModelCommand(Command):
         if self.app:
             self.app.select_model()
 
+class ProviderCommand(Command):
+    """切换 Provider Profile 命令"""
+
+    name = "provider"
+    description = "切换 API Provider Profile"
+    aliases = ["profile"]
+
+    def execute(self, args: List[str]) -> None:
+        if not self.app:
+            return
+
+        settings = self.app.settings
+        profiles = getattr(settings, 'profiles', {}) or {}
+
+        if not args:
+            from claude_code.ui.input import interactive_menu
+
+            options = []
+            for profile_id, profile in profiles.items():
+                provider = profile.primary_provider
+                desc_parts = []
+                if profile_id == settings.active_profile:
+                    desc_parts.append("当前")
+                desc_parts.append(f"{len(profile.models)} models")
+                if provider and provider.profile:
+                    desc_parts.append(provider.profile)
+                options.append({
+                    "name": profile.name,
+                    "value": profile_id,
+                    "desc": " · ".join(desc_parts),
+                })
+
+            profile_id = interactive_menu("SELECT PROVIDER", options)
+            if not profile_id:
+                return
+        else:
+            profile_id = args[0].strip()
+        if profile_id not in profiles:
+            console.error(f"未知 Provider Profile: {profile_id}")
+            console.info(f"可用 Profile: {', '.join(profiles.keys())}")
+            return
+
+        if profile_id == settings.active_profile:
+            console.info(f"当前已是 Provider Profile: {profile_id}")
+            return
+
+        if self.app.switch_provider_profile(profile_id):
+            model_name = self.app.current_model.name if self.app.current_model else ""
+            console.success(f"已切换 Provider Profile: {profile_id}，当前模型: {model_name}")
+        else:
+            console.error(f"切换 Provider Profile 失败: {profile_id}")
+
 class StyleCommand(Command):
     """切换风格命令"""
     
@@ -116,7 +169,7 @@ class HistoryCommand(Command):
     
     def execute(self, args: List[str]) -> None:
         if self.app:
-            self.app.load_history()
+            self.app.load_history(args)
 
 class QuitCommand(Command):
     """退出命令"""
@@ -198,6 +251,9 @@ class PlanCommand(Command):
         # 设置计划模式标志，让 chat() 知道这是计划模式
         self.app._plan_mode = True
         self.app._plan_task = task_description
+        self.app._plan_started_at = datetime.now().isoformat(timespec="seconds")
+        self.app._plan_completed_at = ""
+        self.app._plan_final_summary = ""
         self.app._plan_reminder_count = 0
         self.app._update_input_state()
 
@@ -332,9 +388,24 @@ class DoctorCommand(Command):
             has_url = bool(settings.base_url)
             has_key = bool(settings.api_key)
             has_models = bool(settings.models)
+            provider_count = len(getattr(settings, 'providers', {}) or {})
+            active_profile = getattr(settings, 'active_profile', 'default')
+            active_provider = settings.get_provider(settings.get_model()) if has_models else None
             results.append(("API base_url", "已配置" if has_url else "未配置", has_url, "检查 data/config/api-config.json"))
             results.append(("API api_key", "已配置" if has_key else "未配置", has_key, "检查 data/config/api-config.json"))
+            results.append(("Active Profile", active_profile, True, active_provider.name if active_provider else ""))
+            results.append(("Provider", f"{provider_count} 个 provider", provider_count > 0, "至少配置一个 provider"))
+            if active_provider and active_provider.profile == "deepseek_official":
+                results.append(("DeepSeek 官方", "thinking=enabled, reasoning_effort=max", True, "满血推理模式"))
             results.append(("模型列表", f"{len(settings.models)} 个模型", has_models, "至少配置一个模型"))
+
+            if settings.models:
+                providers = getattr(settings, 'providers', {}) or {}
+                missing_provider = [m.name for m in settings.models if m.provider not in providers]
+                if missing_provider:
+                    results.append(("模型 Provider", f"{len(missing_provider)} 个模型绑定无效", False, f"缺少: {', '.join(missing_provider[:3])}"))
+                else:
+                    results.append(("模型 Provider", "全部已绑定", True, ""))
 
             # 4. 模型价格配置
             if settings.models:
@@ -433,6 +504,7 @@ BUILTIN_COMMANDS = [
     HelpCommand,
     NewCommand,
     ModelCommand,
+    ProviderCommand,
     StyleCommand,
     SaveCommand,
     HistoryCommand,

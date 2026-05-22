@@ -7,7 +7,8 @@ import time
 import signal
 import atexit
 import threading
-from typing import Optional, List
+from typing import Optional, List, Any
+from dataclasses import replace
 from datetime import datetime
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.text import Text
@@ -74,6 +75,7 @@ class Application:
         Args:
             config_dir: 配置目录路径
         """
+        self.config_dir = config_dir
         # 加载配置
         self.settings: Settings = load_settings(config_dir)
         self.client: APIClient = APIClient(
@@ -105,6 +107,9 @@ class Application:
         self._plan_task: str = ""                # 计划模式任务描述
         self._plan_reminder_count: int = 0       # 计划模式连续提醒计数（熔断用）
         self._plan_prev_statuses: dict = {}      # 上轮任务状态快照 {id: status}（增量推送用）
+        self._plan_started_at: str = ""
+        self._plan_completed_at: str = ""
+        self._plan_final_summary: str = ""
         self._update_input_state()
         self.history_dir = "data/history"
         os.makedirs(self.history_dir, exist_ok=True)
@@ -244,13 +249,31 @@ class Application:
         from claude_code.tools.builtins.todo import get_todo_list
         todo = get_todo_list()
 
+        provider = self.settings.get_provider(self.current_model) if self.current_model else None
+        path_state = {}
+        if hasattr(self, 'path_manager') and self.path_manager:
+            path_state = {
+                "active_path": str(self.path_manager.active_path),
+                "workplace": str(self.path_manager.workplace),
+                "is_workplace_mode": self.path_manager.is_workplace_mode,
+            }
+
         return {
             "messages": self.conversation.get_messages(),
             "model": self.current_model.id if self.current_model else "",
+            "active_profile": getattr(self.settings, 'active_profile', ""),
+            "provider_profile": provider.profile if provider else "",
             "style_id": self.current_style_id,
             "active_path": str(self.path_manager.active_path),
+            "path_state": path_state,
+            "tool_history": self.tool_executor.get_history(limit=100) if hasattr(self, 'tool_executor') else [],
             "plan_mode": self._plan_mode,
             "plan_task": self._plan_task,
+            "plan_title": self._plan_task[:40] if self._plan_task else "",
+            "plan_started_at": getattr(self, '_plan_started_at', ""),
+            "plan_completed_at": getattr(self, '_plan_completed_at', ""),
+            "plan_final_summary": getattr(self, '_plan_final_summary', ""),
+            "plan_prev_statuses": getattr(self, '_plan_prev_statuses', {}),
             "todos": [item.__dict__ for item in todo.items] if todo.items else [],
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
@@ -279,7 +302,12 @@ class Application:
 
     def _restore_autosave(self, data: dict) -> None:
         """从自动保存数据恢复会话"""
-        # 1. 恢复对话
+        # 1. 先恢复 Provider Profile（不持久化到配置文件）
+        active_profile = data.get("active_profile")
+        if active_profile and active_profile in getattr(self.settings, 'profiles', {}):
+            self.switch_provider_profile(active_profile, persist=False)
+
+        # 2. 恢复对话
         self.conversation.load_messages(data.get("messages", []))
 
         # 2. 恢复模型
@@ -295,7 +323,8 @@ class Application:
             self.current_style_id = style_id
 
         # 4. 恢复路径
-        active_path = data.get("active_path")
+        path_state = data.get("path_state", {})
+        active_path = path_state.get("active_path") or data.get("active_path")
         if active_path:
             self.path_manager.set_active_path(active_path)
 
@@ -304,9 +333,18 @@ class Application:
         plan_task = data.get("plan_task", "")
         self._plan_mode = plan_mode
         self._plan_task = plan_task
+        self._plan_started_at = data.get("plan_started_at", "")
+        self._plan_completed_at = data.get("plan_completed_at", "")
+        self._plan_final_summary = data.get("plan_final_summary", "")
+        self._plan_prev_statuses = data.get("plan_prev_statuses", {}) or {}
         self._update_input_state()
 
-        # 6. 恢复 Todo
+        # 6. 恢复工具执行历史
+        tool_history = data.get("tool_history", [])
+        if tool_history and hasattr(self.tool_executor, 'execution_history'):
+            self.tool_executor.execution_history = tool_history
+
+        # 7. 恢复 Todo
         todos_data = data.get("todos", [])
         if todos_data:
             from claude_code.tools.context import tool_context
@@ -319,6 +357,16 @@ class Application:
                     status=item_data.get("status", "pending"),
                     priority=item_data.get("priority", "medium"),
                     depends_on=item_data.get("depends_on", []),
+                    notes=item_data.get("notes", ""),
+                    evidence=item_data.get("evidence", ""),
+                    files=item_data.get("files", []),
+                    tests=item_data.get("tests", []),
+                    error=item_data.get("error", ""),
+                    started_at=item_data.get("started_at"),
+                    completed_at=item_data.get("completed_at"),
+                    last_failure_tool=item_data.get("last_failure_tool", ""),
+                    last_error_signature=item_data.get("last_error_signature", ""),
+                    retry_count=item_data.get("retry_count", 0),
                 )
                 todo_list.items.append(item)
             tool_context.todo_list = todo_list
@@ -387,6 +435,48 @@ class Application:
     # ============================================================
     # 对话功能
     # ============================================================
+    def _build_plan_prompt(self, todo, first_injection: bool) -> str:
+        """构建紧凑计划模式提示，减少重复 token。"""
+        rules = f"规则:无任务先TodoCreate; pending→in_progress→completed/failed; 并行≤{PLAN.MAX_IN_PROGRESS}; 不要提前停止。"
+        if first_injection:
+            return f"[PLAN] {todo.progress_text}\n{todo.to_prompt_text()}\n{rules}"
+        return todo.to_prompt_diff(self._plan_prev_statuses)
+
+    def _build_plan_reminder(self, todo, action_hint: str) -> str:
+        """构建紧凑计划提醒。"""
+        warning = ""
+        if self._plan_reminder_count >= PLAN.NO_TOOL_ROUNDS_MAX:
+            warning = f"\nWARN: 连续{self._plan_reminder_count}轮无工具调用，必须调用工具推进。"
+        return (
+            f"[PLAN_REMINDER] {todo.progress_text} ({self._plan_reminder_count}/{PLAN.REMINDER_MAX})\n"
+            f"NEXT: {action_hint}{warning}"
+        )
+
+    def _record_plan_tool_failures(self, report: Optional[ExecutionReport]) -> None:
+        """记录计划模式中当前任务的工具失败信息，帮助模型换策略恢复。"""
+        if not self._plan_mode or not report or report.failed_count <= 0:
+            return
+        try:
+            from claude_code.tools.builtins.todo import get_todo_list
+            todo = get_todo_list()
+            if not todo.items:
+                return
+            failures = [
+                r for r in report.results
+                if not r.success and not r.skipped and not r.interrupted
+            ]
+            if not failures:
+                return
+            first = failures[0]
+            tool_name = first.tool_call.name if first.tool_call else "unknown"
+            error = first.error or "工具执行失败"
+            signature = f"{tool_name}:{error[:80]}"
+            item = todo.record_current_failure(tool_name, error, signature)
+            if item:
+                self._plan_prev_statuses = todo.get_status_snapshot()
+        except Exception:
+            pass
+
     def chat(self, user_input: str) -> None:
         """
         处理用户对话 (新增连续错误熔断逻辑 + 计划模式支持)
@@ -407,17 +497,12 @@ class Application:
             )
             if not has_rules_injected:
                 # 首轮：注入完整规则 + 全量任务清单（模型需要首次了解全貌）
-                plan_prompt = (
-                    f"[计划模式] 进度:{todo.progress_text}\n"
-                    f"{todo.to_prompt_text()}\n"
-                    f"规则: 1.无清单→TodoCreate创建 2.开始→in_progress 完成→completed 失败→failed "
-                    f"3.最多{PLAN.MAX_IN_PROGRESS}个任务并行(批量:TodoUpdate(updates=[...])) 4.禁止提前停止"
-                )
+                plan_prompt = self._build_plan_prompt(todo, first_injection=True)
                 # 初始化状态快照
                 self._plan_prev_statuses = todo.get_status_snapshot()
             else:
                 # 后续：只注入状态变化的增量（大幅节省 token，不丢失关键信息）
-                plan_prompt = todo.to_prompt_diff(self._plan_prev_statuses)
+                plan_prompt = self._build_plan_prompt(todo, first_injection=False)
                 # 更新快照供下一轮对比
                 self._plan_prev_statuses = todo.get_status_snapshot()
             self.conversation.add_user_message(plan_prompt)
@@ -501,6 +586,8 @@ class Application:
                         from claude_code.ui.components import show_plan_complete
                         console.print()
                         show_plan_complete(todo)
+                        self._plan_completed_at = datetime.now().isoformat(timespec="seconds")
+                        self._plan_final_summary = f"计划完成：{todo.progress_text}，共 {todo.total_count} 个任务。"
                         self._plan_mode = False
                         self._plan_task = ""
                         self._update_input_state()
@@ -537,10 +624,18 @@ class Application:
 
                         if in_progress_items:
                             task = in_progress_items[0]
-                            action_hint = (
-                                f"请调用 TodoUpdate(id=\"{task.id}\", status=\"completed\") 标记完成，"
-                                f"或 TodoUpdate(id=\"{task.id}\", status=\"pending\") 暂停后换任务。"
-                            )
+                            if task.error:
+                                action_hint = (
+                                    f"当前任务 {task.id} 最近失败：{task.error[:120]}。"
+                                    f"请不要重复同一失败操作，先换策略修复，"
+                                    f"成功后调用 TodoUpdate(id=\"{task.id}\", status=\"completed\", evidence=\"完成证据\", tests=[...])，"
+                                    f"无法推进则 TodoUpdate(id=\"{task.id}\", status=\"pending\", error=\"阻塞原因\") 暂停后换任务。"
+                                )
+                            else:
+                                action_hint = (
+                                    f"请调用 TodoUpdate(id=\"{task.id}\", status=\"completed\", evidence=\"完成证据\") 标记完成，"
+                                    f"或 TodoUpdate(id=\"{task.id}\", status=\"pending\", error=\"阻塞原因\") 暂停后换任务。"
+                                )
                         elif pending_items:
                             task = pending_items[0]
                             action_hint = (
@@ -550,23 +645,11 @@ class Application:
                         else:
                             action_hint = "请检查任务状态并继续执行。"
 
-                        # 连续无工具调用加强警告
-                        no_tool_warning = ""
-                        if self._plan_reminder_count >= PLAN.NO_TOOL_ROUNDS_MAX:
-                            no_tool_warning = (
-                                f"\n⚠ 你已连续 {self._plan_reminder_count} 轮未调用任何工具！"
-                                f"计划模式下必须通过工具调用来推进任务，请立即执行上述行动。"
-                            )
-
-                        remind = (
-                            f"[计划提醒] 进度:{todo.progress_text} {action_hint}"
-                            f"（{self._plan_reminder_count}/{PLAN.REMINDER_MAX}）"
-                            f"{no_tool_warning}"
-                        )
+                        remind = self._build_plan_reminder(todo, action_hint)
                         # 合并策略：替换上一条计划提醒（避免历史中堆积重复提醒）
                         if self.conversation._messages:
                             last_msg = self.conversation._messages[-1]
-                            if last_msg.role == "user" and "[计划提醒]" in (last_msg.content or ""):
+                            if last_msg.role == "user" and ("[计划提醒]" in (last_msg.content or "") or "[PLAN_REMINDER]" in (last_msg.content or "")):
                                 last_msg.content = remind
                             else:
                                 self.conversation.add_user_message(remind)
@@ -575,6 +658,9 @@ class Application:
                         console.print(f"[dim]{ICONS['info']} 计划模式：检测到模型提前停止，已注入行动提醒 ({todo.progress_text}) [{self._plan_reminder_count}/{PLAN.REMINDER_MAX}][/]")
                         continue
                 break
+
+            # 记录计划模式工具失败，供后续提醒/增量状态注入恢复使用
+            self._record_plan_tool_failures(report)
 
             # 检查本轮工具执行是否有用户真实中断（Ctrl+C）
             # 直接从 ExecutionReport 判断，不依赖文本内容（避免历史残留误判）
@@ -813,6 +899,8 @@ class Application:
                     messages=messages,
                     tools=tools_definition,
                     stream=True,
+                    model_config=self.current_model,
+                    provider_config=self.settings.get_provider(self.current_model),
                 ):
                     # 检查是否被中断（CTRL+C）
                     if self._is_interrupted():
@@ -966,11 +1054,22 @@ class Application:
             self.stats.update_input(self.conversation.get_messages())
             self.stats.update_output(full_response)
 
-        # 保存助手消息，带上 reasoning_content
+        # 保存助手消息，带上 reasoning_content 和历史渲染元数据
+        assistant_metadata = {
+            "model_id": self.current_model.id if self.current_model else "",
+            "model_name": model_name,
+            "active_profile": getattr(self.settings, 'active_profile', ""),
+            "duration": duration,
+            "tokens": real_usage if real_usage else None,
+            "usage": real_usage if real_usage else None,
+            "has_tools": bool(tool_calls),
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+        }
         self.conversation.add_assistant_message(
             full_response,
             tool_calls=native_tool_calls if tool_calls else None,
             reasoning_content=thinking_content if thinking_content else None,  # 新增
+            metadata=assistant_metadata,
         )
 
         return tool_calls
@@ -1033,6 +1132,53 @@ class Application:
         """压缩工具输出（委托给 tool_feedback 模块）"""
         return compress_tool_output(output, tool_name, parameters)
 
+    def _generate_plan_summary_messages(self) -> list:
+        """生成计划模式专用摘要请求，保留任务、证据、失败和关键文件。"""
+        try:
+            from claude_code.tools.builtins.todo import get_todo_list
+            todo = get_todo_list()
+            if not todo.items:
+                return self.conversation.generate_summary_messages()
+
+            todo_lines = []
+            for item in todo.items:
+                parts = [f"{item.id} {item.status} {item.content}"]
+                if item.evidence:
+                    parts.append(f"证据:{item.evidence}")
+                if item.files:
+                    parts.append(f"文件:{', '.join(item.files[:5])}")
+                if item.tests:
+                    parts.append(f"测试:{', '.join(item.tests[:3])}")
+                if item.error:
+                    parts.append(f"失败:{item.error} 工具:{item.last_failure_tool} 重试:{item.retry_count}")
+                todo_lines.append(" | ".join(parts))
+
+            recent = []
+            for msg in self.conversation._messages[-30:]:
+                if msg.role == "system":
+                    continue
+                content = (msg.content or "").strip()
+                if not content:
+                    continue
+                if msg.role == "tool":
+                    content = content[:200]
+                    recent.append(f"[tool] {content}")
+                elif msg.role == "assistant":
+                    recent.append(f"[assistant] {content[:300]}")
+                elif msg.role == "user" and not content.startswith("[PLAN") and not content.startswith("[计划"):
+                    recent.append(f"[user] {content[:300]}")
+
+            prompt = (
+                "请生成计划模式专用摘要，保留：目标、Todo状态、已完成证据、相关文件、测试结果、失败尝试、关键决策。"
+                "压缩重复工具输出和闲聊。只输出摘要，300字以内。\n\n"
+                f"目标: {self._plan_task}\n"
+                f"计划状态:\n" + "\n".join(todo_lines) + "\n\n"
+                f"近期上下文:\n" + "\n".join(recent)
+            )
+            return [{"role": "user", "content": prompt[:8000]}]
+        except Exception:
+            return self.conversation.generate_summary_messages()
+
     def _try_generate_summary(self) -> None:
         """
         尝试对中间轮次生成对话摘要（上下文 >80% 时触发）
@@ -1067,7 +1213,7 @@ class Application:
                 pass  # 获取失败时安全放行
 
         # 生成摘要请求消息
-        summary_msgs = self.conversation.generate_summary_messages()
+        summary_msgs = self._generate_plan_summary_messages() if self._plan_mode else self.conversation.generate_summary_messages()
         if not summary_msgs:
             return  # 中间轮次内容太少，不值得摘要
 
@@ -1081,6 +1227,8 @@ class Application:
                 messages=summary_msgs,
                 tools=None,  # 不传工具，纯粹文本生成
                 stream=True,
+                model_config=self.current_model,
+                provider_config=self.settings.get_provider(self.current_model),
             ):
                 if chunk is None:
                     continue
@@ -1200,6 +1348,22 @@ class Application:
     # 模型/风格切换
     # ============================================================
 
+    def switch_provider_profile(self, profile_id: str, persist: bool = True) -> bool:
+        """切换 Provider Profile"""
+        if not self.settings.switch_profile(profile_id):
+            return False
+
+        self.client.close()
+        self.client = APIClient(
+            base_url=self.settings.base_url,
+            api_key=self.settings.api_key,
+        )
+        self.current_model = self.settings.get_model()
+        self._update_input_state()
+        if persist:
+            self.settings.persist_active_profile()
+        return True
+
     def select_model(self) -> None:
         """选择模型"""
         models = self.settings.models
@@ -1259,6 +1423,111 @@ class Application:
     # 会话保存/加载
     # ============================================================
 
+    def _fallback_history_title(self, messages: list) -> str:
+        """使用首条用户消息生成兼容标题。"""
+        user_msgs = [m for m in messages if m.get("role") == "user"]
+        title = user_msgs[0].get("content", "")[:20] if user_msgs else "未命名"
+        title = title.replace('\n', ' ').strip() or "未命名"
+        return self._sanitize_history_title(title)
+
+    def _sanitize_history_title(self, title: str, max_length: int = 40) -> str:
+        """清理历史标题，确保可作为文件名片段。"""
+        title = re.sub(r'[\r\n]+', ' ', title or "").strip().strip('"\'“”‘’')
+        for c in ['/', '\\', ':', '*', '?', '"', '<', '>', '|']:
+            title = title.replace(c, '_')
+        title = re.sub(r'\s+', ' ', title).strip()
+        return (title[:max_length].strip() or "未命名")
+
+    def _get_history_title_model(self):
+        """获取用于历史标题生成的 DeepSeek 官方 Flash 模型配置。"""
+        profile = getattr(self.settings, 'profiles', {}).get("deepseek")
+        if not profile:
+            return None, None
+        model = next((m for m in profile.models if m.id == "deepseek-v4-flash"), None)
+        if not model:
+            model = next((m for m in profile.models if m.id == profile.default_model), None)
+        return profile, model
+
+    def _generate_history_title(self, messages: list) -> tuple[str, dict]:
+        """用 DeepSeek 官方 Flash 生成短标题，失败时回退首条用户消息。"""
+        fallback = self._fallback_history_title(messages)
+        meta = {
+            "title_model": "",
+            "title_profile": "",
+            "title_generated": False,
+            "title_error": "",
+        }
+        try:
+            profile, model = self._get_history_title_model()
+            provider = profile.primary_provider if profile else None
+            if not profile:
+                meta["title_error"] = "missing profile: deepseek"
+                return fallback, meta
+            if not model:
+                meta["title_error"] = "missing model: deepseek-v4-flash"
+                return fallback, meta
+            if not provider:
+                meta["title_error"] = "missing provider: deepseek"
+                return fallback, meta
+
+            prompt_messages = [
+                {
+                    "role": "system",
+                    "content": "请为这段对话生成一个简短中文标题。只输出标题，不要解释，不要引号，最多20个字。",
+                },
+                {
+                    "role": "user",
+                    "content": "\n\n".join(
+                        f"{m.get('role', '')}: {str(m.get('content', ''))[:1000]}"
+                        for m in messages
+                        if m.get("role") in {"user", "assistant"} and m.get("content")
+                    )[:6000],
+                },
+            ]
+            title_model = replace(
+                model,
+                capabilities={
+                    **(model.capabilities or {}),
+                    "tools": False,
+                    "thinking": False,
+                    "reasoning_effort": False,
+                    "stream_usage": False,
+                },
+                thinking=None,
+                reasoning_effort=None,
+                max_output_tokens=64,
+            )
+            client = APIClient(base_url=provider.base_url, api_key=provider.api_key, max_retries=1)
+            try:
+                title = ""
+                for chunk in client.send_message(
+                    model_id=model.id,
+                    messages=prompt_messages,
+                    tools=None,
+                    stream=True,
+                    temperature=0.2,
+                    max_tokens=64,
+                    model_config=title_model,
+                    provider_config=provider,
+                ):
+                    title += client.extract_content(chunk)
+            finally:
+                client.close()
+
+            title = self._sanitize_history_title(title)
+            if not title or title == "未命名":
+                meta["title_error"] = "empty title response"
+                return fallback, meta
+            meta.update({
+                "title_model": model.id,
+                "title_profile": profile.id,
+                "title_generated": True,
+            })
+            return title, meta
+        except Exception as e:
+            meta["title_error"] = f"{type(e).__name__}: {str(e)[:200]}"
+            return fallback, meta
+
     def save_conversation(self) -> None:
         """保存会话（增强版：包含完整对话+工具执行记录+挂载文件+路径状态）"""
         if self.conversation.is_empty:
@@ -1266,12 +1535,7 @@ class Application:
             return
 
         messages = self.conversation.get_messages()
-        user_msgs = [m for m in messages if m["role"] == "user"]
-        title = user_msgs[0]["content"][:20] if user_msgs else "未命名"
-        title = title.replace('\n', ' ').strip()
-
-        for c in ['/', '\\', ':', '*', '?', '"', '<', '>', '|']:
-            title = title.replace(c, '_')
+        title, title_meta = self._generate_history_title(messages)
 
         filename = f"chat_{datetime.now().strftime('%m%d_%H%M')}_{title}.json"
         filepath = os.path.join(self.history_dir, filename)
@@ -1302,14 +1566,27 @@ class Application:
             plan_state = {
                 "plan_mode": self._plan_mode,
                 "plan_task": self._plan_task,
+                "plan_title": self._plan_task[:40] if self._plan_task else "",
+                "goal": self._plan_task,
+                "started_at": getattr(self, '_plan_started_at', ""),
+                "completed_at": getattr(self, '_plan_completed_at', ""),
+                "final_summary": getattr(self, '_plan_final_summary', ""),
+                "plan_prev_statuses": getattr(self, '_plan_prev_statuses', {}),
                 "todos": [item.__dict__ for item in todo.items] if todo.items else [],
             }
 
             data = {
                 "version": VERSION,
                 "title": title,
+                **title_meta,
                 "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
                 "model": self.current_model.id if self.current_model else "",
+                "active_profile": getattr(self.settings, 'active_profile', ""),
+                "provider_profile": (
+                    self.settings.get_provider(self.current_model).profile
+                    if self.current_model and self.settings.get_provider(self.current_model)
+                    else ""
+                ),
                 "style_id": self.current_style_id if hasattr(self, 'current_style_id') else "",
                 "messages": messages,
                 "tool_history": tool_history,
@@ -1335,8 +1612,18 @@ class Application:
 
         except Exception as e:
             console.error(f"保存失败: {e}")
-    def load_history(self) -> None:
+    def load_history(self, args: Optional[List[str]] = None) -> None:
         """加载历史"""
+        replay_mode = "recent"
+        if args:
+            mode = args[0].lower().strip()
+            if mode in {"full", "all"}:
+                replay_mode = "full"
+            elif mode == "recent":
+                replay_mode = "recent"
+            else:
+                console.warning("未知 history 模式，可用: /history recent 或 /history full")
+                return
         if not os.path.exists(self.history_dir):
             console.warning("没有历史记录")
             return
@@ -1370,9 +1657,9 @@ class Application:
         choice = interactive_menu("LOAD HISTORY", options)
 
         if choice:
-            self._load_history_file(choice)
+            self._load_history_file(choice, replay_mode=replay_mode)
 
-    def _load_history_file(self, filename: str) -> None:
+    def _load_history_file(self, filename: str, replay_mode: str = "recent") -> None:
         """加载历史文件（完整恢复上下文状态）"""
         try:
             filepath = os.path.join(self.history_dir, filename)
@@ -1380,10 +1667,15 @@ class Application:
             with open(filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
 
-            # 1. 恢复对话消息
+            # 1. 先恢复 Provider Profile，再恢复对话消息/模型
+            active_profile = data.get("active_profile")
+            if active_profile and active_profile in getattr(self.settings, 'profiles', {}):
+                self.switch_provider_profile(active_profile, persist=False)
+
+            # 2. 恢复对话消息
             self.conversation.load_messages(data.get("messages", []))
 
-            # 2. 恢复模型
+            # 3. 恢复模型
             model_id = data.get("model")
             if model_id:
                 model = self.settings.get_model(model_id)
@@ -1451,6 +1743,10 @@ class Application:
             if plan_state:
                 self._plan_mode = plan_state.get("plan_mode", False)
                 self._plan_task = plan_state.get("plan_task", "")
+                self._plan_started_at = plan_state.get("started_at", "")
+                self._plan_completed_at = plan_state.get("completed_at", "")
+                self._plan_final_summary = plan_state.get("final_summary", "")
+                self._plan_prev_statuses = plan_state.get("plan_prev_statuses", {}) or {}
                 # 恢复 Todo 列表
                 todos_data = plan_state.get("todos", [])
                 if todos_data:
@@ -1464,6 +1760,16 @@ class Application:
                             status=item_data.get("status", "pending"),
                             priority=item_data.get("priority", "medium"),
                             depends_on=item_data.get("depends_on", []),
+                            notes=item_data.get("notes", ""),
+                            evidence=item_data.get("evidence", ""),
+                            files=item_data.get("files", []),
+                            tests=item_data.get("tests", []),
+                            error=item_data.get("error", ""),
+                            started_at=item_data.get("started_at"),
+                            completed_at=item_data.get("completed_at"),
+                            last_failure_tool=item_data.get("last_failure_tool", ""),
+                            last_error_signature=item_data.get("last_error_signature", ""),
+                            retry_count=item_data.get("retry_count", 0),
                         )
                         todo_list.items.append(item)
                     tool_context.todo_list = todo_list
@@ -1478,7 +1784,7 @@ class Application:
 
             # 11. 回放对话内容（使用与正常对话一致的渲染风格）
             messages = self.conversation.get_messages()
-            self._replay_messages(messages)
+            self._replay_messages(messages, replay_mode=replay_mode)
 
             # 12. 恢复计划模式视觉反馈
             if self._plan_mode:
@@ -1500,32 +1806,54 @@ class Application:
         except Exception as e:
             console.error(f"加载失败: {e}")
 
-    def _replay_messages(self, messages: list) -> None:
-        """回放对话消息（使用与正常对话一致的渲染风格）
+    @staticmethod
+    def _summarize_tool_arguments(tool_call: dict) -> str:
+        """提取工具调用关键参数用于历史回放。"""
+        try:
+            func = tool_call.get("function", {})
+            args = json.loads(func.get("arguments") or "{}")
+        except Exception:
+            return ""
+        keep = []
+        for key in ("file_path", "path", "pattern", "command", "query", "id"):
+            if key in args:
+                value = str(args[key]).replace("\n", " ")
+                if len(value) > 80:
+                    value = value[:77] + "..."
+                keep.append(f"{key}={value}")
+        return ", ".join(keep)
 
-        将保存的历史消息重新渲染到终端，让用户能通过滚动查看完整历史。
-        渲染风格与实时对话一致：AI 响应用 Panel 包裹，工具结果用卡片展示。
-        最多回放最近 50 条消息（不含 system），避免超长会话刷屏。
+    def _build_tool_replay_index(self) -> tuple[dict, list]:
+        """构建工具历史索引，兼容无 tool_call_id 的旧历史。"""
+        history = []
+        if hasattr(self, 'tool_executor') and hasattr(self.tool_executor, 'execution_history'):
+            history = self.tool_executor.execution_history or []
+        by_id = {
+            item.get("tool_call_id"): item
+            for item in history
+            if item.get("tool_call_id")
+        }
+        legacy = [item for item in history if not item.get("tool_call_id")]
+        return by_id, legacy
 
-        Args:
-            messages: 消息字典列表（来自 conversation.get_messages()）
-        """
+    def _replay_messages(self, messages: list, replay_mode: str = "recent") -> None:
+        """回放对话消息；recent 最多 50 条，full 回放全部。"""
         from claude_code.ui.renderer import render_response
         from claude_code.ui.safe_markup import escape_markup
 
-        # 跳过 system 消息
         chat_msgs = [m for m in messages if m.get("role") != "system"]
         if not chat_msgs:
             return
 
-        # 限制回放条数：最多最近 50 条
         MAX_REPLAY = 50
-        if len(chat_msgs) > MAX_REPLAY:
+        if replay_mode != "full" and len(chat_msgs) > MAX_REPLAY:
             omitted = len(chat_msgs) - MAX_REPLAY
-            console.print(f"[dim]... (省略前 {omitted} 条消息) ...[/]\n")
+            console.print(f"[dim]... (省略前 {omitted} 条消息；使用 /history full 可完整回放) ...[/]\n")
             chat_msgs = chat_msgs[-MAX_REPLAY:]
 
-        model_name = self.current_model.name if self.current_model else "Claude"
+        default_model_name = self.current_model.name if self.current_model else "Claude"
+        tool_by_id, legacy_tool_history = self._build_tool_replay_index()
+        legacy_tool_index = 0
 
         for msg in chat_msgs:
             role = msg.get("role", "")
@@ -1533,41 +1861,60 @@ class Application:
 
             if role == "user":
                 console.print(f"\n[bold {COLORS['info']}]{ICONS['user']} YOU[/]")
-                # 用户消息：转义 Markup 后安全显示（内容可能含 [ ] 花括号）
                 if content:
                     console.print(escape_markup(content))
 
             elif role == "assistant":
-                # AI 响应：使用与实时对话一致的 Panel 渲染
-                content = msg.get("content", "")
-                if content and content.strip():
-                    # 判断是否有后续工具调用（有则不加后空行）
-                    has_tools = bool(msg.get("tool_calls"))
-                    render_response(content, model_name, duration=0.0, tokens=None, has_tools=has_tools)
-
-                # 如果有工具调用，显示工具调用摘要
+                metadata = msg.get("metadata") or {}
                 tool_calls = msg.get("tool_calls", [])
-                if tool_calls:
-                    for tc in tool_calls:
-                        func = tc.get("function", {})
-                        tool_name = func.get("name", "unknown")
-                        tool_icon = ICONS.get(tool_name.lower(), ICONS.get('file', '○'))
-                        console.print(
-                            f"  [{COLORS['primary']}]{tool_icon}[/] [dim]{tool_name}[/]"
-                        )
+                has_tools = metadata.get("has_tools") if "has_tools" in metadata else bool(tool_calls)
+                if content and content.strip():
+                    render_response(
+                        content,
+                        metadata.get("model_name") or default_model_name,
+                        duration=metadata.get("duration", 0.0) or 0.0,
+                        tokens=metadata.get("tokens") or metadata.get("usage"),
+                        has_tools=bool(has_tools),
+                    )
+
+                for tc in tool_calls:
+                    func = tc.get("function", {})
+                    tool_name = func.get("name", "unknown")
+                    tool_icon = ICONS.get(tool_name.lower(), ICONS.get('file', '○'))
+                    args_summary = self._summarize_tool_arguments(tc)
+                    suffix = f" [dim]{escape_markup(args_summary)}[/]" if args_summary else ""
+                    console.print(f"  [{COLORS['primary']}]{tool_icon}[/] [dim]{tool_name}[/]{suffix}")
 
             elif role == "tool":
-                # 工具结果：简洁卡片展示（转义 Markup，内容常含 [ ] 等）
-                content = msg.get("content", "")
-                # 截断长输出用于回放显示
-                if len(content) > 200:
-                    display = content[:200] + f"... (省略 {len(content) - 200} 字符)"
+                entry = tool_by_id.get(msg.get("tool_call_id"))
+                if not entry and legacy_tool_index < len(legacy_tool_history):
+                    entry = legacy_tool_history[legacy_tool_index]
+                    legacy_tool_index += 1
+
+                if entry:
+                    tool_name = entry.get("tool", "tool")
+                    success = entry.get("success", True)
+                    status_icon = ICONS['success'] if success else ICONS['error']
+                    status_color = COLORS['success'] if success else COLORS['error']
+                    duration_ms = entry.get("duration_ms", 0) or 0
+                    duration = f" {duration_ms / 1000:.1f}s" if duration_ms >= 1000 else (f" {duration_ms}ms" if duration_ms else "")
+                    params = entry.get("parameters") or {}
+                    param_text = ", ".join(f"{k}={str(v)[:60]}" for k, v in params.items() if v)
+                    if len(param_text) > 120:
+                        param_text = param_text[:117] + "..."
+                    output = entry.get("error") or entry.get("output") or content or ""
+                    display = output[:500] + (f"... (省略 {len(output) - 500} 字符)" if len(output) > 500 else "")
+                    param_suffix = f" [dim]{escape_markup(param_text)}[/]" if param_text else ""
+                    console.print(
+                        f"  [{status_color}]{status_icon}[/] [dim]{tool_name}{duration}[/]{param_suffix} "
+                        f"[{COLORS['text_muted']}]{escape_markup(display)}[/]"
+                    )
                 else:
-                    display = content
-                console.print(
-                    f"  [{COLORS['success']}]{ICONS['success']}[/] [dim]tool_result[/] "
-                    f"[{COLORS['text_muted']}]{escape_markup(display)}[/]"
-                )
+                    display = content[:200] + (f"... (省略 {len(content) - 200} 字符)" if len(content) > 200 else "")
+                    console.print(
+                        f"  [{COLORS['success']}]{ICONS['success']}[/] [dim]tool_result[/] "
+                        f"[{COLORS['text_muted']}]{escape_markup(display)}[/]"
+                    )
 
 
     # ============================================================

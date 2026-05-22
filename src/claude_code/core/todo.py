@@ -1,5 +1,6 @@
 """TodoList 数据模型 - 计划模式的核心数据结构"""
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Optional, List, Dict, Tuple
 
 from claude_code.config.defaults import PLAN
@@ -13,6 +14,16 @@ class TodoItem:
     status: str = "pending"          # pending | in_progress | completed | failed
     priority: str = "medium"         # high | medium | low
     depends_on: List[str] = field(default_factory=list)  # 依赖的任务ID列表，如 ["t1", "t2"]
+    notes: str = ""                   # 执行备注/完成说明
+    evidence: str = ""                # 完成证据摘要
+    files: List[str] = field(default_factory=list)        # 相关文件
+    tests: List[str] = field(default_factory=list)        # 相关测试/验证命令
+    error: str = ""                   # 最近失败原因
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    last_failure_tool: str = ""
+    last_error_signature: str = ""
+    retry_count: int = 0
 
     # 合法状态值
     VALID_STATUSES = ("pending", "in_progress", "completed", "failed")
@@ -37,9 +48,13 @@ class TodoItem:
             raise ValueError(f"无效状态: {self.status}，合法值: {self.VALID_STATUSES}")
         if self.priority not in self.VALID_PRIORITIES:
             raise ValueError(f"无效优先级: {self.priority}，合法值: {self.VALID_PRIORITIES}")
-        # 确保 depends_on 是 list
+        # 确保 depends_on/files/tests 是 list
         if self.depends_on is None:
             self.depends_on = []
+        if self.files is None:
+            self.files = []
+        if self.tests is None:
+            self.tests = []
 
     @property
     def is_done(self) -> bool:
@@ -150,6 +165,10 @@ class TodoList:
         if target is None:
             return False, f"未找到任务: {item_id}"
 
+        # 幂等更新：模型重复标记同一状态时视为成功 no-op，避免计划模式无意义失败
+        if target.status == status:
+            return True, ""
+
         # 同一时间最多 PLAN.MAX_IN_PROGRESS 个任务处于 in_progress（支持并行推进）
         if status == "in_progress":
             # 如果该任务当前已是 in_progress，不重复计数（允许重复标记）
@@ -183,8 +202,62 @@ class TodoList:
             else:
                 return False, f"任务 {item_id} 不允许从 [{target.status}] 转换到 [{status}]"
 
+        now = datetime.now().isoformat(timespec="seconds")
+        if status == "in_progress" and not target.started_at:
+            target.started_at = now
+        if status in ("completed", "failed"):
+            target.completed_at = now
+        if status == "completed":
+            target.error = ""
+            target.last_failure_tool = ""
+            target.last_error_signature = ""
+
         target.status = status
         return True, ""
+
+    def apply_evidence(
+        self,
+        item_id: str,
+        notes: str = "",
+        evidence: str = "",
+        files: List[str] = None,
+        tests: List[str] = None,
+        error: str = "",
+    ) -> tuple[bool, str]:
+        """为任务记录执行证据/备注。"""
+        target = self.get_item(item_id)
+        if target is None:
+            return False, f"未找到任务: {item_id}"
+        if notes:
+            target.notes = notes.strip()
+        if evidence:
+            target.evidence = evidence.strip()
+        if files is not None:
+            target.files = [str(f) for f in files if str(f).strip()]
+        if tests is not None:
+            target.tests = [str(t) for t in tests if str(t).strip()]
+        if error:
+            target.error = error.strip()
+        return True, ""
+
+    def record_failure(self, item_id: str, tool_name: str, error: str, signature: str = "") -> tuple[bool, str]:
+        """记录任务执行失败信息，供计划模式换策略/恢复使用。"""
+        target = self.get_item(item_id)
+        if target is None:
+            return False, f"未找到任务: {item_id}"
+        target.error = (error or "").strip()
+        target.last_failure_tool = tool_name or ""
+        target.last_error_signature = signature or tool_name or ""
+        target.retry_count += 1
+        return True, ""
+
+    def record_current_failure(self, tool_name: str, error: str, signature: str = "") -> Optional[TodoItem]:
+        """记录当前 in_progress 任务的失败；没有进行中任务时返回 None。"""
+        item = self.get_in_progress_item()
+        if not item:
+            return None
+        self.record_failure(item.id, tool_name, error, signature)
+        return item
 
     def get_item(self, item_id: str) -> Optional[TodoItem]:
         """根据 ID 获取任务项"""
@@ -305,6 +378,23 @@ class TodoList:
     # 文本输出
     # ============================================================
 
+    @staticmethod
+    def _format_prompt_item(item: TodoItem) -> str:
+        dep_str = f" ← {', '.join(item.depends_on)}" if item.depends_on else ""
+        detail_parts = []
+        if item.evidence:
+            detail_parts.append(f"证据:{item.evidence[:80]}")
+        if item.files:
+            detail_parts.append(f"文件:{', '.join(item.files[:3])}")
+        if item.tests:
+            detail_parts.append(f"测试:{', '.join(item.tests[:2])}")
+        if item.error:
+            retry = f" 重试:{item.retry_count}" if item.retry_count else ""
+            tool = f" 工具:{item.last_failure_tool}" if item.last_failure_tool else ""
+            detail_parts.append(f"错误:{item.error[:80]}{tool}{retry}")
+        details = f"  {{{'; '.join(detail_parts)}}}" if detail_parts else ""
+        return f"  {item.icon} {item.id}  {item.content}  [{item.status}]{dep_str}{details}"
+
     def to_prompt_text(self) -> str:
         """
         生成注入给模型的文本
@@ -317,8 +407,7 @@ class TodoList:
 
         lines = []
         for item in self.items:
-            dep_str = f" ← {', '.join(item.depends_on)}" if item.depends_on else ""
-            lines.append(f"  {item.icon} {item.id}  {item.content}  [{item.status}]{dep_str}")
+            lines.append(self._format_prompt_item(item))
         return "\n".join(lines)
 
     def to_prompt_diff(self, previous_statuses: dict) -> str:
@@ -341,8 +430,7 @@ class TodoList:
         for item in self.items:
             prev = previous_statuses.get(item.id)
             if prev != item.status:
-                dep_str = f" ← {', '.join(item.depends_on)}" if item.depends_on else ""
-                changes.append(f"  {item.icon} {item.id}  {item.content}  [{item.status}]{dep_str}")
+                changes.append(self._format_prompt_item(item))
 
         if not changes:
             # 无变化：返回简洁状态行
@@ -356,7 +444,17 @@ class TodoList:
 
     def get_status_snapshot(self) -> dict:
         """获取当前所有任务的状态快照 {id: status}，供增量对比使用"""
-        return {item.id: item.status for item in self.items}
+        return {
+            item.id: (
+                item.status,
+                item.retry_count,
+                item.error,
+                item.evidence,
+                tuple(item.files),
+                tuple(item.tests),
+            )
+            for item in self.items
+        }
 
     def clear(self) -> None:
         """清空所有任务"""

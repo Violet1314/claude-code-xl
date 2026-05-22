@@ -7,7 +7,7 @@ v2.8.17 优化要点：
 4. 工具输出摘要化：历史轮次的工具大输出替换为摘要
 """
 import re
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from dataclasses import dataclass, field
 
 from claude_code.utils.tokens import estimate_tokens, estimate_messages_tokens
@@ -21,8 +21,9 @@ class Message:
     tool_call_id: Optional[str] = None
     tool_calls: Optional[list] = None
     reasoning_content: Optional[str] = None  # 新增
+    metadata: Optional[Dict[str, Any]] = None
 
-    def to_dict(self) -> Dict[str, str]:
+    def to_dict(self) -> Dict[str, Any]:
         result = {"role": self.role, "content": self.content}
         if self.tool_call_id:
             result["tool_call_id"] = self.tool_call_id
@@ -30,16 +31,19 @@ class Message:
             result["tool_calls"] = self.tool_calls
         if self.reasoning_content:              # 新增
             result["reasoning_content"] = self.reasoning_content
+        if self.metadata:
+            result["metadata"] = self.metadata
         return result
 
     @classmethod
-    def from_dict(cls, data: Dict[str, str]) -> "Message":
+    def from_dict(cls, data: Dict[str, Any]) -> "Message":
         return cls(
             role=data.get("role", ""),
             content=data.get("content", ""),
             tool_call_id=data.get("tool_call_id"),
             tool_calls=data.get("tool_calls"),
             reasoning_content=data.get("reasoning_content"),  # 新增
+            metadata=data.get("metadata"),
         )
 
 class Conversation:
@@ -99,9 +103,21 @@ class Conversation:
         """添加用户消息"""
         self._messages.append(Message(role="user", content=content))
     
-    def add_assistant_message(self, content: str, tool_calls: Optional[list] = None, reasoning_content: Optional[str] = None) -> None:
-        """添加助手消息（可附带原生 tool_calls 和 reasoning_content）"""
-        self._messages.append(Message(role="assistant", content=content, tool_calls=tool_calls, reasoning_content=reasoning_content))
+    def add_assistant_message(
+        self,
+        content: str,
+        tool_calls: Optional[list] = None,
+        reasoning_content: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """添加助手消息（可附带原生 tool_calls、reasoning_content 和 metadata）"""
+        self._messages.append(Message(
+            role="assistant",
+            content=content,
+            tool_calls=tool_calls,
+            reasoning_content=reasoning_content,
+            metadata=metadata,
+        ))
 
     def add_tool_message(self, tool_call_id: str, content: str) -> None:
         """添加工具结果消息（原生 tool role）"""

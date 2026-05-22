@@ -68,6 +68,7 @@ def save_autosave(
     plan_mode: bool = False,
     plan_task: str = "",
     todos: list = None,
+    extra: dict = None,
 ) -> bool:
     """保存会话状态到自动保存文件
 
@@ -86,7 +87,7 @@ def save_autosave(
     path = get_autosave_path()
     try:
         data = {
-            "version": 1,
+            "version": 2,
             "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "messages": messages,
             "model": model_id,
@@ -97,6 +98,8 @@ def save_autosave(
             "todos": todos or [],
             "todo_progress": "",
         }
+        if extra:
+            data.update(extra)
 
         # 计算 todo 进度
         if todos:
@@ -151,6 +154,10 @@ class AutosaveManager:
         """保存会话快照"""
         messages = data.get("messages", [])
         todos = data.get("todos", [])
+        extra = {
+            k: v for k, v in data.items()
+            if k not in {"messages", "model", "style_id", "active_path", "plan_mode", "plan_task", "todos"}
+        }
         return save_autosave(
             messages=messages,
             model_id=data.get("model", ""),
@@ -159,6 +166,7 @@ class AutosaveManager:
             plan_mode=data.get("plan_mode", False),
             plan_task=data.get("plan_task", ""),
             todos=todos,
+            extra=extra,
         )
 
     def load(self) -> Optional[Dict[str, Any]]:

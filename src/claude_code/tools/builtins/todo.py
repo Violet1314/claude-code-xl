@@ -153,6 +153,28 @@ class TodoUpdateTool(Tool):
                     "description": "新状态：pending / in_progress / completed / failed（单任务模式）",
                     "enum": ["pending", "in_progress", "completed", "failed"],
                 },
+                "notes": {
+                    "type": "string",
+                    "description": "执行备注或完成说明（可选）",
+                },
+                "evidence": {
+                    "type": "string",
+                    "description": "完成证据摘要（可选）",
+                },
+                "files": {
+                    "type": "array",
+                    "description": "相关文件路径列表（可选）",
+                    "items": {"type": "string"},
+                },
+                "tests": {
+                    "type": "array",
+                    "description": "相关测试或验证命令列表（可选）",
+                    "items": {"type": "string"},
+                },
+                "error": {
+                    "type": "string",
+                    "description": "失败原因或阻塞信息（可选）",
+                },
                 "updates": {
                     "type": "array",
                     "description": "批量更新列表（批量模式，与 id/status 互斥）。每项包含 id 和 status",
@@ -167,6 +189,28 @@ class TodoUpdateTool(Tool):
                                 "type": "string",
                                 "description": "新状态：pending / in_progress / completed / failed",
                                 "enum": ["pending", "in_progress", "completed", "failed"],
+                            },
+                            "notes": {
+                                "type": "string",
+                                "description": "执行备注或完成说明（可选）",
+                            },
+                            "evidence": {
+                                "type": "string",
+                                "description": "完成证据摘要（可选）",
+                            },
+                            "files": {
+                                "type": "array",
+                                "description": "相关文件路径列表（可选）",
+                                "items": {"type": "string"},
+                            },
+                            "tests": {
+                                "type": "array",
+                                "description": "相关测试或验证命令列表（可选）",
+                                "items": {"type": "string"},
+                            },
+                            "error": {
+                                "type": "string",
+                                "description": "失败原因或阻塞信息（可选）",
                             },
                         },
                         "required": ["id", "status"],
@@ -188,11 +232,28 @@ class TodoUpdateTool(Tool):
         # 批量模式
         if updates and isinstance(updates, list):
             return self._execute_batch(updates)
-        
-        # 单任务模式
-        return self._execute_single(item_id, status)
 
-    def _execute_single(self, item_id: str, status: str) -> ToolResult:
+        # 单任务模式
+        return self._execute_single(
+            item_id,
+            status,
+            notes=parameters.get("notes", ""),
+            evidence=parameters.get("evidence", ""),
+            files=parameters.get("files"),
+            tests=parameters.get("tests"),
+            error=parameters.get("error", ""),
+        )
+
+    def _execute_single(
+        self,
+        item_id: str,
+        status: str,
+        notes: str = "",
+        evidence: str = "",
+        files: Optional[List[str]] = None,
+        tests: Optional[List[str]] = None,
+        error: str = "",
+    ) -> ToolResult:
         """单任务更新（向后兼容）"""
         todo = get_todo_list()
 
@@ -224,8 +285,22 @@ class TodoUpdateTool(Tool):
                 error=error_msg,
             )
 
+        # 记录执行证据/备注
+        evidence_updated = any([notes, evidence, files is not None, tests is not None, error])
+        if evidence_updated:
+            todo.apply_evidence(
+                item_id,
+                notes=notes,
+                evidence=evidence,
+                files=files,
+                tests=tests,
+                error=error,
+            )
+
         # 构建输出
         output = f"任务 {item_id} [{item.content}] 状态: {old_status} → {status}"
+        if evidence_updated:
+            output += "\n已记录执行证据/备注"
         progress = f"进度: {todo.progress_text}"
 
         # 如果是刚完成的任务，在 metadata 中记录以便 UI 闪烁
@@ -241,7 +316,7 @@ class TodoUpdateTool(Tool):
             metadata=metadata,
         )
 
-    def _execute_batch(self, updates: List[Dict[str, str]]) -> ToolResult:
+    def _execute_batch(self, updates: List[Dict[str, Any]]) -> ToolResult:
         """批量更新多个任务状态"""
         todo = get_todo_list()
 
@@ -273,7 +348,22 @@ class TodoUpdateTool(Tool):
                 results.append(f"  ✗ {uid} [{item.content}]: {error_msg}")
                 fail_count += 1
             else:
-                results.append(f"  {item.icon} {uid} [{item.content}]: {old_status} → {ustatus}")
+                todo.apply_evidence(
+                    uid,
+                    notes=update.get("notes", ""),
+                    evidence=update.get("evidence", ""),
+                    files=update.get("files"),
+                    tests=update.get("tests"),
+                    error=update.get("error", ""),
+                )
+                evidence_note = " +证据" if any([
+                    update.get("notes"),
+                    update.get("evidence"),
+                    update.get("files") is not None,
+                    update.get("tests") is not None,
+                    update.get("error"),
+                ]) else ""
+                results.append(f"  {item.icon} {uid} [{item.content}]: {old_status} → {ustatus}{evidence_note}")
                 success_count += 1
                 if ustatus == "completed":
                     flash_ids.append(uid)

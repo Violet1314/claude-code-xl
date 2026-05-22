@@ -140,6 +140,48 @@ class TestTodoList:
         assert result is False
         assert "无效状态" in error
 
+    def test_update_status_same_status_idempotent(self):
+        """测试同状态更新是幂等成功"""
+        todo = self._make_list(2)
+        result, error = todo.update_status("t1", "in_progress")
+        assert result is True
+        result, error = todo.update_status("t1", "in_progress")
+        assert result is True
+        assert error == ""
+        assert todo.in_progress_count == 1
+
+    def test_record_failure_on_current_task(self):
+        """测试记录当前任务失败信息"""
+        todo = self._make_list(2)
+        todo.update_status("t1", "in_progress")
+
+        item = todo.record_current_failure("Bash", "command failed", "Bash:command failed")
+
+        assert item.id == "t1"
+        assert item.error == "command failed"
+        assert item.last_failure_tool == "Bash"
+        assert item.last_error_signature == "Bash:command failed"
+        assert item.retry_count == 1
+        assert "错误:command failed" in todo.to_prompt_text()
+
+    def test_apply_evidence(self):
+        """测试记录任务执行证据"""
+        todo = self._make_list(1)
+        ok, error = todo.apply_evidence(
+            "t1",
+            notes="已完成",
+            evidence="测试通过",
+            files=["a.py"],
+            tests=["pytest"],
+        )
+
+        assert ok is True
+        item = todo.get_item("t1")
+        assert item.notes == "已完成"
+        assert item.evidence == "测试通过"
+        assert item.files == ["a.py"]
+        assert item.tests == ["pytest"]
+
     def test_update_status_invalid_transition(self):
         """测试非法状态转换"""
         todo = self._make_list(3)
@@ -399,6 +441,42 @@ class TestTodoUpdateTool:
         tool = TodoUpdateTool()
         result = tool.execute({"id": "t1", "status": "running"})
         assert result.success is False
+
+    def test_update_same_status_is_idempotent(self):
+        """测试同状态重复更新为成功 no-op"""
+        from claude_code.tools.builtins.todo import TodoUpdateTool, get_todo_list
+        tool = TodoUpdateTool()
+
+        result = tool.execute({"id": "t1", "status": "in_progress"})
+        assert result.success is True
+        result = tool.execute({"id": "t1", "status": "in_progress"})
+        assert result.success is True
+
+        todo = get_todo_list()
+        assert todo.items[0].status == "in_progress"
+        assert todo.in_progress_count == 1
+
+    def test_update_records_evidence(self):
+        """测试更新任务时记录执行证据"""
+        from claude_code.tools.builtins.todo import TodoUpdateTool, get_todo_list
+        tool = TodoUpdateTool()
+
+        result = tool.execute({
+            "id": "t1",
+            "status": "in_progress",
+            "notes": "开始分析",
+            "evidence": "已读取核心文件",
+            "files": ["src/app.py"],
+            "tests": ["pytest tests/test_todo.py"],
+        })
+
+        assert result.success is True
+        item = get_todo_list().items[0]
+        assert item.notes == "开始分析"
+        assert item.evidence == "已读取核心文件"
+        assert item.files == ["src/app.py"]
+        assert item.tests == ["pytest tests/test_todo.py"]
+        assert "证据" in get_todo_list().to_prompt_text()
 
     def test_is_read_only(self):
         """测试不是只读"""
