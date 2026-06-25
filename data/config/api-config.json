@@ -5,9 +5,9 @@
       "name": "Company Gateway",
       "provider": {
         "id": "company",
-        "name": "MThreads OpenAI Compatible Gateway",
-        "base_url": "https://new-api.aiplan.mthreads.com/v1",
-        "api_key": "sk-mtcode-Cm1aUWR8u-shKYIEcH6h6xDDzzKsLJS4Cj-pHAbnGxI",
+        "name": "OpenAI Compatible Gateway",
+        "base_url": "https://your-api.com/v1",
+        "api_key": "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
         "api_style": "openai_compatible",
         "profile": "generic_openai_compatible"
       },
